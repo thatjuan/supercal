@@ -1,3 +1,4 @@
+import { migrate } from '@supercal/db';
 import { loadConfig } from './config.ts';
 import { createApp } from './http.ts';
 import { createLogger } from './log.ts';
@@ -10,6 +11,11 @@ const SHUTDOWN_GRACE_MS = 10_000;
 const config = loadConfig();
 const log = createLogger();
 if (Bun.version !== PINNED_BUN) log.warn('unpinned Bun version', { expected: PINNED_BUN, actual: Bun.version });
+
+if (config.SUPERCAL_MIGRATE === 'auto') {
+  const { applied } = await migrate(config.DATABASE_MIGRATION_URL ?? config.DATABASE_URL);
+  log.info('migrations applied', { applied });
+}
 
 const roles = config.SUPERCAL_ROLES;
 const server = Bun.serve({ port: config.PORT, fetch: createApp(roles).fetch });
