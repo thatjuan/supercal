@@ -34,21 +34,25 @@ const PROBLEMS = {
 
 export type ProblemStatus = keyof typeof PROBLEMS;
 
-export const problemType = (status: ProblemStatus) => `https://supercal.dev/problems/${PROBLEMS[status].slug}`;
+export const problemType = (slug: string) => `https://supercal.dev/problems/${slug}`;
 
-/** Base class for errors that render as a problem; prefer the named subclasses. */
+/**
+ * Base class for errors that render as a problem; prefer the named subclasses. `slug` names a more
+ * specific problem type than the status's default (e.g. `no-active-tenant` for a 403).
+ */
 export class ProblemError extends Error {
   constructor(
     readonly status: ProblemStatus,
     readonly detail?: string,
     readonly errors?: FieldError[],
+    readonly slug: string = PROBLEMS[status].slug,
   ) {
     super(detail ?? PROBLEMS[status].title);
   }
 
   toProblem(instance: string): Problem {
     return {
-      type: problemType(this.status),
+      type: problemType(this.slug),
       title: PROBLEMS[this.status].title,
       status: this.status,
       ...(this.detail !== undefined && { detail: this.detail }),
@@ -69,8 +73,8 @@ export class Unauthorized extends ProblemError {
   }
 }
 export class Forbidden extends ProblemError {
-  constructor(detail?: string) {
-    super(403, detail);
+  constructor(detail?: string, slug?: string) {
+    super(403, detail, undefined, slug);
   }
 }
 export class NotFound extends ProblemError {
