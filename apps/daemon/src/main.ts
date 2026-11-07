@@ -1,4 +1,4 @@
-import { connectDb, createControlDatabase, migrate } from '@supercal/db';
+import { connectDb, createControlDatabase, createSecretBox, migrate } from '@supercal/db';
 import { createAuth } from './auth/auth.ts';
 import { loadConfig } from './config.ts';
 import { createApp } from './http.ts';
@@ -20,9 +20,10 @@ if (config.SUPERCAL_MIGRATE === 'auto') {
 
 connectDb(config.DATABASE_URL);
 const auth = createAuth(config, createControlDatabase(config.DATABASE_URL));
+const secrets = await createSecretBox({ keys: config.SUPERCAL_KEYS, insecureDev: config.SUPERCAL_INSECURE_DEV, warn: (message) => log.warn(message) });
 
 const roles = config.SUPERCAL_ROLES;
-const server = Bun.serve({ port: config.PORT, fetch: createApp(roles, auth).fetch });
+const server = Bun.serve({ port: config.PORT, fetch: createApp(roles, { auth, secrets }).fetch });
 log.info('listening', { port: server.port, roles: [...roles] });
 
 const workerAbort = new AbortController();

@@ -404,6 +404,656 @@
           "userId",
           "via"
         ]
+      },
+      "FeedList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Feed"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Feed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "feed_01h455vb4pex5vsknk084sn02q"
+          },
+          "ownerUserId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "caldavUsername": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ownerUserId",
+          "name",
+          "isDefault",
+          "caldavUsername"
+        ]
+      },
+      "CreatedFeed": {
+        "type": "object",
+        "properties": {
+          "feed": {
+            "$ref": "#/components/schemas/Feed"
+          },
+          "credentials": {
+            "type": "object",
+            "properties": {
+              "caldav": {
+                "$ref": "#/components/schemas/CaldavCredentials"
+              },
+              "ics": {
+                "$ref": "#/components/schemas/IcsCredentials"
+              }
+            },
+            "required": [
+              "caldav",
+              "ics"
+            ]
+          }
+        },
+        "required": [
+          "feed",
+          "credentials"
+        ]
+      },
+      "CaldavCredentials": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "description": "Shown only in this response"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "IcsCredentials": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Shown only in this response"
+          },
+          "urls": {
+            "$ref": "#/components/schemas/IcsUrls"
+          }
+        },
+        "required": [
+          "token",
+          "urls"
+        ]
+      },
+      "IcsUrls": {
+        "type": "object",
+        "properties": {
+          "combined": {
+            "type": "string",
+            "format": "uri"
+          },
+          "publications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "publicationId": {
+                  "type": "string",
+                  "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+                  "example": "pub_01h455vb4pex5vsknk084sn02q"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "publicationId",
+                "url"
+              ]
+            }
+          }
+        },
+        "required": [
+          "combined",
+          "publications"
+        ],
+        "description": "The combined feed and each enabled publication"
+      },
+      "OccurrenceList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Occurrence"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ]
+      },
+      "Occurrence": {
+        "type": "object",
+        "properties": {
+          "publicationId": {
+            "type": "string",
+            "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "pub_01h455vb4pex5vsknk084sn02q"
+          },
+          "outputUid": {
+            "type": "string"
+          },
+          "recurrenceId": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "allDay": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string",
+            "description": "Only for full-privacy publications"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "publicationId",
+          "outputUid",
+          "recurrenceId",
+          "start",
+          "end",
+          "allDay",
+          "summary",
+          "color"
+        ]
+      },
+      "PublicationList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Publication"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Publication": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PassthroughPublication"
+          },
+          {
+            "$ref": "#/components/schemas/VirtualPublication"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "passthrough": "#/components/schemas/PassthroughPublication",
+            "virtual": "#/components/schemas/VirtualPublication"
+          }
+        }
+      },
+      "PassthroughPublication": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "pub_01h455vb4pex5vsknk084sn02q"
+          },
+          "feedId": {
+            "type": "string",
+            "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "feed_01h455vb4pex5vsknk084sn02q"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "full",
+              "title-only",
+              "busy-only"
+            ]
+          },
+          "filters": {
+            "$ref": "#/components/schemas/PublicationFilters"
+          },
+          "keepAlarms": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "disabled-invalid"
+            ],
+            "description": "`disabled-invalid`: disabled by Supercal; see `statusDetail`"
+          },
+          "statusDetail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "passthrough"
+            ]
+          },
+          "sourceCalendarId": {
+            "type": "string",
+            "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "cal_01h455vb4pex5vsknk084sn02q"
+          }
+        },
+        "required": [
+          "id",
+          "feedId",
+          "slug",
+          "name",
+          "color",
+          "privacy",
+          "filters",
+          "keepAlarms",
+          "enabled",
+          "sortOrder",
+          "status",
+          "statusDetail",
+          "kind",
+          "sourceCalendarId"
+        ]
+      },
+      "PublicationFilters": {
+        "type": "object",
+        "properties": {
+          "hideDeclined": {
+            "type": "boolean"
+          },
+          "hideCancelled": {
+            "type": "boolean"
+          },
+          "hideAllDay": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hideDeclined",
+          "hideCancelled",
+          "hideAllDay"
+        ],
+        "description": "Hide events the owner declined, cancelled events, all-day events"
+      },
+      "VirtualPublication": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "pub_01h455vb4pex5vsknk084sn02q"
+          },
+          "feedId": {
+            "type": "string",
+            "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "feed_01h455vb4pex5vsknk084sn02q"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "full",
+              "title-only",
+              "busy-only"
+            ]
+          },
+          "filters": {
+            "$ref": "#/components/schemas/PublicationFilters"
+          },
+          "keepAlarms": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "disabled-invalid"
+            ],
+            "description": "`disabled-invalid`: disabled by Supercal; see `statusDetail`"
+          },
+          "statusDetail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "virtual"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "calendarId": {
+                  "type": "string",
+                  "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+                  "example": "cal_01h455vb4pex5vsknk084sn02q"
+                },
+                "priority": {
+                  "type": "integer",
+                  "description": "Lower wins merge ties"
+                }
+              },
+              "required": [
+                "calendarId",
+                "priority"
+              ]
+            },
+            "minItems": 2
+          }
+        },
+        "required": [
+          "id",
+          "feedId",
+          "slug",
+          "name",
+          "color",
+          "privacy",
+          "filters",
+          "keepAlarms",
+          "enabled",
+          "sortOrder",
+          "status",
+          "statusDetail",
+          "kind",
+          "sources"
+        ]
+      },
+      "NewPublication": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/NewPassthroughPublication"
+          },
+          {
+            "$ref": "#/components/schemas/NewVirtualPublication"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "passthrough": "#/components/schemas/NewPassthroughPublication",
+            "virtual": "#/components/schemas/NewVirtualPublication"
+          }
+        }
+      },
+      "NewPassthroughPublication": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "full",
+              "title-only",
+              "busy-only"
+            ]
+          },
+          "filters": {
+            "$ref": "#/components/schemas/PublicationFilters"
+          },
+          "keepAlarms": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "passthrough"
+            ]
+          },
+          "sourceCalendarId": {
+            "type": "string",
+            "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "cal_01h455vb4pex5vsknk084sn02q"
+          }
+        },
+        "required": [
+          "kind",
+          "sourceCalendarId"
+        ],
+        "description": "Name and colour default to the calendar’s"
+      },
+      "NewVirtualPublication": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "full",
+              "title-only",
+              "busy-only"
+            ]
+          },
+          "filters": {
+            "$ref": "#/components/schemas/PublicationFilters"
+          },
+          "keepAlarms": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "virtual"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "calendarId": {
+                  "type": "string",
+                  "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+                  "example": "cal_01h455vb4pex5vsknk084sn02q"
+                },
+                "priority": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "calendarId"
+              ]
+            },
+            "minItems": 2
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "sources"
+        ],
+        "description": "Source priority defaults to list position"
+      },
+      "PublicationPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "full",
+              "title-only",
+              "busy-only"
+            ]
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "hideDeclined": {
+                "type": "boolean"
+              },
+              "hideCancelled": {
+                "type": "boolean"
+              },
+              "hideAllDay": {
+                "type": "boolean"
+              }
+            }
+          },
+          "keepAlarms": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "calendarId": {
+                  "type": "string",
+                  "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+                  "example": "cal_01h455vb4pex5vsknk084sn02q"
+                },
+                "priority": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "calendarId"
+              ]
+            },
+            "minItems": 2,
+            "description": "Virtual publications only"
+          }
+        }
       }
     },
     "parameters": {}
@@ -1023,6 +1673,1282 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds": {
+      "get": {
+        "operationId": "listFeeds",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Admins: another member’s feeds"
+            },
+            "required": false,
+            "description": "Admins: another member’s feeds",
+            "name": "ownerUserId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The user’s feeds; the default feed is created on first access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createFeed",
+        "tags": [
+          "Feeds"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new feed, with its credentials (shown only here)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFeed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}": {
+      "get": {
+        "operationId": "getFeed",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The feed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateFeed",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ETag from a previous read; 412 when it is stale"
+            },
+            "required": false,
+            "description": "ETag from a previous read; 412 when it is stale",
+            "name": "if-match",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The renamed feed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteFeed",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted, with its publications"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/credentials/caldav/rotate": {
+      "post": {
+        "operationId": "rotateFeedCaldavPassword",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A new app password; the old one stops working now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaldavCredentials"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/credentials/ics/rotate": {
+      "post": {
+        "operationId": "rotateFeedIcsToken",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A new ICS token; old URLs stop working now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IcsCredentials"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/occurrences": {
+      "get": {
+        "operationId": "listFeedOccurrences",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": true,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Exclusive; at most 62 days after `from`"
+            },
+            "required": true,
+            "description": "Exclusive; at most 62 days after `from`",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "pub_01h455vb4pex5vsknk084sn02q",
+              "description": "Only this publication, even when disabled"
+            },
+            "required": false,
+            "description": "Only this publication, even when disabled",
+            "name": "publicationId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Projected occurrences overlapping the window, by start (UTC)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/publications": {
+      "get": {
+        "operationId": "listPublications",
+        "tags": [
+          "Publications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The feed’s publications, in order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPublication",
+        "tags": [
+          "Publications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPublication"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new publication, last in the feed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/publications/order": {
+      "put": {
+        "operationId": "reorderPublications",
+        "tags": [
+          "Publications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+                      "example": "pub_01h455vb4pex5vsknk084sn02q"
+                    },
+                    "description": "Every publication of the feed, in the new order"
+                  }
+                },
+                "required": [
+                  "ids"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The feed’s publications, in the new order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/publications/{id}": {
+      "get": {
+        "operationId": "getPublication",
+        "tags": [
+          "Publications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "pub_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The publication",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePublication",
+        "tags": [
+          "Publications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "pub_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ETag from a previous read; 412 when it is stale"
+            },
+            "required": false,
+            "description": "ETag from a previous read; 412 when it is stale",
+            "name": "if-match",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated publication",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePublication",
+        "tags": [
+          "Publications"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "pub_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/problem+json": {
                 "schema": {

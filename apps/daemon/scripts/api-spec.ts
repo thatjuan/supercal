@@ -1,5 +1,5 @@
 /** `bun run api:spec`: writes the OpenAPI document to packages/api-client/openapi.json without starting a server. */
-import { createControlDatabase } from '@supercal/db';
+import { createControlDatabase, createSecretBox } from '@supercal/db';
 import { createApi, openApiConfig } from '../src/api/index.ts';
 import { createAuth } from '../src/auth/auth.ts';
 
@@ -10,5 +10,5 @@ const auth = createAuth(
 );
 
 const out = new URL('../../../packages/api-client/openapi.json', import.meta.url);
-await Bun.write(out, `${JSON.stringify(createApi(auth).getOpenAPI31Document(openApiConfig), null, 2)}\n`);
+await Bun.write(out, `${JSON.stringify(createApi({ auth, secrets: await createSecretBox({ insecureDev: true, warn: () => {} }) }).getOpenAPI31Document(openApiConfig), null, 2)}\n`);
 console.log(`wrote ${out.pathname}`);

@@ -21,7 +21,7 @@ import {
   requireIfMatch,
 } from '../src/api/kit/index.ts';
 import type { ApiEnv, Principal } from '../src/auth/principal.ts';
-import { testAuth } from './auth-fixture.ts';
+import { testAuth, testSecrets } from './auth-fixture.ts';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
@@ -70,7 +70,7 @@ const widgets = createApiApp()
   });
 
 const fixture = testAuth('invite');
-const app = createApi(fixture.auth, injectPrincipal).route('/', widgets);
+const app = createApi({ auth: fixture.auth, secrets: testSecrets }, injectPrincipal).route('/', widgets);
 
 const send = (path: string, init?: RequestInit) => app.request(path, init);
 const json = (method: string, body: string, headers: Record<string, string> = {}): RequestInit => ({

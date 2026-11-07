@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { closeDb, connectDb, migrate, newId, withControl, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import postgres from 'postgres';
-import { startBus, wake, WAKE_CHANNEL, type Bus, type BusEvents } from './bus.ts';
+import { FEED_CREDENTIALS_CHANNEL, startBus, wake, WAKE_CHANNEL, type Bus, type BusEvents } from './bus.ts';
 import { createLogger } from './log.ts';
 
 /** Resolves once `check` passes, polling every 10 ms; rejects after `ms`. */
@@ -15,7 +15,7 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
   let notifier: postgres.Sql;
   let bus: Bus;
   const logs: { level: string; msg: string }[] = [];
-  const events: { [E in keyof BusEvents]: BusEvents[E][] } = { change: [], wake: [], reconnected: [] };
+  const events: { [E in keyof BusEvents]: BusEvents[E][] } = { change: [], wake: [], 'feed-credentials-rotated': [], reconnected: [] };
 
   beforeAll(async () => {
     scratch = await scratchDatabase('bus');
@@ -25,6 +25,7 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
     bus = await startBus(scratch.url, createLogger({}, (line) => logs.push(JSON.parse(line))), { pingMs: 50 });
     bus.on('change', (e) => events.change.push(e));
     bus.on('wake', (e) => events.wake.push(e));
+    bus.on('feed-credentials-rotated', (e) => events['feed-credentials-rotated'].push(e));
     bus.on('reconnected', (e) => events.reconnected.push(e));
   });
 
@@ -37,19 +38,23 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
 
   test('emits typed events and drops malformed payloads', async () => {
     const target = newId('tgt');
+    const feed = newId('feed');
     for (const [channel, payload] of [
       ['supercal_changes', '{"t":"org_1","s":"42"}'],
       ['supercal_changes', 'not json'],
       ['supercal_changes', '{"t":"org_1","s":"4.2"}'],
       [WAKE_CHANNEL, '{"ids":["acc_1"]}'],
       [WAKE_CHANNEL, JSON.stringify({ ids: [target] })],
+      [FEED_CREDENTIALS_CHANNEL, JSON.stringify({ f: target })],
+      [FEED_CREDENTIALS_CHANNEL, JSON.stringify({ f: feed })],
     ] as const)
       await notifier`select pg_notify(${channel}, ${payload})`;
 
-    await eventually(() => events.wake.length > 0);
+    await eventually(() => events.wake.length > 0 && events['feed-credentials-rotated'].length > 0);
     expect(events.change).toEqual([{ tenantId: 'org_1' as TenantId, maxSeq: 42n }]);
     expect(events.wake).toEqual([{ targetIds: [target] }]);
-    expect(logs.filter((line) => line.msg === 'dropped malformed notification')).toHaveLength(3);
+    expect(events['feed-credentials-rotated']).toEqual([{ feedId: feed }]);
+    expect(logs.filter((line) => line.msg === 'dropped malformed notification')).toHaveLength(4);
     expect(bus.connected).toBe(true);
   });
 
