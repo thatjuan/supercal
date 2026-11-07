@@ -1,0 +1,12 @@
+calendars: [ "Work ctag=http://supercal.invalid/ns/sync/1/1/6 reports=calendarQuery,calendarMultiget,syncCollection comps=VEVENT",
+  "Personal (title only) ctag=http://supercal.invalid/ns/sync/2/1/9 reports=calendarQuery,calendarMultiget,syncCollection comps=VEVENT",
+  "Everything (busy) ctag=http://supercal.invalid/ns/sync/3/1/11 reports=calendarQuery,calendarMultiget,syncCollection comps=VEVENT",
+  "Work + Team (merged) ctag=http://supercal.invalid/ns/sync/4/1/11 reports=calendarQuery,calendarMultiget,syncCollection comps=VEVENT",
+  "Work + Team (source UIDs) ctag=http://supercal.invalid/ns/sync/5/1/11 reports=calendarQuery,calendarMultiget,syncCollection comps=VEVENT"
+]
+time-range Nov 2026: 5 objects
+all: 6 objects, first etag "hf3E_PcaHTf0iEFisHSLlPmp0XM"
+webdav sync: created 0 updated 1 deleted 1 new token http://supercal.invalid/ns/sync/1/1/5013
+  updated summaries: [ "Meeting B (edited for tsdav)" ]
+after epoch bump: created 0 updated 1 deleted 1 token http://supercal.invalid/ns/sync/1/2/5013
+isCollectionDirty (ctag compare) after changes: true http://supercal.invalid/ns/sync/1/2/5013

@@ -1,0 +1,8 @@
+run 0: 5000 resources | db+merge 92ms | full render (db+project+serialise) 201ms | raw 2830 KiB | gzip 80 KiB in 5ms | br q5 19 KiB in 7ms
+run 3: 5000 resources | db+merge 79ms | full render (db+project+serialise) 206ms | raw 2830 KiB | gzip 80 KiB in 4ms | br q5 19 KiB in 5ms
+GET identity: 200 2897793 bytes 229ms (first request, cache miss) ETag="6.1.5011" Last-Modified=Sat, 07 Nov 2026 22:22:02 GMT
+GET gzip: 200 gzip 81672 bytes 9ms (render cached)
+GET br: 200 br 19798 bytes 9ms
+GET If-None-Match: 304 0 bytes 3ms
+GET If-Modified-Since: 304 0 bytes 2ms
+GET wrong token: 404

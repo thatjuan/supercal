@@ -1,0 +1,11 @@
+/Users/user/work/playground/supercal/spikes/feed/clients/caldav_lib.py:18: DeprecationWarning: The 'name' attribute is deprecated. Use get_display_name() instead.
+  print("calendars:", [(c.name, str(c.url)) for c in cals])
+principal: http://localhost:5232/dav/principals/meridian/
+calendars: [('Work', 'http://localhost:5232/dav/calendars/meridian/work/'), ('Personal (title only)', 'http://localhost:5232/dav/calendars/meridian/personal/'), ('Everything (busy)', 'http://localhost:5232/dav/calendars/meridian/everything-busy/'), ('Work + Team (merged)', 'http://localhost:5232/dav/calendars/meridian/merged/'), ('Work + Team (source UIDs)', 'http://localhost:5232/dav/calendars/meridian/merged-raw-uids/')]
+work privileges: ['{DAV:}read', '{DAV:}read-current-user-privilege-set']
+work time-range Nov 2026: [vText(b'Flight JFK \xe2\x86\x92 BER \xe2\x9c\x88\xef\xb8\x8f'), vText(b'Floating wake-up (local everywhere)'), vText(b'Meeting A (organizer copy)'), vText(b'Meeting B (stale copy)'), vText(b'Weekly sync\\, team\\; all hands')]
+initial sync: 6 objects, token http://supercal.invalid/ns/sync/1/1/6
+incremental sync after update+delete+add: ['<deleted> http://localhost:5232/dav/calendars/meridian/work/z_iEV4cewHi5j6dn8inqzt.ics', 'Holidays (edited)', 'Brand new'] token http://supercal.invalid/ns/sync/1/1/5014
+after epoch bump, lib returned 6 objects, token fake-0758c69842ccc0cb070372f9e8311b99
+UIDs shared between 'work' and 'merged-raw-uids': [vText(b'allday@example.com'), vText(b'flight@example.com'), vText(b'meeting-a@example.com'), vText(b'meeting-b@example.com'), vText(b'new-one@example.com'), vText(b'weekly-sync@example.com')]
+merged (rewritten UIDs): [('ThAFOFquMSaCyHkDzBaUNhm0mt@supercal', 'Brand new'), ('VWI1r8WY_ygHPmmJPa5gLv83mR@supercal', 'Meeting A (organizer copy)'), ('ahp0bfhSdEvVx1kfq5CXSiYBm5@supercal', 'Flight JFK → BER ✈️'), ('puNedLsh2Rmpl1SQAcgtOvh4GN@supercal', 'Holidays (edited)'), ('swFvd5kNb8wV8TPvFQ8wuJWC29@supercal', 'Weekly sync, team; all hands'), ('y0ZKRN6R78NfvC0TgvzVQ9ZDi6@supercal', 'Meeting B (newest copy)')]

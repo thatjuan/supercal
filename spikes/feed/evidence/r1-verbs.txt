@@ -1,0 +1,6 @@
+PROPFIND 207 PROPFIND depth=1 bodylen=82
+REPORT 207 REPORT depth=1 bodylen=82
+OPTIONS 207 OPTIONS depth=1 bodylen=0
+PROPPATCH 207 PROPPATCH depth=1 bodylen=82
+MKCALENDAR 207 MKCALENDAR depth=1 bodylen=82
+curl chunked PROPFIND -> HTTP/1.1 207 Multi-Status | X-Body-Len: 82

@@ -1,0 +1,4 @@
+mode=naive writers=8x40 committed=320 rows=320 incremental reads=64 reported=212 SKIPPED=108 (0.5s)
+  e.g. race-7-1, race-1-1, race-5-2, race-3-2, race-7-2
+mode=locked writers=8x40 committed=320 rows=320 incremental reads=752 reported=320 SKIPPED=0 (3.6s)
+mode=xmin writers=8x40 committed=320 rows=320 incremental reads=141 reported=320 SKIPPED=0 repeats=325 (0.5s)

@@ -1,0 +1,11 @@
+   1 UID:weekly-sync@example.com	SUMMARY:Weekly sync\, team\; all hands
+   1 UID:weekly-sync@example.com	SUMMARY:Weekly sync (new time from Jan)
+   1 UID:weekly-sync@example.com	SUMMARY:Weekly sync (moved)
+   1 UID:UL3Dr1rAy-HWQ2sYFMSc3m2hnh@supercal	SUMMARY:Gym (free time)
+   1 UID:sBuzrD_0K6smJVl8IoNK_kzWeW@supercal	SUMMARY:Dinner with Ana
+   1 UID:meeting-b@example.com	SUMMARY:Meeting B (stale copy)
+   1 UID:meeting-a@example.com	SUMMARY:Meeting A (organizer copy)
+   1 UID:floating@example.com	SUMMARY:Floating wake-up (local everywhere)
+   1 UID:flight@example.com	SUMMARY:Flight JFK → BER ✈️
+   1 UID:DgLbGhGCtmeILQUT5OqKtzETd7@supercal	SUMMARY:Busy
+   1 UID:allday@example.com	SUMMARY:Holidays

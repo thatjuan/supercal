@@ -1,0 +1,12 @@
+PROPFIND /dav/calendars/meridian/personal/ 0 207 9.3ms
+PROPFIND /dav/calendars/meridian/everything-busy/ 0 207 9.3ms
+REPORT /dav/calendars/meridian/work/ 1 207 28.4ms
+REPORT /dav/calendars/meridian/work/ 1 207 8.4ms
+REPORT /dav/calendars/meridian/work/ 1 207 7.1ms
+REPORT /dav/calendars/meridian/work/ 1 207 7.7ms
+REPORT /dav/calendars/meridian/work/  207 5.5ms
+REPORT /dav/calendars/meridian/work/ 1 207 3.9ms
+REPORT /dav/calendars/meridian/work/  403 1.5ms
+REPORT /dav/calendars/meridian/work/  207 4.3ms
+REPORT /dav/calendars/meridian/work/ 1 207 4.6ms
+PROPFIND /dav/calendars/meridian/work/ 0 207 2.4ms

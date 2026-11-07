@@ -1,0 +1,62 @@
+--- sync 1
+Copying (uploading) item floating@example.com to feed_local/work
+Copying (uploading) item meeting-a@example.com to feed_local/work
+Copying (uploading) item meeting-b@example.com to feed_local/work
+Copying (uploading) item weekly-sync@example.com to feed_local/work
+Copying (uploading) item DgLbGhGCtmeILQUT5OqKtzETd7@supercal to feed_local/personal
+Copying (uploading) item UL3Dr1rAy-HWQ2sYFMSc3m2hnh@supercal to feed_local/personal
+Copying (uploading) item sBuzrD_0K6smJVl8IoNK_kzWeW@supercal to feed_local/personal
+Copying (uploading) item DyPyBNBpe1xSf96zD-RcAWzexJ@supercal to feed_local/everything-busy
+Copying (uploading) item Huk0KmQKu6Ba9YFLR2b995GbNv@supercal to feed_local/everything-busy
+Copying (uploading) item PBCpqq1bkPIN5UxSZAatWp44bF@supercal to feed_local/everything-busy
+Copying (uploading) item bH-nKI4gKOFJwTeM6-ZU06qvWn@supercal to feed_local/everything-busy
+Copying (uploading) item cb6CCILcIAd2LZ1MduXbEIjTKz@supercal to feed_local/everything-busy
+Copying (uploading) item krPc2XiXEycF4oamBuWnBLHTVc@supercal to feed_local/everything-busy
+Copying (uploading) item sulvkIhY3cWlviOQN17AZzhbTg@supercal to feed_local/everything-busy
+Copying (uploading) item allday@example.com to feed_local/merged-raw-uids
+Copying (uploading) item flight@example.com to feed_local/merged-raw-uids
+Copying (uploading) item floating@example.com to feed_local/merged-raw-uids
+Copying (uploading) item meeting-a@example.com to feed_local/merged-raw-uids
+Copying (uploading) item meeting-b@example.com to feed_local/merged-raw-uids
+Copying (uploading) item weekly-sync@example.com to feed_local/merged-raw-uids
+everything-busy: 7 items
+merged: 6 items
+merged-raw-uids: 6 items
+personal: 3 items
+work: 6 items
+--- server-side: update allday, delete floating, add new-one (source 1)
+--- sync 2
+Syncing feed/work
+Syncing feed/personal
+Syncing feed/everything-busy
+Syncing feed/merged
+Syncing feed/merged-raw-uids
+Copying (uploading) item ThAFOFquMSaCyHkDzBaUNhm0mt@supercal to feed_local/merged
+Deleting item _KSXGexb2QHhkDfyw9nXhN6P6n@supercal from feed_local/merged
+Copying (updating) item puNedLsh2Rmpl1SQAcgtOvh4GN@supercal to feed_local/merged
+Copying (updating) item allday@example.com to feed_local/work
+Deleting item floating@example.com from feed_local/work
+Copying (uploading) item new-one@example.com to feed_local/work
+Deleting item cb6CCILcIAd2LZ1MduXbEIjTKz@supercal from feed_local/everything-busy
+Copying (uploading) item fjM6IEAKXWPnza9RDeBlXFgpRt@supercal to feed_local/everything-busy
+Copying (updating) item allday@example.com to feed_local/merged-raw-uids
+Deleting item floating@example.com from feed_local/merged-raw-uids
+Copying (uploading) item new-one@example.com to feed_local/merged-raw-uids
+everything-busy: 7 items
+merged: 6 items
+merged-raw-uids: 6 items
+personal: 3 items
+work: 6 items
+work: edited summary present locally
+work: deleted event gone locally
+--- epoch bump on work (pub 1), then sync 3
+Syncing feed/work
+Syncing feed/personal
+Syncing feed/everything-busy
+Syncing feed/merged
+Syncing feed/merged-raw-uids
+work: 6 items after epoch bump
+--- same UID across collections on disk
+   6 UID:weekly-sync@example.com
+   2 UID:new-one@example.com
+   2 UID:meeting-b@example.com

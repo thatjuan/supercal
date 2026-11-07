@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.caldav.account</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>dev.supercal.feed.1.caldav</string>
+      <key>PayloadUUID</key><string>E5015EAF-49C6-492E-862D-687157F6F415</string>
+      <key>PayloadDisplayName</key><string>Juan's feed (CalDAV)</string>
+      <key>CalDAVAccountDescription</key><string>Juan's feed</string>
+      <key>CalDAVHostName</key><string>cal.example.com</string>
+      <key>CalDAVPort</key><integer>443</integer>
+      <key>CalDAVUseSSL</key><true/>
+      <key>CalDAVPrincipalURL</key><string>https://cal.example.com/dav/principals/meridian/</string>
+      <key>CalDAVUsername</key><string>meridian</string>
+    </dict>
+  </array>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadVersion</key><integer>1</integer>
+  <key>PayloadIdentifier</key><string>dev.supercal.feed.1</string>
+  <key>PayloadUUID</key><string>A08AC7C7-C222-4E6D-81EF-8BE999850D06</string>
+  <key>PayloadDisplayName</key><string>Supercal: Juan's feed</string>
+  <key>PayloadDescription</key><string>Adds your Supercal feed as a read-only calendar account.</string>
+  <key>PayloadOrganization</key><string>Supercal</string>
+  <key>PayloadRemovalDisallowed</key><false/>
+</dict>
+</plist>

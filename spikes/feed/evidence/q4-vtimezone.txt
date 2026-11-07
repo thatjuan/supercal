@@ -1,0 +1,69 @@
+
+=== timezones-ical-library@2.4.0
+  window 2015-2019: 109560 samples, 11/15 zones wrong
+    America/New_York: 5 wrong samples, first 2015-03-08T06 intl=-300 vtz=-240
+    Australia/Lord_Howe: 20 wrong samples, first 2015-04-04T18 intl=630 vtz=660
+    America/Sao_Paulo: 2141 wrong samples, first 2015-01-01T00 intl=-120 vtz=-180
+    Africa/Casablanca: 4435 wrong samples, first 2015-03-29T06 intl=60 vtz=0
+    Asia/Tehran: 3680 wrong samples, first 2015-03-22T00 intl=270 vtz=210
+    Pacific/Chatham: 20 wrong samples, first 2015-04-04T18 intl=765 vtz=825
+    America/Santiago: 1402 wrong samples, first 2015-04-05T00 intl=-180 vtz=-240
+    America/Nuuk: 7272 wrong samples, first 2015-01-01T00 intl=-180 vtz=-120
+    Pacific/Apia: 3776 wrong samples, first 2015-01-01T00 intl=840 vtz=780
+    Asia/Gaza: 74 wrong samples, first 2015-03-28T00 intl=180 vtz=120
+    America/Mexico_City: 4144 wrong samples, first 2015-04-05T12 intl=-300 vtz=-360
+  window 2025-2034: 219120 samples, 7/15 zones wrong
+    America/New_York: 10 wrong samples, first 2025-03-09T06 intl=-300 vtz=-240
+    Australia/Lord_Howe: 40 wrong samples, first 2025-04-05T18 intl=630 vtz=660
+    Africa/Casablanca: 2201 wrong samples, first 2025-01-01T00 intl=60 vtz=0
+    Pacific/Chatham: 40 wrong samples, first 2025-04-05T18 intl=765 vtz=825
+    America/Santiago: 76 wrong samples, first 2025-04-06T00 intl=-180 vtz=-240
+    America/Nuuk: 46 wrong samples, first 2025-03-30T00 intl=-120 vtz=-60
+    Asia/Gaza: 130 wrong samples, first 2025-03-29T06 intl=120 vtz=180
+
+=== @touch4it/ical-timezones@1.9.0
+  window 2015-2019: 94952 samples, 12/15 zones wrong
+    America/New_York: 5 wrong samples, first 2015-03-08T06 intl=-300 vtz=-240
+    Australia/Lord_Howe: 20 wrong samples, first 2015-04-04T18 intl=630 vtz=660
+    America/Sao_Paulo: 491 wrong samples, first 2015-02-15T00 intl=-120 vtz=-180
+    Africa/Casablanca: 2869 wrong samples, first 2015-01-01T00 intl=0 vtz=60
+    Asia/Tehran: 172 wrong samples, first 2015-03-15T00 intl=210 vtz=270
+    Europe/Kyiv: no block
+    Pacific/Chatham: 20 wrong samples, first 2015-04-04T18 intl=765 vtz=825
+    America/Santiago: 1402 wrong samples, first 2015-04-05T00 intl=-180 vtz=-240
+    America/Nuuk: no block
+    Pacific/Apia: 20 wrong samples, first 2015-04-04T18 intl=780 vtz=840
+    Asia/Gaza: 59 wrong samples, first 2015-03-28T00 intl=180 vtz=120
+    America/Mexico_City: 10 wrong samples, first 2015-04-05T06 intl=-360 vtz=-300
+  window 2025-2034: 189904 samples, 12/15 zones wrong
+    America/New_York: 10 wrong samples, first 2025-03-09T06 intl=-300 vtz=-240
+    Australia/Lord_Howe: 40 wrong samples, first 2025-04-05T18 intl=630 vtz=660
+    America/Sao_Paulo: 4220 wrong samples, first 2025-01-01T00 intl=-180 vtz=-120
+    Africa/Casablanca: 12407 wrong samples, first 2025-02-23T06 intl=0 vtz=60
+    Asia/Tehran: 7364 wrong samples, first 2025-03-16T00 intl=210 vtz=270
+    Europe/Kyiv: no block
+    Pacific/Chatham: 40 wrong samples, first 2025-04-05T18 intl=765 vtz=825
+    America/Santiago: 76 wrong samples, first 2025-04-06T00 intl=-180 vtz=-240
+    America/Nuuk: no block
+    Pacific/Apia: 7580 wrong samples, first 2025-01-01T00 intl=780 vtz=840
+    Asia/Gaza: 172 wrong samples, first 2025-03-22T06 intl=120 vtz=180
+    America/Mexico_City: 8288 wrong samples, first 2025-04-06T06 intl=-360 vtz=-300
+
+=== @sdxc/icalendar/timezone (Intl, span-bounded)
+  window 2015-2019: 109560 samples, 9/15 zones wrong
+    America/New_York: 5 wrong samples, first 2015-03-08T06 intl=-300 vtz=-240
+    Australia/Lord_Howe: 20 wrong samples, first 2015-04-04T18 intl=630 vtz=660
+    America/Sao_Paulo: 9 wrong samples, first 2015-02-22T00 intl=-120 vtz=-180
+    Pacific/Chatham: 20 wrong samples, first 2015-04-04T18 intl=765 vtz=825
+    America/Santiago: 8 wrong samples, first 2016-05-15T00 intl=-180 vtz=-240
+    America/Nuuk: 10 wrong samples, first 2015-03-29T00 intl=-180 vtz=-120
+    Pacific/Apia: 20 wrong samples, first 2015-04-04T18 intl=780 vtz=840
+    Asia/Gaza: 3 wrong samples, first 2016-03-26T00 intl=180 vtz=120
+    America/Mexico_City: 10 wrong samples, first 2015-04-05T06 intl=-360 vtz=-300
+  window 2025-2034: 219120 samples, 6/15 zones wrong
+    America/New_York: 10 wrong samples, first 2025-03-09T06 intl=-300 vtz=-240
+    Australia/Lord_Howe: 40 wrong samples, first 2025-04-05T18 intl=630 vtz=660
+    Pacific/Chatham: 40 wrong samples, first 2025-04-05T18 intl=765 vtz=825
+    America/Santiago: 20 wrong samples, first 2025-04-06T00 intl=-180 vtz=-240
+    America/Nuuk: 20 wrong samples, first 2025-03-30T00 intl=-120 vtz=-60
+    Asia/Gaza: 20 wrong samples, first 2025-04-12T00 intl=180 vtz=120
