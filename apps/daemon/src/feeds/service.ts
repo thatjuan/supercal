@@ -44,7 +44,7 @@ import { audit } from '../api/kit/audit.ts';
 import { BadRequest, Conflict, Forbidden, NotFound } from '../api/kit/problem.ts';
 import { canManageOwned } from '../auth/policy.ts';
 import type { Principal } from '../auth/principal.ts';
-import { notifyFeedCredentialsRotated } from '../bus.ts';
+import { notifyEvent, notifyFeedCredentialsRotated } from '../bus.ts';
 import { caldavUsername, newCaldavPassword, newIcsToken, newUidSecret, openUidSecret, ownerHandle } from './credentials.ts';
 
 export type FeedService = ReturnType<typeof createFeedService>;
@@ -119,9 +119,9 @@ const normalizeColor = (color: string | null) => (color && /^#[0-9a-f]{6}/i.test
 /** Sources with their default priority (their position) filled in. */
 const withPriorities = (sources: SourceInput[]) => sources.map(({ calendarId, priority }, index) => ({ calendarId, priority: priority ?? index }));
 
-/** Emits `feed.changed` to SSE subscribers once #11's `notifyEvent` exists. */
-async function feedChanged(_tx: TenantTx, _feedId: FeedId): Promise<void> {
-  // TODO(#11): await notifyEvent(tx, tenantId, { type: 'feed.changed', feedId });
+/** Tells the tenant's live streams (`GET /api/v1/stream`) that the feed's publications or credentials changed. */
+async function feedChanged(tx: TenantTx, feedId: FeedId): Promise<void> {
+  await notifyEvent(tx, await currentTenant(tx), { type: 'feed.changed', feedId });
 }
 
 async function publicationsWhere(tx: TenantTx, where: SQL): Promise<Publication[]> {

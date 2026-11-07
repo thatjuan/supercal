@@ -15,7 +15,14 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
   let notifier: postgres.Sql;
   let bus: Bus;
   const logs: { level: string; msg: string }[] = [];
-  const events: { [E in keyof BusEvents]: BusEvents[E][] } = { change: [], wake: [], 'feed-credentials-rotated': [], reconnected: [] };
+  const events: { [E in keyof BusEvents]: BusEvents[E][] } = {
+    change: [],
+    wake: [],
+    'feed-credentials-rotated': [],
+    event: [],
+    'auth-revoked': [],
+    reconnected: [],
+  };
 
   beforeAll(async () => {
     scratch = await scratchDatabase('bus');

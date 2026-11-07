@@ -1054,6 +1054,125 @@
             "description": "Virtual publications only"
           }
         }
+      },
+      "StreamEvent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ResourcesChangedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AccountStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FeedChangedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ResetEvent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "resources.changed": "#/components/schemas/ResourcesChangedEvent",
+            "account.status": "#/components/schemas/AccountStatusEvent",
+            "feed.changed": "#/components/schemas/FeedChangedEvent",
+            "reset": "#/components/schemas/ResetEvent"
+          }
+        },
+        "description": "One server-sent event: `event:` is `type` and `data:` is this JSON. Only `resources.changed` sets `id:`."
+      },
+      "ResourcesChangedEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "resources.changed"
+            ]
+          },
+          "seq": {
+            "type": "string",
+            "pattern": "^\\d{1,19}$"
+          },
+          "calendarIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "seq",
+          "calendarIds"
+        ],
+        "description": "Events changed in these source calendars, up to `seq` (also the SSE `id:`)"
+      },
+      "AccountStatusEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "account.status"
+            ]
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "reauth_required",
+              "error",
+              "disabled"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "accountId",
+          "status"
+        ],
+        "description": "A calendar account’s connection or sync status changed"
+      },
+      "FeedChangedEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "feed.changed"
+            ]
+          },
+          "feedId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "feedId"
+        ],
+        "description": "A feed’s publications or credentials changed"
+      },
+      "ResetEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "reset"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "description": "Changes cannot be replayed from `Last-Event-ID`: refetch everything"
       }
     },
     "parameters": {}
@@ -2959,6 +3078,109 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream": {
+      "get": {
+        "operationId": "getStream",
+        "tags": [
+          "Live updates"
+        ],
+        "description": "Server-sent events for the current tenant. Resume with `Last-Event-ID` (or `?lastEventId=`); a `: ping` comment is sent every 15 s.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{1,19}$",
+              "description": "For clients that cannot set `Last-Event-ID`; the header wins"
+            },
+            "required": false,
+            "description": "For clients that cannot set `Last-Event-ID`; the header wins",
+            "name": "lastEventId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{1,19}$"
+            },
+            "required": false,
+            "name": "last-event-id",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An endless `text/event-stream` of `StreamEvent`s",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamEvent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -28,6 +28,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { createApi } from '../src/api/index.ts';
+import { idleBus } from '../src/bus.ts';
 import type { ApiEnv, Principal, TenantRole } from '../src/auth/principal.ts';
 import { icsTokenHash } from '../src/feeds/credentials.ts';
 import { createFeedService } from '../src/feeds/service.ts';
@@ -86,7 +87,7 @@ describe.skipIf(!testDatabaseUrl)('feeds and publications', () => {
     await migrate(scratch.url);
     connectDb(scratch.url);
     fixture = testAuth('invite', scratch.url);
-    app = createApi({ auth: fixture.auth, secrets: testSecrets }, injectPrincipal);
+    app = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus }, injectPrincipal);
 
     const db = unsafeDb();
     const now = new Date();

@@ -9,6 +9,7 @@ import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { createApi } from '../src/api/index.ts';
+import { idleBus } from '../src/bus.ts';
 import type { AuthConfig } from '../src/auth/auth.ts';
 import { TEST_ORIGIN, testAuth, testSecrets } from './auth-fixture.ts';
 
@@ -58,7 +59,7 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
     for (const mode of ['open', 'invite', 'disabled'] as const) {
       const fixture = testAuth(mode, scratch.url);
       fixtures.push(fixture);
-      apps.set(mode, createApi({ auth: fixture.auth, secrets: testSecrets }));
+      apps.set(mode, createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus }));
     }
   });
 

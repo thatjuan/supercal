@@ -209,6 +209,16 @@ export async function resourcesByUids(
 const TOMBSTONE_FLOOR = 'tombstone_floor';
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** The seq at or below which tombstones may be gone: positions below it cannot be replayed. */
+export async function tombstoneFloor(tx: TenantTx | ControlTx): Promise<bigint> {
+  const [row] = await tx
+    .select({ floor: sql<string>`(${systemSetting.value} #>> '{}')` })
+    .from(systemSetting)
+    .where(eq(systemSetting.key, TOMBSTONE_FLOOR));
+  if (!row) throw new Error(`system_setting ${TOMBSTONE_FLOOR} is missing`);
+  return BigInt(row.floor);
+}
+
 /**
  * Deletes tombstones last changed before `olderThan` (default 30 days ago), across tenants. First
  * raises `system_setting.tombstone_floor` to the newest such tombstone's seq (never lowering it),

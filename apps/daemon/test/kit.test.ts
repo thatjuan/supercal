@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { createApi } from '../src/api/index.ts';
+import { idleBus } from '../src/bus.ts';
 import {
   audit,
   createApiApp,
@@ -70,7 +71,7 @@ const widgets = createApiApp()
   });
 
 const fixture = testAuth('invite');
-const app = createApi({ auth: fixture.auth, secrets: testSecrets }, injectPrincipal).route('/', widgets);
+const app = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus }, injectPrincipal).route('/', widgets);
 
 const send = (path: string, init?: RequestInit) => app.request(path, init);
 const json = (method: string, body: string, headers: Record<string, string> = {}): RequestInit => ({
