@@ -11,6 +11,7 @@
     "dev": "bun --watch apps/daemon/src/main.ts",
     "typecheck": "bun run --filter './apps/*' --filter './packages/*' typecheck",
     "test": "bun test ./apps ./packages",
+    "test:egress": "bun test ./packages/providers/test/transport",
     "check": "bun run typecheck && bun run test"
   },
   "devDependencies": {

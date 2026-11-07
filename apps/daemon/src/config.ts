@@ -7,6 +7,25 @@ const PROXY_VARIABLES = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']);
 const required = z.string({ error: 'is required' });
 const optional = z.string().optional();
 const url = z.url({ protocol: /^https?$/, error: 'must be an http(s) URL' });
+const cidr = z.union([z.cidrv4(), z.cidrv6()]);
+
+/** One `origin=cidr` entry: the exact http(s) origin may reach non-global addresses inside the CIDR. */
+const egressRule = z.string().transform((entry, ctx) => {
+  const [origin = '', range, extra] = entry.split('=');
+  const parsed = URL.parse(origin);
+  const network = cidr.safeParse(range);
+  if (extra === undefined && parsed && /^https?:$/.test(parsed.protocol) && parsed.href === `${parsed.origin}/` && network.success) {
+    return { origin: parsed.origin, cidrs: [network.data] };
+  }
+  ctx.addIssue({ code: 'custom', message: 'entries must look like https://host[:port]=cidr, separated by commas' });
+  return z.NEVER;
+});
+
+/** Operator LAN allowlist for the guarded transport, passed to `createGuardedFetch` as `EgressPolicy.allow`. */
+const egressAllow = z
+  .string()
+  .transform((value) => value.split(',').map((entry) => entry.trim()).filter(Boolean))
+  .pipe(z.array(egressRule));
 
 const configSchema = z
   .object({
@@ -27,7 +46,7 @@ const configSchema = z
     GOOGLE_CLIENT_SECRET: optional,
     MICROSOFT_CLIENT_ID: optional,
     MICROSOFT_CLIENT_SECRET: optional,
-    SUPERCAL_EGRESS_ALLOW: optional,
+    SUPERCAL_EGRESS_ALLOW: egressAllow.default([]),
     RESEND_API_KEY: optional,
     MAIL_FROM: optional,
     WEB_ORIGIN: url.optional(),

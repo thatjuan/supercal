@@ -23,7 +23,7 @@ Status: decided, 2026-11-07. Supersedes the hypotheses in `docs/brief.md`. Produ
 
 | Concern | Choice | Notes |
 | --- | --- | --- |
-| Runtime | Bun 1.3.4 | Pinned. Upgrades must pass the SSRF/TLS regression suite and the NOTIFY test first *(ingest, platform)*. |
+| Runtime | Bun 1.3.4 | Pinned. Upgrades must pass the SSRF/TLS regression suite (`bun run test:egress`) and the NOTIFY test first *(ingest, platform)*. |
 | Language | TypeScript 5.9.3, strict | TS 7 breaks `openapi-typescript` *(platform)*. |
 | Monorepo | Bun workspaces | `apps/daemon`, `apps/web`, `packages/{core,providers,db,api-client}`. |
 | HTTP | Hono 4.13 | WebDAV verbs via `app.on([...])` work on `Bun.serve` *(feed)*. |

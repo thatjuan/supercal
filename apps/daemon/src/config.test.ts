@@ -22,6 +22,8 @@ const cases: Case[] = [
   { rule: 'migrate must be auto or off', env: { ...prod, SUPERCAL_MIGRATE: 'yes' }, problem: /^SUPERCAL_MIGRATE:/ },
   { rule: 'Google client id needs its secret', env: { ...prod, GOOGLE_CLIENT_ID: 'id' }, problem: /^GOOGLE_CLIENT_ID: must be set together with GOOGLE_CLIENT_SECRET/ },
   { rule: 'Microsoft secret needs its client id', env: { ...prod, MICROSOFT_CLIENT_SECRET: 's' }, problem: /^MICROSOFT_CLIENT_ID: must be set together/ },
+  { rule: 'egress allowlist rejects an origin with a path', env: { ...prod, SUPERCAL_EGRESS_ALLOW: 'https://nas.lan/cal=10.0.0.0/24' }, problem: /^SUPERCAL_EGRESS_ALLOW: entries must look like/ },
+  { rule: 'egress allowlist rejects a bad CIDR', env: { ...prod, SUPERCAL_EGRESS_ALLOW: 'https://nas.lan=10.0.0.0/33' }, problem: /^SUPERCAL_EGRESS_ALLOW:/ },
   { rule: 'proxy variables are refused in any case', env: { ...prod, https_proxy: 'http://proxy' }, problem: /^https_proxy: must not be set; .*SSRF/ },
 ];
 
@@ -42,6 +44,17 @@ describe('parseConfig', () => {
     expect(result.config).toMatchObject({ PORT: 4316, SUPERCAL_SIGNUP: 'invite', SUPERCAL_MIGRATE: 'auto', SUPERCAL_INSECURE_DEV: false });
     expect([...result.config.SUPERCAL_ROLES]).toEqual(['api', 'dav', 'worker']);
     expect(Object.isFrozen(result.config)).toBe(true);
+  });
+
+  test('parses the egress allowlist into exact origins and CIDRs', () => {
+    const result = parseConfig({ ...prod, SUPERCAL_EGRESS_ALLOW: 'http://hare:55232=100.103.147.43/32, https://NAS.lan:443=10.0.0.0/24' });
+    if (!result.ok) throw new Error(result.problems.join('\n'));
+    expect(result.config.SUPERCAL_EGRESS_ALLOW).toEqual([
+      { origin: 'http://hare:55232', cidrs: ['100.103.147.43/32'] },
+      { origin: 'https://nas.lan', cidrs: ['10.0.0.0/24'] },
+    ]);
+    const unset = parseConfig(prod);
+    expect(unset.ok && unset.config.SUPERCAL_EGRESS_ALLOW).toEqual([]);
   });
 
   test('never prints values', () => {
