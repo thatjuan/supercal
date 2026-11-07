@@ -5,3 +5,4 @@ export { parseCalendar, serializeCalendar, componentsOf, PRODID, type ParseError
 export * from "./time.ts";
 export * from "./vtimezone.ts";
 export * from "./normalize/ical.ts";
+export * from "./projection.ts";
