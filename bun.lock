@@ -1,0 +1,62 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "supercal",
+      "devDependencies": {
+        "@types/bun": "1.3.4",
+        "typescript": "5.9.3",
+      },
+    },
+    "apps/daemon": {
+      "name": "@supercal/daemon",
+      "dependencies": {
+        "hono": "4.13.17",
+        "zod": "4.6.7",
+      },
+    },
+    "apps/web": {
+      "name": "@supercal/web",
+    },
+    "packages/api-client": {
+      "name": "@supercal/api-client",
+    },
+    "packages/core": {
+      "name": "@supercal/core",
+    },
+    "packages/db": {
+      "name": "@supercal/db",
+    },
+    "packages/providers": {
+      "name": "@supercal/providers",
+    },
+  },
+  "packages": {
+    "@supercal/api-client": ["@supercal/api-client@workspace:packages/api-client"],
+
+    "@supercal/core": ["@supercal/core@workspace:packages/core"],
+
+    "@supercal/daemon": ["@supercal/daemon@workspace:apps/daemon"],
+
+    "@supercal/db": ["@supercal/db@workspace:packages/db"],
+
+    "@supercal/providers": ["@supercal/providers@workspace:packages/providers"],
+
+    "@supercal/web": ["@supercal/web@workspace:apps/web"],
+
+    "@types/bun": ["@types/bun@1.3.4", "", { "dependencies": { "bun-types": "1.3.4" } }, "sha512-EEPTKXHP+zKGPkhRLv+HI0UEX8/o+65hqARxLy8Ov5rIxMBPNTjeZww00CIihrIQGEQBYg+0roO5qOnS/7boGA=="],
+
+    "@types/node": ["@types/node@26.6.6", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog=="],
+
+    "bun-types": ["bun-types@1.3.4", "", { "dependencies": { "@types/node": "*" } }, "sha512-5ua817+BZPZOlNaRgGBpZJOSAQ9RQ17pkwPD0yR7CfJg+r8DgIILByFifDTa+IPDDxzf5VNhtNlcKqFzDgJvlQ=="],
+
+    "hono": ["hono@4.13.17", "", {}, "sha512-vZIcbkvjOR5hHRWERbGkr8fGfF0GGM1ooYkuH448iO3b2AdVEr3AXZSw4Z3Kn+1L5z0CVoVeyV29VGYmFh05kQ=="],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
+  }
+}
