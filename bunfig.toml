@@ -1,0 +1,3 @@
+[install]
+# Pin added dependencies exactly; the stack in docs/architecture.md §2 is pinned.
+exact = true
