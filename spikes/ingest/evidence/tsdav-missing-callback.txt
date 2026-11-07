@@ -1,0 +1,44 @@
+$ bun src/radicale-run.ts
+discovery {
+  principal: "http://hare:55232/astrolabe/",
+  home: "http://hare:55232/astrolabe/",
+}
+calendar {
+  href: "http://hare:55232/astrolabe/spike-1794088464217/",
+  name: "Astrolabe Spike",
+  color: "#48aaffff",
+  ctag: "\"5c3e328bd173bc5673612b79ab0802ae0ecdd7eca0cde520683e0b0bc10fb342\"",
+  syncToken: "http://radicale.org/ns/sync/83ee2a312de54bed2fbd5da9b4a1220019b3b5c20ddee039a8c62110115e3d61",
+  components: [ "VEVENT" ],
+  syncCollection: true,
+}
+custom initial {
+  objects: 2,
+  seriesComponents: 2,
+  fullResync: true,
+}
+tsdav initial {
+  objects: 2,
+  name: "Astrolabe Spike",
+  color: "#48aaffff",
+  components: [ "VEVENT" ],
+  syncToken: "http://radicale.org/ns/sync/83ee2a312de54bed2fbd5da9b4a1220019b3b5c20ddee039a8c62110115e3d61",
+}
+custom incremental {
+  upserts: 1,
+  deletes: [ "/astrolabe/spike-1794088464217/day.ics" ],
+  tokenAdvanced: true,
+}
+cleanup own calendar 200
+808 | 		if (result.some((response) => response.raw?.multistatus?.response && (typeof response.href !== "string" || !response.href))) throw new Error("Collection sync failed: missing href in DAV response");
+809 | 		const objectResponses = result.filter(isObjectResponse);
+810 | 		const changedObjectUrls = objectResponses.filter((o) => o.status !== 404).map((r) => r.href);
+811 | 		const deletedObjectUrls = objectResponses.filter((o) => o.status === 404).map((r) => r.href);
+812 | 		const objectMultiGet = collection.objectMultiGet;
+813 | 		if (changedObjectUrls.length > 0 && !objectMultiGet) throw new Error("collection.objectMultiGet is required for webdav sync changes");
+                                                                       ^
+error: collection.objectMultiGet is required for webdav sync changes
+      at <anonymous> (/Users/user/work/playground/supercal/spikes/ingest/node_modules/tsdav/dist/tsdav.mjs:813:66)
+
+Bun v1.3.4 (macOS arm64)
+error: script "radicale" exited with code 1

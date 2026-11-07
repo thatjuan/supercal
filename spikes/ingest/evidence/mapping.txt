@@ -1,0 +1,26 @@
+bun test v1.3.4 (5eb2145b)
+
+test/mapping.test.ts:
+(pass) Google recurring master + moved override + sparse cancellation grouped by master, no UTC recurrence drift [6.76ms]
+(pass) Google all-day end remains exclusive; deleted master distinct from cancelled instance [0.73ms]
+(pass) ICS parser retains all-day DATE properties [0.34ms]
+(pass) Graph daily RRULE numbered range [0.08ms]
+(pass) Graph weekly RRULE numbered range [0.02ms]
+(pass) Graph absoluteMonthly RRULE numbered range
+(pass) Graph relativeMonthly RRULE numbered range
+(pass) Graph absoluteYearly RRULE numbered range
+(pass) Graph relativeYearly RRULE numbered range
+(pass) Graph endDate inclusive in local zone becomes UTC UNTIL after DST; all-day stays date [1.07ms]
+(pass) Graph Windows TZ, moved exception, cancellation and differing per-instance iCalUId use master UID [2.19ms]
+(pass) Graph all-day dates and Windows territory mapping; unknown custom zone fails closed [0.42ms]
+(pass) Graph all-day UTC response is converted back to its original positive-offset zone [0.57ms]
+(pass) relative monthly mapping expands to the second Thursday, including short months [2.07ms]
+
+test/google-sync.test.ts:
+(pass) Google 410 resets; all pages drained, exceptions and tombstones retained, terminal token only [0.35ms]
+(pass) Google later-page failure never exposes a partial cursor [0.08ms]
+
+ 16 pass
+ 0 fail
+ 45 expect() calls
+Ran 16 tests across 2 files. [46.00ms]

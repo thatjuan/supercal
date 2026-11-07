@@ -1,0 +1,55 @@
+bun test v1.3.4 (5eb2145b)
+
+test/ssrf.test.ts:
+(pass) blocks 127.0.0.1 [0.39ms]
+(pass) blocks 127.255.255.255
+(pass) blocks 0.0.0.0
+(pass) blocks 10.1.2.3
+(pass) blocks 172.16.0.1
+(pass) blocks 172.31.255.255
+(pass) blocks 192.168.0.1
+(pass) blocks 169.254.169.254
+(pass) blocks 100.64.0.1
+(pass) blocks 100.127.255.255
+(pass) blocks 224.0.0.1
+(pass) blocks 240.0.0.1
+(pass) blocks :: [0.29ms]
+(pass) blocks ::1
+(pass) blocks fc00::1 [0.08ms]
+(pass) blocks fd00::1 [0.02ms]
+(pass) blocks fe80::1
+(pass) blocks ff02::1
+(pass) blocks ::ffff:127.0.0.1 [0.10ms]
+(pass) blocks ::ffff:192.168.1.1 [0.02ms]
+(pass) blocks 64:ff9b::a00:1 [0.01ms]
+(pass) blocks 2001:db8::1 [0.01ms]
+(pass) public address examples [0.04ms]
+(pass) URL normalization blocks numeric IPv4 tricks [0.82ms]
+(pass) mixed public/private DNS answer rejected [0.24ms]
+(pass) LAN rejected without operator allowlist; exact origin+CIDR permits it and Host survives IP dial [2.24ms]
+(pass) pinning uses one DNS answer without resolving the name at connect time [0.43ms]
+(pass) redirect rechecks DNS and rejects metadata before connection [0.82ms]
+(pass) redirect count, deadline and decompressed body bounds [53.61ms]
+(pass) gzip + sloppy MIME + redirect + conditional GET preserve recurrence [3.64ms]
+62 | });
+63 | test('explicit empty proxy bypasses ambient proxy in Bun 1.3.4', async () => {
+64 |   const proxy = Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response('PROXY_USED')});
+65 |   try {
+66 |     const child = Bun.spawn([process.execPath,'-e',`import {guardedRequest} from './src/ssrf.ts'; const origin=process.env.FIXTURE_ORIGIN!; const r=await guardedRequest(origin+'/host',{}, {allow:[{origin,cidrs:['127.0.0.1/32']}],resolve:async()=>[{address:'127.0.0.1',family:4}]}); console.log(r.text);`], {cwd:new URL('..',import.meta.url).pathname, env:{PATH:process.env.PATH,FIXTURE_ORIGIN:origin,HTTP_PROXY:proxy.url.href,HTTPS_PROXY:proxy.url.href,ALL_PROXY:proxy.url.href,NO_PROXY:''},stdout:'pipe',stderr:'pipe'});
+67 |     expect(await child.exited).toBe(0); expect((await new Response(child.stdout).text()).trim()).toBe(`calendar.test:${server.port}`);
+                                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: "calendar.test:57720"
+Received: "PROXY_USED"
+
+      at <anonymous> (/Users/user/work/playground/supercal/spikes/ingest/test/ssrf.test.ts:67:98)
+(fail) explicit empty proxy bypasses ambient proxy in Bun 1.3.4 [28.57ms]
+
+1 tests failed:
+(fail) explicit empty proxy bypasses ambient proxy in Bun 1.3.4 [28.57ms]
+
+ 30 pass
+ 1 fail
+ 55 expect() calls
+Ran 31 tests across 1 file. [222.00ms]

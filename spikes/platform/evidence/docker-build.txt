@@ -1,0 +1,84 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 485B done
+#1 DONE 0.0s
+
+#2 [auth] oven/bun:pull token for registry-1.docker.io
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/oven/bun:1.3.4
+#3 ...
+
+#4 [internal] load metadata for gcr.io/distroless/cc-debian12:nonroot
+#4 DONE 0.6s
+
+#3 [internal] load metadata for docker.io/oven/bun:1.3.4
+#3 DONE 0.7s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 77B done
+#5 DONE 0.0s
+
+#6 [stage-1 1/3] FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+#6 DONE 0.0s
+
+#7 [build 1/7] FROM docker.io/oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 transferring context: 117.78kB done
+#8 DONE 0.0s
+
+#9 [build 2/7] WORKDIR /app
+#9 CACHED
+
+#10 [build 3/7] COPY package.json bun.lock ./
+#10 DONE 0.1s
+
+#11 [build 4/7] RUN bun install --frozen-lockfile --production --ignore-scripts
+#11 0.232 bun install v1.3.4 (5eb2145b)
+#11 0.790 
+#11 0.790 + @better-auth/api-key@1.7.18
+#11 0.790 + @hono/zod-openapi@1.6.3
+#11 0.790 + @scalar/hono-api-reference@0.12.18
+#11 0.790 + @tanstack/react-query@5.107.1
+#11 0.790 + @tanstack/react-router@1.170.46
+#11 0.790 + better-auth@1.7.18
+#11 0.790 + drizzle-orm@0.45.4
+#11 0.790 + hono@4.13.17
+#11 0.790 + openapi-fetch@0.17.0
+#11 0.790 + openapi-react-query@0.5.4
+#11 0.790 + pg-boss@12.38.1
+#11 0.790 + postgres@4.1.0
+#11 0.790 + react@19.3.1
+#11 0.790 + react-dom@19.3.1
+#11 0.790 + zod@4.6.7
+#11 0.790 
+#11 0.790 140 packages installed [558.00ms]
+#11 DONE 1.0s
+
+#12 [build 5/7] COPY src ./src
+#12 DONE 0.1s
+
+#13 [build 6/7] COPY migrations ./migrations
+#13 DONE 0.1s
+
+#14 [build 7/7] RUN bun build --compile --minify src/server.ts --outfile /app/platform
+#14 0.301   [33ms]  minify  -2.84 MB (estimate)
+#14 0.301   [28ms]  bundle  1000 modules
+#14 0.426  [125ms] compile  /app/platform
+#14 DONE 0.5s
+
+#15 [stage-1 2/3] WORKDIR /app
+#15 CACHED
+
+#16 [stage-1 3/3] COPY --from=build --chown=65532:65532 /app/platform /app/platform
+#16 DONE 0.2s
+
+#17 exporting to image
+#17 exporting layers
+#17 exporting layers 0.2s done
+#17 writing image sha256:82c26769ea512932cbca61b1d3c134d21171003c7102826b0e2dc1624ffd45e5 done
+#17 naming to docker.io/library/supercal-spike-gnomon-platform 0.0s done
+#17 DONE 0.2s

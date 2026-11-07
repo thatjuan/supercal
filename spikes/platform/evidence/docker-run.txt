@@ -1,0 +1,16 @@
+{
+  "bun": "1.3.4",
+  "architecture": "amd64",
+  "imageBytes": 128833741,
+  "binaryBytes": 105161752,
+  "runtimeUser": "65532:65532",
+  "coldStartThroughHealthMs": 370,
+  "signup": 200,
+  "organization": 200,
+  "activeOrganization": 200,
+  "protectedRoute": 200,
+  "principalVia": "session",
+  "nativeOrgKeyCreate": 200,
+  "nativeOrgKeyBoundToTenant": true,
+  "logs": "{\"migrations\":\"applied\",\"embeddedFiles\":3,\"advisoryLock\":true,\"elapsedMs\":38}\nplatform ready Bun=1.3.4 port=55316"
+}

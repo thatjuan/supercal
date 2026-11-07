@@ -1,0 +1,56 @@
+{
+  "openapi": "3.1.0",
+  "publication": {
+    "oneOf": [
+      {
+        "$ref": "#/components/schemas/PassthroughPublication"
+      },
+      {
+        "$ref": "#/components/schemas/VirtualPublication"
+      }
+    ],
+    "discriminator": {
+      "propertyName": "kind",
+      "mapping": {
+        "passthrough": "#/components/schemas/PassthroughPublication",
+        "virtual": "#/components/schemas/VirtualPublication"
+      }
+    }
+  },
+  "errorResponse": {
+    "description": "Invalid request",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/Problem"
+        }
+      }
+    }
+  },
+  "managementPaths": 2,
+  "auth": {
+    "version": "3.1.1",
+    "pathCount": 72,
+    "firstPath": "/sign-in/social",
+    "servers": [
+      {
+        "url": "http://localhost:4316/api/auth"
+      }
+    ],
+    "schemaNameCollisions": [],
+    "securitySchemes": {
+      "apiKeyCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "apiKeyCookie",
+        "description": "API Key authentication via cookie"
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Bearer token authentication"
+      }
+    }
+  },
+  "recommendation": "Serve auth OpenAPI separately; merging requires prefixing paths with /api/auth, reconciling server URLs, component names and security schemes."
+}

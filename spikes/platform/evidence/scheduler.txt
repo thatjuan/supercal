@@ -1,0 +1,48 @@
+{
+  "durationMs": 60124,
+  "processes": 3,
+  "workers": [
+    {
+      "exit": 86,
+      "stdout": "{\"crashed\":\"0f175634-4aa1-475b-843c-7076f3e5b37e\",\"ids\":[17,18,19,20,21,22,23,24]}\n",
+      "stderr": ""
+    },
+    {
+      "exit": 0,
+      "stdout": "{\"worker\":\"059febe6-f1fc-499f-bef6-ce737d131bfb\",\"handled\":9800}\n",
+      "stderr": ""
+    },
+    {
+      "exit": 0,
+      "stdout": "{\"worker\":\"955e5f00-8fad-4b7c-b8ad-9c7dee7f657e\",\"handled\":9760}\n",
+      "stderr": ""
+    }
+  ],
+  "summary": {
+    "claims": 19568,
+    "accepted": 19560,
+    "crashed_claims": 8,
+    "distinct_rows": 1000,
+    "max_generation": 36
+  },
+  "concurrentCompletedOverlaps": 0,
+  "crashedLeasesReclaimed": {
+    "count": 8,
+    "min_ms": 1202
+  },
+  "failedAttempts": {
+    "count": 645
+  },
+  "backoffJitterBounds": [
+    2000,
+    4000
+  ]
+}
+{
+  "pausedWorkerFault": {
+    "sameCalendarClaimedTwiceWhileOldWorkerAlive": true,
+    "staleCompletionAccepted": false,
+    "newCompletionAccepted": true
+  },
+  "recommendation": "Fencing protects DB commits; leases alone cannot prevent overlapping external work. Renew/cancel leases and make side effects idempotent."
+}

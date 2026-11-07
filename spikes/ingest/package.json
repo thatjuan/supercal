@@ -1,0 +1,23 @@
+{
+  "name": "supercal-spike-ingest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "radicale": "bun src/radicale-run.ts",
+    "bundle": "bun src/bundle.ts"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "0.5.1",
+    "fast-xml-parser": "5.12.0",
+    "ical.js": "2.2.1",
+    "ipaddr.js": "2.5.0",
+    "tsdav": "2.5.0",
+    "windows-iana": "5.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.4",
+    "typescript": "7.0.2"
+  }
+}

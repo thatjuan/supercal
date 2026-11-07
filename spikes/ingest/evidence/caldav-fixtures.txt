@@ -1,0 +1,11 @@
+bun test v1.3.4 (5eb2145b)
+
+test/caldav.test.ts:
+(pass) unsupported sync-collection falls back, absent ctag cannot suppress listing [2.88ms]
+(pass) auth failure is never converted to a full empty snapshot [0.07ms]
+(pass) multiget disappearance does not advance the cursor [0.34ms]
+
+ 3 pass
+ 0 fail
+ 4 expect() calls
+Ran 3 tests across 1 file. [14.00ms]

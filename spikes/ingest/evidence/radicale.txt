@@ -1,0 +1,51 @@
+$ bun src/radicale-run.ts
+discovery {
+  principal: "http://hare:55232/astrolabe/",
+  home: "http://hare:55232/astrolabe/",
+}
+calendar {
+  href: "http://hare:55232/astrolabe/spike-1794089092005/",
+  name: "Astrolabe Spike",
+  color: "#48aaffff",
+  ctag: "\"5c3e328bd173bc5673612b79ab0802ae0ecdd7eca0cde520683e0b0bc10fb342\"",
+  syncToken: "http://radicale.org/ns/sync/af56fe0647f4a0e74da21872f742ef0aeb3b7c2aebe1e9a1305adf7130672e96",
+  components: [ "VEVENT" ],
+  syncCollection: true,
+}
+CalDavAdapter normalized resources 2
+custom initial {
+  objects: 2,
+  seriesComponents: 2,
+  fullResync: true,
+}
+tsdav initial {
+  objects: 2,
+  name: "Astrolabe Spike",
+  color: "#48aaffff",
+  components: [ "VEVENT" ],
+  syncToken: "http://radicale.org/ns/sync/af56fe0647f4a0e74da21872f742ef0aeb3b7c2aebe1e9a1305adf7130672e96",
+}
+custom incremental {
+  upserts: 1,
+  deletes: [ "/astrolabe/spike-1794089092005/day.ics" ],
+  tokenAdvanced: true,
+}
+tsdav incremental {
+  updated: 1,
+  deleted: 1,
+}
+tsdav fallback {
+  updated: 1,
+  deleted: 1,
+}
+fallback {
+  changed: 1,
+  deleted: 1,
+  ctagUnchangedSkips: true,
+}
+invalid sync token {
+  fullResync: true,
+  objects: 1,
+}
+PASS Radicale CalDAV discovery/query/multiget/incremental/delete/fallback/token reset
+cleanup own calendar 200

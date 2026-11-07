@@ -1,0 +1,4 @@
+  [26ms]  minify  -3.12 MB (estimate)
+   [9ms]  bundle  1120 modules
+  [68ms] compile  build/platform-macos
+build/platform-macos: replacing existing signature

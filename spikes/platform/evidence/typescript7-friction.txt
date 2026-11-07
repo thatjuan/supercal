@@ -1,0 +1,12 @@
+ 6 | const JS_PROPERTY_INDEX_INVALID_CHARS_RE = /[^A-Za-z_$0-9]+/g;
+ 7 | const SPECIAL_CHARACTER_MAP = {
+ 8 |   "+": "Plus"
+ 9 |   // Add more mappings as needed
+10 | };
+11 | const BOOLEAN = ts.factory.createKeywordTypeNode(ts.SyntaxKind.BooleanKeyword);
+                        ^
+TypeError: undefined is not an object (evaluating 'ts.factory.createKeywordTypeNode')
+      at /Users/user/work/playground/supercal/spikes/platform/build/ts7-friction/node_modules/openapi-typescript/dist/lib/ts.mjs:11:20
+      at loadAndEvaluateModule (2:1)
+
+Bun v1.3.4 (macOS arm64)

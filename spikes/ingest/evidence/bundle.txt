@@ -1,0 +1,3 @@
+$ bun src/bundle.ts
+{"entry":"src/caldav.ts","minifiedBytes":71399,"gzipBytes":24138,"bun":"1.3.4"}
+{"entry":"src/tsdav-entry.ts","minifiedBytes":99048,"gzipBytes":31138,"bun":"1.3.4"}

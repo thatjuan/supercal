@@ -1,0 +1,39 @@
+bun test v1.3.4 (5eb2145b)
+
+test/ssrf.test.ts:
+(pass) blocks 127.0.0.1 [0.30ms]
+(pass) blocks 127.255.255.255
+(pass) blocks 0.0.0.0 [0.16ms]
+(pass) blocks 10.1.2.3
+(pass) blocks 172.16.0.1
+(pass) blocks 172.31.255.255
+(pass) blocks 192.168.0.1
+(pass) blocks 169.254.169.254
+(pass) blocks 100.64.0.1
+(pass) blocks 100.127.255.255
+(pass) blocks 224.0.0.1
+(pass) blocks 240.0.0.1
+(pass) blocks :: [0.16ms]
+(pass) blocks ::1
+(pass) blocks fc00::1 [0.09ms]
+(pass) blocks fd00::1
+(pass) blocks fe80::1
+(pass) blocks ff02::1
+(pass) blocks ::ffff:127.0.0.1 [0.09ms]
+(pass) blocks ::ffff:192.168.1.1 [0.07ms]
+(pass) blocks 64:ff9b::a00:1
+(pass) blocks 2001:db8::1 [0.03ms]
+(pass) public address examples [0.03ms]
+(pass) URL normalization blocks numeric IPv4 tricks [0.54ms]
+(pass) mixed public/private DNS answer rejected [0.18ms]
+(pass) LAN rejected without operator allowlist; exact origin+CIDR permits it and Host survives IP dial [1.98ms]
+(pass) pinning uses one DNS answer without resolving the name at connect time [0.52ms]
+(pass) redirect rechecks DNS and rejects metadata before connection [0.91ms]
+(pass) redirect count, deadline and decompressed body bounds [53.88ms]
+(pass) gzip + sloppy MIME + redirect + conditional GET preserve recurrence [4.84ms]
+(pass) ambient proxy is rejected before network access in Bun 1.3.4 [18.69ms]
+
+ 31 pass
+ 0 fail
+ 55 expect() calls
+Ran 31 tests across 1 file. [223.00ms]

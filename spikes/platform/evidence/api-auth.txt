@@ -1,0 +1,51 @@
+2026-11-07T22:00:47.197Z ERROR [Better Auth]: Failed to validate API key: APIError: Invalid API key.
+     status: "UNAUTHORIZED",
+       body: {
+  message: "Invalid API key.",
+  code: "INVALID_API_KEY",
+},
+    headers: {},
+ statusCode: 401,
+
+
+{
+  "signup": 200,
+  "createOrg": 200,
+  "session": {
+    "userId": "uVbaXQYzNRJigcEefV8yIQDpee8wKmdE",
+    "tenantId": "zJdLud1xqNorIaFO3qaAPxxcBeisv2zW",
+    "role": "owner",
+    "via": "session"
+  },
+  "apiKey": {
+    "userId": "uVbaXQYzNRJigcEefV8yIQDpee8wKmdE",
+    "tenantId": "zJdLud1xqNorIaFO3qaAPxxcBeisv2zW",
+    "role": "owner",
+    "via": "apiKey"
+  },
+  "invalidKey": 401,
+  "editableMetadataIgnored": true,
+  "revokedMembership": 401,
+  "resolvedRoles": [
+    "admin",
+    "member",
+    "owner"
+  ],
+  "malformedJson": 400,
+  "nativeOrgKey": {
+    "created": 200,
+    "verified": true,
+    "referenceIsTenant": true
+  },
+  "feedCreate": 201,
+  "patch": 200,
+  "pagination": [
+    1,
+    1
+  ],
+  "invalidUnion": {
+    "status": 400,
+    "contentType": "application/problem+json"
+  },
+  "scalar": 200
+}

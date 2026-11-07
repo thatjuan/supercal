@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794088431771,
+      "tag": "0000_luxuriant_sharon_ventura",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794088648307,
+      "tag": "0001_supreme_mac_gargan",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794088838383,
+      "tag": "0002_sour_captain_universe",
+      "breakpoints": true
+    }
+  ]
+}

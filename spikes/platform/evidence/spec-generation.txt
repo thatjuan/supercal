@@ -1,0 +1,4 @@
+$ bun run src/generate.ts
+{"management":"3.1.0","authVersion":"3.1.1","authPaths":72,"authFirstPath":"/sign-in/social","authServers":[{"url":"http://localhost:4316/api/auth"}]}
+✨ openapi-typescript 7.13.0
+🚀 openapi.json → src/generated.ts [16.3ms]

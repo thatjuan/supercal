@@ -1,0 +1,24 @@
+{
+  "bun": "1.3.4",
+  "subscriberCount": 6,
+  "tenants": 2,
+  "eventsPerSubscriber": [
+    10,
+    10,
+    10,
+    2,
+    2,
+    2
+  ],
+  "listenerConnections": 1,
+  "noDeliveryBeforeCommit": true,
+  "latencyDefinition": "time immediately before COMMIT round trip until SSE received in another process",
+  "latencyMs": {
+    "min": 1.11,
+    "p95": 2.64,
+    "max": 2.72
+  },
+  "crossTenantEvents": 0,
+  "idleTimeout": 0,
+  "heartbeatSeconds": 15
+}

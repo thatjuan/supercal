@@ -1,0 +1,10 @@
+import {strict as assert} from 'node:assert';
+import management from '../openapi.json';
+import authSpec from '../auth-openapi.json';
+const pub=management.components.schemas.Publication;
+assert.equal(pub.oneOf.length,2);assert.equal(pub.discriminator.propertyName,'kind');
+const error=management.paths['/api/v1/feeds'].get.responses['400'];
+assert.equal(error.content['application/problem+json'].schema.$ref,'#/components/schemas/Problem');
+const authNames=new Set(Object.keys(authSpec.components.schemas));
+const collisions=Object.keys(management.components.schemas).filter(name=>authNames.has(name));
+console.log(JSON.stringify({openapi:management.openapi,publication:pub,errorResponse:error,managementPaths:Object.keys(management.paths).length,auth:{version:authSpec.openapi,pathCount:Object.keys(authSpec.paths).length,firstPath:Object.keys(authSpec.paths)[0],servers:authSpec.servers,schemaNameCollisions:collisions,securitySchemes:authSpec.components.securitySchemes},recommendation:'Serve auth OpenAPI separately; merging requires prefixing paths with /api/auth, reconciling server URLs, component names and security schemes.'},null,2));

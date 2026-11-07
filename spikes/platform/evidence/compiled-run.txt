@@ -1,0 +1,43 @@
+{
+  "executable": "/Users/user/work/playground/supercal/spikes/platform/build/platform-macos",
+  "workingDirectory": "/var/folders/9g/pvjk_ls12872q9k9m8vk01300000gn/T",
+  "binaryBytes": 61011504,
+  "ready": [
+    {
+      "port": 4318,
+      "elapsedMs": 684,
+      "health": {
+        "ok": true,
+        "bun": "1.3.4"
+      }
+    },
+    {
+      "port": 4319,
+      "elapsedMs": 664,
+      "health": {
+        "ok": true,
+        "bun": "1.3.4"
+      }
+    }
+  ],
+  "bindingTableBefore": {
+    "probe_exists": false
+  },
+  "bindingTableAfter": {
+    "probe_exists": true
+  },
+  "compiledAuth": {
+    "signup": 200,
+    "organization": 200,
+    "protectedRoute": 200
+  },
+  "scalar": 200
+}
+{"migrations":"applied","embeddedFiles":3,"advisoryLock":true,"elapsedMs":74}
+platform ready Bun=1.3.4 port=4318
+
+
+{"migrations":"applied","embeddedFiles":3,"advisoryLock":true,"elapsedMs":56}
+platform ready Bun=1.3.4 port=4319
+
+

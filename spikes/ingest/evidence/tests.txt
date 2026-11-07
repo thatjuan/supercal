@@ -1,0 +1,81 @@
+bun test v1.3.4 (5eb2145b)
+
+test/mapping.test.ts:
+(pass) Google recurring master + moved override + sparse cancellation grouped by master, no UTC recurrence drift [6.02ms]
+(pass) Google all-day end remains exclusive; deleted master distinct from cancelled instance [0.55ms]
+(pass) ICS parser retains all-day DATE properties [0.34ms]
+(pass) Graph daily RRULE numbered range [0.09ms]
+(pass) Graph weekly RRULE numbered range [0.02ms]
+(pass) Graph absoluteMonthly RRULE numbered range
+(pass) Graph relativeMonthly RRULE numbered range
+(pass) Graph absoluteYearly RRULE numbered range
+(pass) Graph relativeYearly RRULE numbered range
+(pass) Graph endDate inclusive in local zone becomes UTC UNTIL after DST; all-day stays date [1.00ms]
+(pass) Graph Windows TZ, moved exception, cancellation and differing per-instance iCalUId use master UID [1.44ms]
+(pass) Graph all-day dates and Windows territory mapping; unknown custom zone fails closed [0.56ms]
+(pass) Graph all-day UTC response is converted back to its original positive-offset zone [0.60ms]
+(pass) relative monthly mapping expands to the second Thursday, including short months [2.18ms]
+
+test/ssrf.test.ts:
+(pass) blocks 127.0.0.1 [0.16ms]
+(pass) blocks 127.255.255.255
+(pass) blocks 0.0.0.0
+(pass) blocks 10.1.2.3
+(pass) blocks 172.16.0.1
+(pass) blocks 172.31.255.255
+(pass) blocks 192.168.0.1
+(pass) blocks 169.254.169.254
+(pass) blocks 100.64.0.1
+(pass) blocks 100.127.255.255
+(pass) blocks 224.0.0.1
+(pass) blocks 240.0.0.1 [0.09ms]
+(pass) blocks :: [0.17ms]
+(pass) blocks ::1 [0.03ms]
+(pass) blocks fc00::1 [0.02ms]
+(pass) blocks fd00::1 [0.01ms]
+(pass) blocks fe80::1
+(pass) blocks ff02::1 [0.01ms]
+(pass) blocks ::ffff:127.0.0.1 [0.07ms]
+(pass) blocks ::ffff:192.168.1.1 [0.02ms]
+(pass) blocks 64:ff9b::a00:1
+(pass) blocks 2001:db8::1 [0.02ms]
+(pass) public address examples [0.03ms]
+(pass) URL normalization blocks numeric IPv4 tricks [0.49ms]
+(pass) mixed public/private DNS answer rejected [0.21ms]
+(pass) LAN rejected without operator allowlist; exact origin+CIDR permits it and Host survives IP dial [2.00ms]
+(pass) pinning uses one DNS answer without resolving the name at connect time [0.41ms]
+(pass) redirect rechecks DNS and rejects metadata before connection [0.59ms]
+(pass) redirect count, deadline and decompressed body bounds [54.55ms]
+(pass) gzip + sloppy MIME + redirect + conditional GET preserve recurrence [2.10ms]
+(pass) ambient proxy is rejected before network access in Bun 1.3.4 [17.53ms]
+
+test/adapters.test.ts:
+(pass) ICS adapter implements one calendar and complete resource upserts [1.97ms]
+(pass) CalDAV adapter exposes poll discovery and has no push side effects [0.05ms]
+
+test/caldav.test.ts:
+(pass) unsupported sync-collection falls back, absent ctag cannot suppress listing [1.98ms]
+(pass) auth failure is never converted to a full empty snapshot
+(pass) multiget disappearance does not advance the cursor [0.38ms]
+(pass) omitted multiget result does not advance the cursor
+
+test/google-sync.test.ts:
+(pass) Google 410 resets; all pages drained, exceptions and tombstones retained, terminal token only [0.27ms]
+(pass) Google later-page failure never exposes a partial cursor
+
+test/tls.test.ts:
+native calendar.test custom check false Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:59600/". For more information, pass `verbose: true` in the second argument to fetch()
+native calendar.test custom check true 200 calendar.test:59600
+native wrong.test custom check false Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:59600/". For more information, pass `verbose: true` in the second argument to fetch()
+native wrong.test custom check true Error [ERR_TLS_CERT_ALTNAME_INVALID]: Hostname/IP does not match certificate's altnames: Host: wrong.test. is not in the cert's altnames: DNS:calendar.test
+guarded Bun.fetch original identity + pinned IP: PASS
+guarded Bun.fetch wrong hostname: REJECTED
+fresh-process untrusted certificate: REJECTED
+Bun.fetch tls.serverName outcome: Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:59600/". For more information, pass `verbose: true` in the second argument to fetch()
+Bun.fetch wrong serverName outcome: Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:59600/". For more information, pass `verbose: true` in the second argument to fetch()
+(pass) Bun 1.3.4 IP pinning: native fetch versus node:https, certificate hostname validated [152.22ms]
+
+ 54 pass
+ 0 fail
+ 117 expect() calls
+Ran 54 tests across 6 files. [417.00ms]

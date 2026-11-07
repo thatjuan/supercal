@@ -1,0 +1,18 @@
+bun test v1.3.4 (5eb2145b)
+
+test/tls.test.ts:
+native calendar.test custom check false Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:56350/". For more information, pass `verbose: true` in the second argument to fetch()
+native calendar.test custom check true 200 calendar.test:56350
+native wrong.test custom check false Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:56350/". For more information, pass `verbose: true` in the second argument to fetch()
+native wrong.test custom check true Error [ERR_TLS_CERT_ALTNAME_INVALID]: Hostname/IP does not match certificate's altnames: Host: wrong.test. is not in the cert's altnames: DNS:calendar.test
+node:https all-aware lookup 1 Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:56350/". For more information, pass `verbose: true` in the second argument to fetch()
+error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:56350/". For more information, pass `verbose: true` in the second argument to fetch()
+  path: "https://127.0.0.1:56350/",
+ errno: 0,
+  code: "ERR_TLS_CERT_ALTNAME_INVALID"
+
+(fail) Bun 1.3.4 IP pinning: native fetch versus node:https, certificate hostname validated [55.91ms]
+
+ 0 pass
+ 1 fail
+Ran 1 test across 1 file. [74.00ms]

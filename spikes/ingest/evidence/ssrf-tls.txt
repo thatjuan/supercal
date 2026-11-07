@@ -1,0 +1,63 @@
+bun test v1.3.4 (5eb2145b)
+
+test/ssrf.test.ts:
+(pass) blocks 127.0.0.1 [0.38ms]
+(pass) blocks 127.255.255.255 [0.01ms]
+(pass) blocks 0.0.0.0
+(pass) blocks 10.1.2.3
+(pass) blocks 172.16.0.1
+(pass) blocks 172.31.255.255
+(pass) blocks 192.168.0.1
+(pass) blocks 169.254.169.254
+(pass) blocks 100.64.0.1
+(pass) blocks 100.127.255.255
+(pass) blocks 224.0.0.1
+(pass) blocks 240.0.0.1
+(pass) blocks :: [0.24ms]
+(pass) blocks ::1 [0.03ms]
+(pass) blocks fc00::1 [0.02ms]
+(pass) blocks fd00::1 [0.02ms]
+(pass) blocks fe80::1 [0.03ms]
+(pass) blocks ff02::1
+(pass) blocks ::ffff:127.0.0.1 [0.08ms]
+(pass) blocks ::ffff:192.168.1.1 [0.03ms]
+(pass) blocks 64:ff9b::a00:1
+(pass) blocks 2001:db8::1 [0.01ms]
+(pass) public address examples [0.03ms]
+(pass) URL normalization blocks numeric IPv4 tricks [0.60ms]
+(pass) mixed public/private DNS answer rejected [0.20ms]
+(pass) LAN rejected without operator allowlist; exact origin+CIDR permits it and Host survives IP dial [2.04ms]
+(pass) pinning uses one DNS answer without resolving the name at connect time [0.44ms]
+(pass) redirect rechecks DNS and rejects metadata before connection [0.81ms]
+(pass) redirect count, deadline and decompressed body bounds [54.33ms]
+(pass) gzip + sloppy MIME + redirect + conditional GET preserve recurrence [4.34ms]
+
+test/tls.test.ts:
+native calendar.test custom check false Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:57526/". For more information, pass `verbose: true` in the second argument to fetch()
+native calendar.test custom check true 200 calendar.test:57526
+native wrong.test custom check false Error: ERR_TLS_CERT_ALTNAME_INVALID fetching "https://127.0.0.1:57526/". For more information, pass `verbose: true` in the second argument to fetch()
+native wrong.test custom check true Error [ERR_TLS_CERT_ALTNAME_INVALID]: Hostname/IP does not match certificate's altnames: Host: wrong.test. is not in the cert's altnames: DNS:calendar.test
+guarded Bun.fetch original identity + pinned IP: PASS
+guarded Bun.fetch wrong hostname: REJECTED
+26 |     const opts = { ca:cert, allow:[{origin, cidrs:['127.0.0.1/32']}], resolve: async () => [{ address:'127.0.0.1', family:4 }] };
+27 |     const good = await guardedRequest(origin, {}, opts); expect(good.text).toBe(`calendar.test:${server.port}`);
+28 |     console.log('guarded Bun.fetch original identity + pinned IP: PASS');
+29 |     await expect(guardedRequest(bad, {}, { ...opts, allow:[{origin:bad, cidrs:['127.0.0.1/32']}] })).rejects.toThrow();
+30 |     console.log('guarded Bun.fetch wrong hostname: REJECTED');
+31 |     await expect(guardedRequest(origin, {}, { ...opts, ca:undefined })).rejects.toThrow();
+                                                                                     ^
+error: 
+
+Expected promise that rejects
+Received promise that resolved: Promise { <resolved> }
+
+      at <anonymous> (/Users/user/work/playground/supercal/spikes/ingest/test/tls.test.ts:31:81)
+(fail) Bun 1.3.4 IP pinning: native fetch versus node:https, certificate hostname validated [60.32ms]
+
+1 tests failed:
+(fail) Bun 1.3.4 IP pinning: native fetch versus node:https, certificate hostname validated [60.32ms]
+
+ 30 pass
+ 1 fail
+ 56 expect() calls
+Ran 31 tests across 2 files. [285.00ms]

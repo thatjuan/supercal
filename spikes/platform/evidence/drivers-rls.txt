@@ -1,0 +1,36 @@
+{
+  "bun": "1.3.4",
+  "postgres": {
+    "current_user": "supercal",
+    "version": "PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "rolsuper": true,
+    "rolcreaterole": true
+  },
+  "postgresJs": {
+    "transactionCommit": true,
+    "rollback": true,
+    "listenNotify": true,
+    "notifyMs": 1
+  },
+  "bunSql": {
+    "transactionCommit": true,
+    "rollback": true,
+    "notifyViaSql": true,
+    "rawListenAccepted": true,
+    "listenAPI": "undefined"
+  },
+  "rls": {
+    "pgForgotWhere": [
+      "A"
+    ],
+    "bunForgotWhere": [
+      "B"
+    ],
+    "unsetTenantRows": 0,
+    "crossTenantInsertBlocked": true,
+    "blockedSqlState": "42501",
+    "role": "supercal_platform_app NOSUPERUSER NOBYPASSRLS",
+    "tableOwner": "supercal (test setup only)",
+    "forceRls": true
+  }
+}
