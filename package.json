@@ -2,7 +2,10 @@
   "name": "supercal",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "packageManager": "bun@1.3.4",
   "engines": {
     "bun": "1.3.4"
@@ -12,8 +15,11 @@
     "typecheck": "bun run --filter './apps/*' --filter './packages/*' typecheck",
     "test": "bun test ./apps ./packages",
     "test:egress": "bun test ./packages/providers/test/transport",
-    "check": "bun run typecheck && bun run test",
-    "migrate": "bun packages/db/scripts/migrate.ts"
+    "check": "bun run typecheck && bun run test && bun run check:api-client",
+    "migrate": "bun packages/db/scripts/migrate.ts",
+    "api:spec": "bun apps/daemon/scripts/api-spec.ts",
+    "api:client": "bun run --cwd packages/api-client generate",
+    "check:api-client": "bun run api:spec && bun run api:client && git diff --exit-code -- packages/api-client/openapi.json packages/api-client/src/schema.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.4",
