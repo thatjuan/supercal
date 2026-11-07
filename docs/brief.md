@@ -1,5 +1,7 @@
 # Supercal: architecture brief (pre-spike)
 
+> Superseded by `docs/architecture.md`. Kept as the record of what the spikes set out to test.
+
 This is the working hypothesis the derisking spikes test. Anything marked **H** is a hypothesis a spike must confirm or overturn. The final architecture lives in `docs/architecture.md` once the spikes report.
 
 ## Team
