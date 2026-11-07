@@ -8,7 +8,7 @@ Status: decided, 2026-11-07. Supersedes the hypotheses in `docs/brief.md`. Produ
                     ┌──────────────────────── supercal container (Bun, one binary) ────────────────────────┐
  providers          │                                                                                     │      clients
  ─────────          │   worker role                     postgres                     api / dav roles      │      ───────
- Google API  ◄──────┤   scheduler ─► adapters ─► normaliser ─► recordChange ─► resource + change log ────►│ CalDAV ─► Apple, Thunderbird, DAVx5…
+ Google API  ◄──────┤   scheduler ─► adapters ─► normaliser ─► recordChanges ► resource + change log ────►│ CalDAV ─► Apple, Thunderbird, DAVx5…
  Graph API   ◄──────┤        ▲            ▲                         │ NOTIFY              │               │ ICS    ─► Google, Outlook, anything
  CalDAV      ◄──────┤   push hooks   guarded transport               ▼                     ▼               │ API    ─► dashboard, automation
  ICS URLs    ◄──────┤   (/hooks/*)   (SSRF, pinned TLS)    change log ─► sink runner ─► Google sink cal │ SSE    ─► dashboard live view
@@ -53,7 +53,7 @@ Vocabulary from `docs/brief.md`: tenant, account, source calendar, feed, publica
 
 - Tenant = Better Auth `organization`. `tenant_id` is **text** (Better Auth IDs are opaque strings) *(platform)*.
 - Our own entities use prefixed TypeIDs as text: `acc_…`, `cal_…`, `feed_…`, `pub_…`, `snk_…`. Exposed as-is in the API. Branded TS types in `packages/db` prevent mixing.
-- Three identities of an event are distinct and never conflated *(ingest)*: provider resource id (our key within a source calendar), iCalendar UID (used for merging and output), and recurrence identity (RECURRENCE-ID / original start).
+- Three identities of an event are distinct and never conflated *(ingest)*: provider object id (`source_object` key within a source calendar), iCalendar UID (used for merging and output), and recurrence identity (RECURRENCE-ID / original start).
 
 ## 4. Data model (Postgres)
 
@@ -307,6 +307,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 | `SUPERCAL_ROLES` | no | `api,dav,worker` (default all). |
 | `SUPERCAL_MIGRATE` | no | `auto` (default; advisory-locked at boot) or `off`. |
 | `SUPERCAL_SIGNUP` | no | `open`, `invite` (default), `disabled`. |
+| `SUPERCAL_INSECURE_DEV` | dev | `1` allows an http `SUPERCAL_PUBLIC_URL` and relaxes secure-cookie flags. Never in production. |
 | `GOOGLE_CLIENT_ID/SECRET` | no | Enables Google accounts and sinks. |
 | `MICROSOFT_CLIENT_ID/SECRET` | no | Enables Microsoft accounts. |
 | `SUPERCAL_EGRESS_ALLOW` | no | Operator LAN allowlist: `origin=cidr,…`. |
