@@ -14,7 +14,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 
 ### Accounts and calendars
 
-- Connect accounts: Google (OAuth), Microsoft 365 / Outlook.com (OAuth), iCloud (app-specific password), any CalDAV server (URL + credentials, with autodiscovery from an email address or domain via RFC 6764), any ICS/webcal URL.
+- Connect accounts: Google (OAuth), Microsoft 365 / Outlook.com (OAuth), iCloud (app-specific password), any CalDAV server (server URL + credentials, discovered via `/.well-known/caldav`), any ICS/webcal URL.
 - Supercal discovers the account's calendars and keeps discovering: new calendars appear automatically, removed ones are retired.
 - Per account: sync status, last success, last error, next run, and whether push is active or Supercal fell back to polling.
 - Reconnect flow when credentials expire or are revoked; the account stays, its data stays visible but stale, and the dashboard says why.
