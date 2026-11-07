@@ -69,18 +69,21 @@ async function fromSession(auth: Auth, headers: Headers): Promise<Principal> {
 const BEARER = /^Bearer\s+(\S+)$/i;
 
 /**
- * Middleware for `/api/v1/*`. `Authorization: Bearer <key>` wins and never falls back to the cookie,
- * so a bad key is a 401 even beside a valid session.
+ * Resolves the principal behind request `headers`, throwing a 401/403 problem. `Authorization:
+ * Bearer <key>` wins and never falls back to the cookie, so a bad key is a 401 even beside a valid
+ * session. Long-lived streams call it again to revalidate.
  */
+export async function resolvePrincipal(auth: Auth, headers: Headers): Promise<Principal> {
+  const authorization = headers.get('authorization');
+  if (authorization === null) return fromSession(auth, headers);
+  const key = BEARER.exec(authorization)?.[1];
+  if (!key) throw new Unauthorized('Expected Authorization: Bearer <api key>');
+  return fromApiKey(auth, key);
+}
+
+/** Middleware for `/api/v1/*`: sets `c.var.principal` from `resolvePrincipal`. */
 export const requirePrincipal = (auth: Auth) =>
   createMiddleware<ApiEnv>(async (c, next) => {
-    const authorization = c.req.header('authorization');
-    if (authorization !== undefined) {
-      const key = BEARER.exec(authorization)?.[1];
-      if (!key) throw new Unauthorized('Expected Authorization: Bearer <api key>');
-      c.set('principal', await fromApiKey(auth, key));
-    } else {
-      c.set('principal', await fromSession(auth, c.req.raw.headers));
-    }
+    c.set('principal', await resolvePrincipal(auth, c.req.raw.headers));
     await next();
   });

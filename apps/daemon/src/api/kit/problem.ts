@@ -29,7 +29,9 @@ const PROBLEMS = {
   409: { slug: 'conflict', title: 'Conflict' },
   412: { slug: 'precondition-failed', title: 'Precondition failed' },
   428: { slug: 'precondition-required', title: 'Precondition required' },
+  429: { slug: 'too-many-requests', title: 'Too many requests' },
   500: { slug: 'internal', title: 'Internal error' },
+  503: { slug: 'unavailable', title: 'Service unavailable' },
 } as const;
 
 export type ProblemStatus = keyof typeof PROBLEMS;
@@ -95,6 +97,12 @@ export class PreconditionFailed extends ProblemError {
 export class PreconditionRequired extends ProblemError {
   constructor(detail = 'This request requires an If-Match header') {
     super(428, detail);
+  }
+}
+
+export class TooManyRequests extends ProblemError {
+  constructor(detail?: string) {
+    super(429, detail);
   }
 }
 

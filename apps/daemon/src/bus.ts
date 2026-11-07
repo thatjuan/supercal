@@ -6,9 +6,24 @@
  *   const bus = await startBus(config.DATABASE_URL, log);
  *   bus.on('change', ({ tenantId, maxSeq }) => …);
  *   bus.on('reconnected', () => catchUp());
+ *
+ * Publishers: `recordChanges` (change), `wake`, `notifyEvent` (account status and feed changes for
+ * the live stream) and `publishAuthRevoked` (sign-out, membership removal, API-key deletion).
  */
-import { CHANGES_CHANNEL, parseId, type ControlTx, type FeedId, type SyncTargetId, type TenantId, type TenantTx } from '@supercal/db';
-import { sql as drizzleSql } from 'drizzle-orm';
+import {
+  calendarAccount,
+  CHANGES_CHANNEL,
+  connectionStatus,
+  feed,
+  parseId,
+  type ControlTx,
+  type FeedId,
+  type IdPrefix,
+  type SyncTargetId,
+  type TenantId,
+  type TenantTx,
+} from '@supercal/db';
+import { eq, sql as drizzleSql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { z } from 'zod';
 import type { Logger } from './log.ts';
@@ -17,13 +32,41 @@ import type { Logger } from './log.ts';
 export const WAKE_CHANNEL = 'supercal_wake';
 /** Rotated feed credentials, payload `{"f":"feed_…"}`. Sent by `notifyFeedCredentialsRotated`. */
 export const FEED_CREDENTIALS_CHANNEL = 'supercal_feed_credentials_rotated';
+/** Live-stream events, payload `{t, type, id, u, …}` where `u` is the owning user. Sent by `notifyEvent`. */
+export const EVENTS_CHANNEL = 'supercal_events';
+/** A user's authorization was revoked, payload `{"u":"<userId>"}`. Sent by `publishAuthRevoked`. */
+export const AUTH_REVOKED_CHANNEL = 'supercal_auth_revoked';
 /** Each bus NOTIFYs itself here to prove its LISTEN connection still receives. */
 const PING_CHANNEL = 'supercal_bus_ping';
 /** NOTIFY rejects payloads of 8000 bytes or more; stay well below. */
 const WAKE_PAYLOAD_BYTES = 7000;
+/** Status details are truncated to this many characters, keeping event payloads small. */
+const DETAIL_CHARS = 1000;
 
-const feedId = z.string().transform((raw, ctx) => parseId('feed', raw) ?? (ctx.addIssue({ code: 'custom', message: 'not a feed id' }), z.NEVER));
-const targetId = z.string().transform((raw, ctx) => parseId('tgt', raw) ?? (ctx.addIssue({ code: 'custom', message: 'not a sync target id' }), z.NEVER));
+const typeId = <P extends IdPrefix>(prefix: P) =>
+  z.string().transform((raw, ctx) => parseId(prefix, raw) ?? (ctx.addIssue({ code: 'custom', message: `not a ${prefix} id` }), z.NEVER));
+
+const eventHeader = { t: z.string().min(1), u: z.string().nullable() };
+const eventPayload = z
+  .discriminatedUnion('type', [
+    z.object({
+      ...eventHeader,
+      type: z.literal('account.status'),
+      id: typeId('acc'),
+      status: z.enum(connectionStatus.enumValues),
+      detail: z.string().optional(),
+    }),
+    z.object({ ...eventHeader, type: z.literal('feed.changed'), id: typeId('feed') }),
+  ])
+  .transform(({ t, u, ...e }) => ({
+    tenantId: t as TenantId,
+    /** Who may see it besides tenant admins; null when the account or feed is already gone. */
+    ownerUserId: u,
+    event:
+      e.type === 'account.status'
+        ? { type: e.type, accountId: e.id, status: e.status, ...(e.detail !== undefined && { detail: e.detail }) }
+        : { type: e.type, feedId: e.id },
+  }));
 
 /**
  * Every channel the bus listens on: the event it emits and the schema that validates (and shapes)
@@ -38,11 +81,16 @@ const CHANNELS = {
   },
   wake: {
     channel: WAKE_CHANNEL,
-    payload: z.object({ ids: z.array(targetId) }).transform(({ ids }) => ({ targetIds: ids })),
+    payload: z.object({ ids: z.array(typeId('tgt')) }).transform(({ ids }) => ({ targetIds: ids })),
+  },
+  event: { channel: EVENTS_CHANNEL, payload: eventPayload },
+  'auth-revoked': {
+    channel: AUTH_REVOKED_CHANNEL,
+    payload: z.object({ u: z.string().min(1) }).transform(({ u }) => ({ userId: u })),
   },
   'feed-credentials-rotated': {
     channel: FEED_CREDENTIALS_CHANNEL,
-    payload: z.object({ f: feedId }).transform(({ f }) => ({ feedId: f })),
+    payload: z.object({ f: typeId('feed') }).transform(({ f }) => ({ feedId: f })),
   },
 } as const satisfies Record<string, { channel: string; payload: z.ZodType }>;
 
@@ -53,6 +101,9 @@ export type BusEvents = { [E in ChannelEvent]: z.output<(typeof CHANNELS)[E]['pa
   reconnected: undefined;
 };
 
+/** An event `notifyEvent` publishes to a tenant's live streams. */
+export type NotifiedEvent = BusEvents['event']['event'];
+
 export type Bus = {
   /** Subscribes to an event; returns the unsubscribe function. */
   on<E extends keyof BusEvents>(event: E, listener: (payload: BusEvents[E]) => void): () => void;
@@ -60,6 +111,9 @@ export type Bus = {
   readonly connected: boolean;
   close(): Promise<void>;
 };
+
+/** A bus that never emits, for building the API without a database (OpenAPI generation, tests). */
+export const idleBus: Bus = { on: () => () => {}, connected: false, close: async () => {} };
 
 const parseJson = (raw: string): unknown => {
   try {
@@ -79,6 +133,8 @@ export async function startBus(url: string, log: Logger, { pingMs = 5_000 } = {}
     change: new Set(),
     wake: new Set(),
     'feed-credentials-rotated': new Set(),
+    event: new Set(),
+    'auth-revoked': new Set(),
     reconnected: new Set(),
   };
   const emit = <E extends keyof BusEvents>(event: E, payload: BusEvents[E]) => {
@@ -176,4 +232,31 @@ export async function wake(tx: TenantTx | ControlTx, targetIds: readonly SyncTar
  */
 export async function notifyFeedCredentialsRotated(tx: TenantTx, feedId: FeedId): Promise<void> {
   await tx.execute(drizzleSql`select pg_notify(${FEED_CREDENTIALS_CHANNEL}, ${JSON.stringify({ f: feedId })})`);
+}
+
+/**
+ * NOTIFYs the tenant's live streams of `event`, on commit of `tx`. The payload names the account's
+ * or feed's owner, so streams can show it to that user and tenant admins only. One call each in the
+ * sync engine (account status changes) and the feeds service (publication or credential mutations):
+ *
+ *   await notifyEvent(tx, tenantId, { type: 'feed.changed', feedId });
+ */
+export async function notifyEvent(tx: TenantTx, tenantId: TenantId, event: NotifiedEvent): Promise<void> {
+  const [wire, owner] =
+    event.type === 'account.status'
+      ? [
+          { t: tenantId, type: event.type, id: event.accountId, status: event.status, ...(event.detail !== undefined && { detail: event.detail.slice(0, DETAIL_CHARS) }) },
+          tx.select({ u: calendarAccount.ownerUserId }).from(calendarAccount).where(eq(calendarAccount.id, event.accountId)),
+        ]
+      : [{ t: tenantId, type: event.type, id: event.feedId }, tx.select({ u: feed.ownerUserId }).from(feed).where(eq(feed.id, event.feedId))];
+  await tx.execute(drizzleSql`select pg_notify(${EVENTS_CHANNEL}, (${JSON.stringify(wire)}::jsonb || jsonb_build_object('u', (${owner})))::text)`);
+}
+
+/**
+ * NOTIFYs every replica to close `userId`'s live streams at once (on commit, inside a transaction).
+ * Sent on sign-out, membership removal and API-key deletion; other changes are caught by the
+ * streams' periodic revalidation.
+ */
+export async function publishAuthRevoked(db: Pick<ControlTx, 'execute'>, userId: string): Promise<void> {
+  await db.execute(drizzleSql`select pg_notify(${AUTH_REVOKED_CHANNEL}, ${JSON.stringify({ u: userId })})`);
 }

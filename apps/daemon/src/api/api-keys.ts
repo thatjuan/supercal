@@ -8,6 +8,7 @@ import { apikey, apiKeyTenant, withControl, withTenant } from '@supercal/db';
 import { and, desc, eq } from 'drizzle-orm';
 import { canManageOwned, hasRole } from '../auth/policy.ts';
 import { audit, createApiApp, Forbidden, NotFound, ProblemError, problemResponses } from './kit/index.ts';
+import { publishAuthRevoked } from '../bus.ts';
 import { createLogger } from '../log.ts';
 
 const log = createLogger({ component: 'api-keys' });
@@ -128,6 +129,7 @@ export const apiKeyRoutes = createApiApp()
       if (!canManageOwned(principal, binding.userId)) throw new Forbidden('You can only delete your own keys');
       await tx.delete(apiKeyTenant).where(eq(apiKeyTenant.apiKeyId, id));
       await audit(tx, principal, 'api_key.delete', { type: 'api_key', id });
+      await publishAuthRevoked(tx, binding.userId);
     });
     // The unbound key is already unusable; this removes the secret itself.
     await destroyKey(id);

@@ -228,6 +228,23 @@ export interface paths {
         patch: operations["updatePublication"];
         trace?: never;
     };
+    "/api/v1/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Server-sent events for the current tenant. Resume with `Last-Event-ID` (or `?lastEventId=`); a `: ping` comment is sent every 15 s. */
+        get: operations["getStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -514,6 +531,47 @@ export interface components {
                 calendarId: string;
                 priority?: number;
             }[];
+        };
+        /** @description One server-sent event: `event:` is `type` and `data:` is this JSON. Only `resources.changed` sets `id:`. */
+        StreamEvent: components["schemas"]["ResourcesChangedEvent"] | components["schemas"]["AccountStatusEvent"] | components["schemas"]["FeedChangedEvent"] | components["schemas"]["ResetEvent"];
+        /** @description Events changed in these source calendars, up to `seq` (also the SSE `id:`) */
+        ResourcesChangedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "resources.changed";
+            seq: string;
+            calendarIds: string[];
+        };
+        /** @description A calendar account’s connection or sync status changed */
+        AccountStatusEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "account.status";
+            accountId: string;
+            /** @enum {string} */
+            status: "active" | "reauth_required" | "error" | "disabled";
+            detail?: string;
+        };
+        /** @description A feed’s publications or credentials changed */
+        FeedChangedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "feed.changed";
+            feedId: string;
+        };
+        /** @description Changes cannot be replayed from `Last-Event-ID`: refetch everything */
+        ResetEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "reset";
         };
     };
     responses: never;
@@ -2032,6 +2090,85 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getStream: {
+        parameters: {
+            query?: {
+                /** @description For clients that cannot set `Last-Event-ID`; the header wins */
+                lastEventId?: string;
+            };
+            header?: {
+                "last-event-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An endless `text/event-stream` of `StreamEvent`s */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["StreamEvent"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -30,6 +30,7 @@ import { betterAuth } from 'better-auth/minimal';
 import { admin, openAPI, organization } from 'better-auth/plugins';
 import { and, asc, count, eq, gt, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { publishAuthRevoked } from '../bus.ts';
 import type { Config } from '../config.ts';
 
 export type AuthConfig = Pick<
@@ -155,11 +156,14 @@ export function createAuth(config: AuthConfig, db: ControlDatabase) {
             return first ? { data: { ...row, activeOrganizationId: first.id } } : undefined;
           },
         },
+        // Sign-out, session revocation and bans: close the user's live streams now, not at revalidation.
+        delete: { after: (row) => publishAuthRevoked(db, row.userId) },
       },
     },
     plugins: [
       organization({
         allowUserToCreateOrganization: (user) => config.SUPERCAL_SIGNUP === 'open' || ('role' in user && user.role === OPERATOR_ROLE),
+        organizationHooks: { afterRemoveMember: ({ user }) => publishAuthRevoked(db, user.id) },
       }),
       admin({ adminRoles: [OPERATOR_ROLE] }),
       apiKey({ defaultPrefix: 'sc_', enableMetadata: true, rateLimit: { enabled: false } }),
