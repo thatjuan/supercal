@@ -12,7 +12,7 @@ describe.skipIf(!testDatabaseUrl)('migrate', () => {
   test('two concurrent runs on a fresh database succeed and only one applies', async () => {
     const { url, drop } = await scratchDatabase('migrate');
     const runs = await Promise.all([migrate(url), migrate(url)]);
-    expect(runs.map((run) => run.applied).sort()).toEqual([0, 2]);
+    expect(runs.map((run) => run.applied).sort()).toEqual([0, 3]);
 
     const sql = postgres(url, { max: 1 });
     try {

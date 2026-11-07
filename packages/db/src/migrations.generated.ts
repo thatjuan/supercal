@@ -3,6 +3,7 @@
 import journal from '../migrations/meta/_journal.json' with { type: 'json' };
 import m0 from '../migrations/0000_init.sql' with { type: 'text' };
 import m1 from '../migrations/0001_roles_rls.sql' with { type: 'text' };
+import m2 from '../migrations/0002_change_log.sql' with { type: 'text' };
 
 /** Every migration file, by name, plus the drizzle-kit journal. */
-export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1 } };
+export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2 } };

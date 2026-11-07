@@ -16,20 +16,20 @@ export const idColumn = <P extends IdPrefix>(prefix: P) =>
     .primaryKey()
     .$defaultFn(() => newId(prefix));
 
-/** A time span; `end: null` is unbounded (an endless RRULE). Bounds are `[start, end)`. */
-export type Span = { start: Date; end: Date | null };
+/** A time span; `end: 'infinity'` is unbounded (an endless RRULE), as in `@supercal/core`. Bounds are `[start, end)`. */
+export type Span = { start: Date; end: Date | 'infinity' };
 
 const RANGE = /^\[(?:"([^"]+)"|([^,]+)),(?:"([^"]+)"|([^)]+))\)$/;
 
 /** Postgres `tstzrange`, which Drizzle has no native column for. */
 export const tstzrange = customType<{ data: Span; driverData: string }>({
   dataType: () => 'tstzrange',
-  toDriver: ({ start, end }) => `[${start.toISOString()},${end?.toISOString() ?? 'infinity'})`,
+  toDriver: ({ start, end }) => `[${start.toISOString()},${end === 'infinity' ? end : end.toISOString()})`,
   fromDriver: (value) => {
     const match = RANGE.exec(value);
     const start = match?.[1] ?? match?.[2];
     const end = match?.[3] ?? match?.[4];
     if (!start || !end) throw new Error(`unsupported tstzrange ${value}`);
-    return { start: new Date(start), end: end === 'infinity' ? null : new Date(end) };
+    return { start: new Date(start), end: end === 'infinity' ? end : new Date(end) };
   },
 });

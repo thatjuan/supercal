@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, index, integer, jsonb, pgEnum, pgSequence, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
+import type { EventResource } from '@supercal/core';
 import type { SourceCalendarId } from '../ids.ts';
 import { sourceCalendar } from './accounts.ts';
 import { tenantId, tstzrange } from './columns.ts';
@@ -47,7 +48,7 @@ export const sourceObject = pgTable(
 
 /**
  * Derived layer and change log: one iCalendar object per UID per source calendar, with the `seq`
- * of its last change. Deletions are tombstones (`deleted`). Written only by `recordChanges`.
+ * of its last change. Deletions are tombstones (`deleted`, `data` null). Written only by `recordChanges`.
  */
 export const resource = pgTable(
   'resource',
@@ -55,7 +56,7 @@ export const resource = pgTable(
     tenantId: tenantId(),
     sourceCalendarId: sourceCalendarId(),
     uid: text('uid').notNull(),
-    data: jsonb('data').notNull(),
+    data: jsonb('data').$type<EventResource>(),
     revision: text('revision').notNull(),
     sequence: integer('sequence').notNull().default(0),
     lastModified: timestamp('last_modified', { withTimezone: true }),
@@ -64,7 +65,7 @@ export const resource = pgTable(
     completeness: completeness('completeness').notNull().default('complete'),
     completenessReason: text('completeness_reason'),
     deleted: boolean('deleted').notNull().default(false),
-    seq: bigint('seq', { mode: 'number' }).notNull(),
+    seq: bigint('seq', { mode: 'bigint' }).notNull(),
     changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
