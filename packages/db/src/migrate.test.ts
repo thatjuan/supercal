@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import postgres from 'postgres';
 import { source } from '../scripts/embed-migrations.ts';
 import { migrate } from './migrate.ts';
+import { migrations } from './migrations.generated.ts';
 import { scratchDatabase, testDatabaseUrl } from './test-db.ts';
 
 test('the embedded migration manifest matches the migrations folder', async () => {
@@ -12,7 +13,7 @@ describe.skipIf(!testDatabaseUrl)('migrate', () => {
   test('two concurrent runs on a fresh database succeed and only one applies', async () => {
     const { url, drop } = await scratchDatabase('migrate');
     const runs = await Promise.all([migrate(url), migrate(url)]);
-    expect(runs.map((run) => run.applied).sort()).toEqual([0, 4]);
+    expect(runs.map((run) => run.applied).sort()).toEqual([0, migrations.journal.entries.length]);
 
     const sql = postgres(url, { max: 1 });
     try {

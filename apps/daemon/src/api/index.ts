@@ -4,14 +4,18 @@
  * `c.var.principal`: `requirePrincipal` in production, an injected one in some tests.
  */
 import { apiReference } from '@scalar/hono-api-reference';
+import type { SecretBox } from '@supercal/db';
 import type { MiddlewareHandler } from 'hono';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Auth } from '../auth/auth.ts';
 import { requirePrincipal, type ApiEnv } from '../auth/principal.ts';
+import { createFeedService } from '../feeds/service.ts';
 import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
+import { feedRoutes } from './feeds.ts';
 import { createApiApp } from './kit/index.ts';
 import { meRoutes } from './me.ts';
+import { publicationRoutes } from './publications.ts';
 import { tenantRoutes } from './tenants.ts';
 
 /** Settings for `getOpenAPI31Document` / `doc31`, shared by the served document and `bun run api:spec`. */
@@ -25,8 +29,12 @@ export const openApiConfig = {
   security: [{ session: [] }, { apiKey: [] }],
 };
 
+/** What the API runs on: Better Auth, and the secret box for values stored encrypted. */
+export type ApiDeps = { auth: Auth; secrets: SecretBox };
+
 /** Builds the API. Route groups are mounted after the docs, so the docs are public. */
-export function createApi(auth: Auth, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
+export function createApi({ auth, secrets }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
+  const feeds = createFeedService(secrets);
   const app = createApiApp();
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
   app.openAPIRegistry.registerComponent('securitySchemes', 'session', { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' });
@@ -39,8 +47,15 @@ export function createApi(auth: Auth, authenticate: MiddlewareHandler<ApiEnv> = 
   app.get('/api/docs', apiReference({ url: '/api/v1/openapi.json', pageTitle: 'Supercal API' }));
   app.use('/api/v1/*', async (c, next) => {
     c.set('auth', auth);
+    c.set('feeds', feeds);
     await next();
   });
   app.use('/api/v1/*', authenticate);
-  return app.route('/', meRoutes).route('/', tenantRoutes).route('/', apiKeyRoutes).route('/', auditLogRoutes);
+  return app
+    .route('/', meRoutes)
+    .route('/', tenantRoutes)
+    .route('/', apiKeyRoutes)
+    .route('/', auditLogRoutes)
+    .route('/', feedRoutes)
+    .route('/', publicationRoutes);
 }

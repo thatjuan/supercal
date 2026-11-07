@@ -29,6 +29,13 @@
       "when": 1794094211094,
       "tag": "0003_tenant_organization",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794094594614,
+      "tag": "0004_feeds",
+      "breakpoints": true
     }
   ]
 }

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { createApi } from '../src/api/index.ts';
 import type { AuthConfig } from '../src/auth/auth.ts';
-import { TEST_ORIGIN, testAuth } from './auth-fixture.ts';
+import { TEST_ORIGIN, testAuth, testSecrets } from './auth-fixture.ts';
 
 type Mode = AuthConfig['SUPERCAL_SIGNUP'];
 type Me = { user: { id: string; email: string }; tenant: { id: string }; role: string; isOperator: boolean; via: string; tenants: { id: string }[] };
@@ -58,7 +58,7 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
     for (const mode of ['open', 'invite', 'disabled'] as const) {
       const fixture = testAuth(mode, scratch.url);
       fixtures.push(fixture);
-      apps.set(mode, createApi(fixture.auth));
+      apps.set(mode, createApi({ auth: fixture.auth, secrets: testSecrets }));
     }
   });
 

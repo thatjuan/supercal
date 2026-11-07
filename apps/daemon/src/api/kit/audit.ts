@@ -12,7 +12,11 @@ export type AuditAction =
   | 'feed.create'
   | 'feed.update'
   | 'feed.delete'
-  | 'publication.delete';
+  | 'feed.credentials.rotate'
+  | 'publication.create'
+  | 'publication.update'
+  | 'publication.delete'
+  | 'publication.reorder';
 
 /** The actor recorded on each entry: who acted and how they authenticated. */
 export const AuditActor = z.object({ kind: z.literal('user'), userId: z.string(), via: z.enum(['session', 'apiKey']) }).openapi('AuditActor');

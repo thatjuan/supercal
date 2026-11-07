@@ -7,7 +7,7 @@
  *   bus.on('change', ({ tenantId, maxSeq }) => …);
  *   bus.on('reconnected', () => catchUp());
  */
-import { CHANGES_CHANNEL, parseId, type ControlTx, type SyncTargetId, type TenantId, type TenantTx } from '@supercal/db';
+import { CHANGES_CHANNEL, parseId, type ControlTx, type FeedId, type SyncTargetId, type TenantId, type TenantTx } from '@supercal/db';
 import { sql as drizzleSql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { z } from 'zod';
@@ -15,11 +15,14 @@ import type { Logger } from './log.ts';
 
 /** Woken sync targets, payload `{"ids":["tgt_…",…]}`. Sent by `wake`. */
 export const WAKE_CHANNEL = 'supercal_wake';
+/** Rotated feed credentials, payload `{"f":"feed_…"}`. Sent by `notifyFeedCredentialsRotated`. */
+export const FEED_CREDENTIALS_CHANNEL = 'supercal_feed_credentials_rotated';
 /** Each bus NOTIFYs itself here to prove its LISTEN connection still receives. */
 const PING_CHANNEL = 'supercal_bus_ping';
 /** NOTIFY rejects payloads of 8000 bytes or more; stay well below. */
 const WAKE_PAYLOAD_BYTES = 7000;
 
+const feedId = z.string().transform((raw, ctx) => parseId('feed', raw) ?? (ctx.addIssue({ code: 'custom', message: 'not a feed id' }), z.NEVER));
 const targetId = z.string().transform((raw, ctx) => parseId('tgt', raw) ?? (ctx.addIssue({ code: 'custom', message: 'not a sync target id' }), z.NEVER));
 
 /**
@@ -36,6 +39,10 @@ const CHANNELS = {
   wake: {
     channel: WAKE_CHANNEL,
     payload: z.object({ ids: z.array(targetId) }).transform(({ ids }) => ({ targetIds: ids })),
+  },
+  'feed-credentials-rotated': {
+    channel: FEED_CREDENTIALS_CHANNEL,
+    payload: z.object({ f: feedId }).transform(({ f }) => ({ feedId: f })),
   },
 } as const satisfies Record<string, { channel: string; payload: z.ZodType }>;
 
@@ -68,7 +75,12 @@ const parseJson = (raw: string): unknown => {
  */
 export async function startBus(url: string, log: Logger, { pingMs = 5_000 } = {}): Promise<Bus> {
   const sql = postgres(url, { max: 1, connection: { application_name: 'supercal-bus' }, onnotice: () => {} });
-  const listeners: { [E in keyof BusEvents]: Set<(payload: BusEvents[E]) => void> } = { change: new Set(), wake: new Set(), reconnected: new Set() };
+  const listeners: { [E in keyof BusEvents]: Set<(payload: BusEvents[E]) => void> } = {
+    change: new Set(),
+    wake: new Set(),
+    'feed-credentials-rotated': new Set(),
+    reconnected: new Set(),
+  };
   const emit = <E extends keyof BusEvents>(event: E, payload: BusEvents[E]) => {
     for (const listener of listeners[event])
       try {
@@ -156,4 +168,12 @@ export async function wake(tx: TenantTx | ControlTx, targetIds: readonly SyncTar
   }
   if (chunk.length > 0) chunks.push(chunk);
   for (const ids of chunks) await tx.execute(drizzleSql`select pg_notify(${WAKE_CHANNEL}, ${JSON.stringify({ ids })})`);
+}
+
+/**
+ * NOTIFYs every process that `feedId`'s CalDAV password or ICS token was rotated, on commit of
+ * `tx`. The feed delivery role drops its cached credential verifications for the feed.
+ */
+export async function notifyFeedCredentialsRotated(tx: TenantTx, feedId: FeedId): Promise<void> {
+  await tx.execute(drizzleSql`select pg_notify(${FEED_CREDENTIALS_CHANNEL}, ${JSON.stringify({ f: feedId })})`);
 }

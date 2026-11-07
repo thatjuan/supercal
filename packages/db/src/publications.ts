@@ -9,8 +9,8 @@ import type { PublicationId } from './ids.ts';
 import { publication, type Publication, type PublicationSource } from './schema/index.ts';
 import type { TenantTx } from './tx.ts';
 
-/** What decides a publication's output: its row (minus identity and versions) and its sources. */
-export type PublicationConfig = Omit<Publication, 'id' | 'tenantId' | 'epoch' | 'configVersion'> & {
+/** What decides a publication's output: its row (minus identity, versions and bookkeeping) and its sources. */
+export type PublicationConfig = Omit<Publication, 'id' | 'tenantId' | 'epoch' | 'configVersion' | 'status' | 'statusDetail' | 'updatedAt'> & {
   sources: readonly Pick<PublicationSource, 'sourceCalendarId' | 'priority'>[];
 };
 
