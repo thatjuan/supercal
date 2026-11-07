@@ -13,7 +13,9 @@
       "name": "@supercal/daemon",
       "dependencies": {
         "@supercal/db": "workspace:*",
+        "drizzle-orm": "0.45.4",
         "hono": "4.13.17",
+        "postgres": "4.1.0",
         "zod": "4.6.7",
       },
     },
@@ -33,6 +35,7 @@
     "packages/db": {
       "name": "@supercal/db",
       "dependencies": {
+        "@supercal/core": "workspace:*",
         "drizzle-orm": "0.45.4",
         "postgres": "4.1.0",
         "zod": "4.6.7",

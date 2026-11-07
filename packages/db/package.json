@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./unsafe-db": "./src/unsafe-db.ts"
+    "./unsafe-db": "./src/unsafe-db.ts",
+    "./test-db": "./src/test-db.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
@@ -13,6 +14,7 @@
     "db:check": "drizzle-kit check"
   },
   "dependencies": {
+    "@supercal/core": "workspace:*",
     "drizzle-orm": "0.45.4",
     "postgres": "4.1.0",
     "zod": "4.6.7"

@@ -15,6 +15,13 @@
       "when": 1794092850797,
       "tag": "0001_roles_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794093659211,
+      "tag": "0002_change_log",
+      "breakpoints": true
     }
   ]
 }

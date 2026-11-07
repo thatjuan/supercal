@@ -101,7 +101,7 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
 
 ## 6. Change log, sync tokens, caching
 
-- **Single write path.** `recordChanges(tx, tenantId, changes: ResourceChange[])` is the only code that writes `resource`. Callers pass only resources whose `revision` actually changed, so a full resync that changes nothing allocates no sequence numbers and clients re-download nothing *(feed review)*. Inside the caller's transaction, as the **last** statements before commit:
+- **Single write path.** `recordChanges(tx, changes: ResourceChange[])` (tenant from the `TenantTx`) is the only code that writes `resource`. Callers pass only resources whose `revision` actually changed, so a full resync that changes nothing allocates no sequence numbers and clients re-download nothing *(feed review)*. Inside the caller's transaction, as the **last** statements before commit:
   1. `pg_advisory_xact_lock(<supercal namespace>, hashtext(tenant_id))`, so a tenant's sequence numbers commit in order *(feed: without it, 34% of concurrent changes were skipped)*.
   2. `nextval('change_seq')` per change, then upsert/tombstone `resource` rows with that `seq`.
   3. `pg_notify('supercal_changes', '{"t":"<tenantId>","s":"<maxSeq>"}')`. The payload is bounded: identifiers only, never id lists *(platform review)*.

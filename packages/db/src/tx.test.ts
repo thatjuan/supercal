@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
+import { recordChanges, resourcesIn } from './changes.ts';
 import { newId, type TenantId } from './ids.ts';
 import { migrate } from './migrate.ts';
 import { calendarAccount, feed, organization, resource, sourceCalendar, user } from './schema/index.ts';
@@ -64,17 +65,17 @@ describe.skipIf(!testDatabaseUrl)('tenant isolation', () => {
   });
 
   test('resource spans round-trip and are queryable by overlap', async () => {
-    const span = { start: new Date('2026-03-01T09:00:00Z'), end: null };
+    const span = { start: new Date('2026-03-01T09:00:00Z'), end: 'infinity' as const };
     const found = await withTenant(tenantA, async (tx) => {
       const calendarId = newId('cal');
       await tx.insert(sourceCalendar).values({ id: calendarId, tenantId: tenantA, accountId: accountA, providerCalendarId: 'c', name: 'C' });
-      await tx.insert(resource).values({ tenantId: tenantA, sourceCalendarId: calendarId, uid: 'u1', data: [], revision: 'r', span, seq: sql`nextval('change_seq')` });
-      return tx
-        .select({ span: resource.span })
-        .from(resource)
-        .where(and(eq(resource.sourceCalendarId, calendarId), sql`${resource.span} && tstzrange('2030-01-01', '2030-01-02')`));
+      const resource = { uid: 'u1', master: null, overrides: [], timezones: {} };
+      await recordChanges(tx, [
+        { op: 'upsert', sourceCalendarId: calendarId, uid: 'u1', resource, revision: 'r', sequence: null, lastModified: null, organizer: null, span, completeness: 'complete' },
+      ]);
+      return resourcesIn(tx, [calendarId], { from: new Date('2030-01-01'), to: new Date('2030-01-02') });
     });
-    expect(found).toEqual([{ span }]);
+    expect(found.map((row) => row.span)).toEqual([span]);
   });
 
   test('supercal_control reads lookup columns across tenants but no event data or secrets', async () => {
