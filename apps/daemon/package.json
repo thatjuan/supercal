@@ -1,5 +1,6 @@
 {
   "name": "@supercal/daemon",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -7,8 +8,14 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@scalar/hono-api-reference": "0.12.18",
     "@supercal/db": "workspace:*",
+    "drizzle-orm": "0.45.4",
     "hono": "4.13.17",
     "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "13.1.0"
   }
 }
