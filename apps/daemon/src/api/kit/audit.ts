@@ -1,10 +1,18 @@
 /** The audit log: every mutation calls `audit` inside the transaction that made the change. */
 import { z } from '@hono/zod-openapi';
 import { auditLog, type TenantTx } from '@supercal/db';
-import type { Principal } from './principal.ts';
+import type { Principal } from '../../auth/principal.ts';
 
 /** Every audited action. Feature issues add theirs here. */
-export type AuditAction = 'tenant.update' | 'feed.create' | 'feed.update' | 'feed.delete' | 'publication.delete';
+export type AuditAction =
+  | 'tenant.create'
+  | 'tenant.update'
+  | 'api_key.create'
+  | 'api_key.delete'
+  | 'feed.create'
+  | 'feed.update'
+  | 'feed.delete'
+  | 'publication.delete';
 
 /** The actor recorded on each entry: who acted and how they authenticated. */
 export const AuditActor = z.object({ kind: z.literal('user'), userId: z.string(), via: z.enum(['session', 'apiKey']) }).openapi('AuditActor');

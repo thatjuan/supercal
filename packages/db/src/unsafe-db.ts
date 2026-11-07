@@ -1,7 +1,7 @@
 /**
  * The process-wide connection pool. `unsafeDb()` bypasses tenant isolation (it runs as the login
  * role), so only migrations, `tx.ts` and tests may import this module; everything else goes
- * through `withTenant` / `withControl`.
+ * through `withTenant` / `withControl`, or `createControlDatabase` for Better Auth.
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -11,6 +11,15 @@ import * as schema from './schema/index.ts';
 export const createDatabase = (url: string, max = 10) => drizzle({ client: postgres(url, { max, onnotice: () => {} }), schema });
 
 export type Database = ReturnType<typeof createDatabase>;
+
+/**
+ * A pool whose connections run as `supercal_control` from the start. Better Auth's Drizzle adapter
+ * cannot use `withControl`, so the daemon hands it this handle instead of the login role.
+ */
+export const createControlDatabase = (url: string, max = 5) =>
+  drizzle({ client: postgres(url, { max, onnotice: () => {}, connection: { role: 'supercal_control' } }), schema });
+
+export type ControlDatabase = ReturnType<typeof createControlDatabase>;
 
 let current: Database | undefined;
 

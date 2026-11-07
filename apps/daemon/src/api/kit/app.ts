@@ -2,7 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createLogger } from '../../log.ts';
-import type { ApiEnv } from './principal.ts';
+import type { ApiEnv } from '../../auth/principal.ts';
 import { BadRequest, ProblemError, Unauthorized } from './problem.ts';
 
 const log = createLogger({ component: 'api' });

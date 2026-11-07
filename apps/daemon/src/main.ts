@@ -1,4 +1,5 @@
-import { migrate } from '@supercal/db';
+import { connectDb, createControlDatabase, migrate } from '@supercal/db';
+import { createAuth } from './auth/auth.ts';
 import { loadConfig } from './config.ts';
 import { createApp } from './http.ts';
 import { createLogger } from './log.ts';
@@ -17,8 +18,11 @@ if (config.SUPERCAL_MIGRATE === 'auto') {
   log.info('migrations applied', { applied });
 }
 
+connectDb(config.DATABASE_URL);
+const auth = createAuth(config, createControlDatabase(config.DATABASE_URL));
+
 const roles = config.SUPERCAL_ROLES;
-const server = Bun.serve({ port: config.PORT, fetch: createApp(roles).fetch });
+const server = Bun.serve({ port: config.PORT, fetch: createApp(roles, auth).fetch });
 log.info('listening', { port: server.port, roles: [...roles] });
 
 const workerAbort = new AbortController();

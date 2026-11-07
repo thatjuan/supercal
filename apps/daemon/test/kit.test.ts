@@ -19,10 +19,9 @@ import {
   problemResponses,
   redactSecrets,
   requireIfMatch,
-  type ApiEnv,
-  type Principal,
 } from '../src/api/kit/index.ts';
-import { createApp } from '../src/http.ts';
+import type { ApiEnv, Principal } from '../src/auth/principal.ts';
+import { testAuth } from './auth-fixture.ts';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
@@ -70,7 +69,8 @@ const widgets = createApiApp()
     throw new Error('connection string postgres://secret@db');
   });
 
-const app = createApi(injectPrincipal).route('/', widgets);
+const fixture = testAuth('invite');
+const app = createApi(fixture.auth, injectPrincipal).route('/', widgets);
 
 const send = (path: string, init?: RequestInit) => app.request(path, init);
 const json = (method: string, body: string, headers: Record<string, string> = {}): RequestInit => ({
@@ -114,12 +114,6 @@ describe('problems', () => {
     const res = await send('/api/v1/widgets-boom');
     expect(res.status).toBe(500);
     expect(await res.text()).not.toContain('secret');
-  });
-
-  test('without #4 the daemon rejects every /api/v1 request', async () => {
-    const res = await createApp(new Set(['api'])).request('/api/v1/audit-log');
-    expect(res.status).toBe(401);
-    expect(res.headers.get('content-type')).toStartWith('application/problem+json');
   });
 });
 

@@ -2,6 +2,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { auditLog, withTenant } from '@supercal/db';
 import { and, eq, getTableColumns } from 'drizzle-orm';
+import { requireRole } from '../auth/policy.ts';
 import {
   AuditActor,
   createApiApp,
@@ -12,7 +13,6 @@ import {
   page,
   pageQuery,
   problemResponses,
-  requireRole,
   toPage,
 } from './kit/index.ts';
 
