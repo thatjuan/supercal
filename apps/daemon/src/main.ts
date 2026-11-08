@@ -7,6 +7,7 @@ import { createApp } from './http.ts';
 import { createLogger } from './log.ts';
 import { GOOGLE_AUTHORIZE_URL } from './oauth/google.ts';
 import { MICROSOFT_AUTHORIZE_URL } from './oauth/microsoft.ts';
+import { defaultWebDir } from './web.ts';
 import { startWorker } from './worker/index.ts';
 
 /** Keep in step with `packageManager` in the root package.json. */
@@ -50,6 +51,7 @@ const roles = config.SUPERCAL_ROLES;
 // The live stream turns off the idle timeout for its own requests (`server.timeout(req, 0)`), and
 // closes when `stopAbort` aborts, since `server.stop()` waits for open streams.
 const stopAbort = new AbortController();
+const webDir = config.SUPERCAL_WEB_DIR ?? defaultWebDir();
 const server = Bun.serve({
   port: config.PORT,
   fetch: createApp(roles, {
@@ -62,9 +64,11 @@ const server = Bun.serve({
     stream: { signal: stopAbort.signal },
     publicUrl: config.SUPERCAL_PUBLIC_URL,
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,
+    signup: config.SUPERCAL_SIGNUP,
+    webDir,
   }).fetch,
 });
-log.info('listening', { port: server.port, roles: [...roles] });
+log.info('listening', { port: server.port, roles: [...roles], webDir });
 
 const worker = roles.has('worker')
   ? startWorker(stopAbort.signal, log.child({ role: 'worker' }), { secrets, bus, fetch: egress, adapters, pushBaseUrl, concurrency: config.SUPERCAL_SYNC_CONCURRENCY })

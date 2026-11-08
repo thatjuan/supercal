@@ -68,8 +68,9 @@ export async function insertTenant(tx: Pick<ControlTx, 'insert'>, tenant: { name
 
 /**
  * Builds the Better Auth instance over `db` (a `supercal_control` pool), plus
- * `passwordResetLink`, which issues a one-time reset link for an operator to hand out, and
- * `publicUrl`, the origin clients reach the daemon at.
+ * `passwordResetLink`, which issues a one-time reset link for an operator to hand out,
+ * `isEmptyInstall`, true until the first user (the operator) signs up, and `publicUrl`, the origin
+ * clients reach the daemon at.
  */
 export function createAuth(config: AuthConfig, db: ControlDatabase) {
   const baseURL = config.SUPERCAL_PUBLIC_URL ?? `http://localhost:${config.PORT}`;
@@ -185,7 +186,7 @@ export function createAuth(config: AuthConfig, db: ControlDatabase) {
     return link;
   }
 
-  return Object.assign(auth, { passwordResetLink, publicUrl: baseURL });
+  return Object.assign(auth, { passwordResetLink, isEmptyInstall, publicUrl: baseURL });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

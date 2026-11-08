@@ -53,6 +53,7 @@ const configSchema = z
     RESEND_API_KEY: optional,
     MAIL_FROM: optional,
     WEB_ORIGIN: url.optional(),
+    SUPERCAL_WEB_DIR: optional,
   })
   .superRefine((config, ctx) => {
     if (!config.SUPERCAL_INSECURE_DEV) {

@@ -23,6 +23,7 @@ import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
 import { calendarRoutes } from './calendars.ts';
 import { feedRoutes } from './feeds.ts';
+import { instanceRoutes, type Signup } from './instance.ts';
 import { createApiApp } from './kit/index.ts';
 import { meRoutes } from './me.ts';
 import { publicationRoutes } from './publications.ts';
@@ -44,16 +45,29 @@ export const openApiConfig = {
 /**
  * What the API runs on: Better Auth, the secret box for values stored encrypted, the bus that
  * feeds the live stream (`idleBus` where nothing streams, such as OpenAPI generation and tests),
- * and for connecting accounts the outbound transport, provider adapters (default: no LAN
- * exceptions, and the registered adapters) and OAuth settings (default: no OAuth providers).
+ * for connecting accounts the outbound transport, provider adapters (default: no LAN
+ * exceptions, and the registered adapters) and OAuth settings (default: no OAuth providers), and
+ * the sign-up mode `GET /api/v1/instance` reports (default: `invite`).
  */
-export type ApiDeps = { auth: Auth; secrets: SecretBox; bus: Bus; stream?: StreamOptions; fetch?: GuardedFetch; adapters?: AdapterRegistry; oauth?: OAuthConfig };
+export type ApiDeps = {
+  auth: Auth;
+  secrets: SecretBox;
+  bus: Bus;
+  stream?: StreamOptions;
+  fetch?: GuardedFetch;
+  adapters?: AdapterRegistry;
+  oauth?: OAuthConfig;
+  signup?: Signup;
+};
 
 /** OAuth settings: `WEB_ORIGIN`, the state signing secret, and each configured provider's client. Redirect URIs are built on the auth's public URL. */
 export type OAuthConfig = { webOrigin?: string | undefined; stateSecret: string; google?: OAuthClient | undefined; microsoft?: OAuthClient | undefined };
 
-/** Builds the API. Route groups are mounted after the docs, so the docs are public. */
-export function createApi({ auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
+/** Builds the API. The docs and `/api/v1/instance` are mounted before authentication, so they are public. */
+export function createApi(
+  { auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig, signup = 'invite' }: ApiDeps,
+  authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth),
+) {
   const feeds = createFeedService(secrets);
   const sync = createSyncDeps({
     secrets,
@@ -79,6 +93,8 @@ export function createApi({ auth, secrets, bus, stream, fetch, adapters, oauth: 
   });
   app.doc31('/api/v1/openapi.json', openApiConfig);
   app.get('/api/docs', apiReference({ url: '/api/v1/openapi.json', pageTitle: 'Supercal API' }));
+  const providers = { google: oauth.google !== null, microsoft: oauth.microsoft !== null };
+  app.route('/', instanceRoutes({ signup, providers }, auth.isEmptyInstall));
   app.use('/api/v1/*', async (c, next) => {
     c.set('auth', auth);
     c.set('feeds', feeds);
