@@ -86,7 +86,10 @@ export const sourceCalendar = pgTable(
   (t) => [unique().on(t.accountId, t.providerCalendarId)],
 );
 
-/** A provider push subscription. Google renewals overlap, so one target may have several leases. */
+/**
+ * A provider push subscription. Google renewals overlap, so one target may have several leases.
+ * `target_id` is the calendar (`calendar`) or the account (`account`, `calendar-list`).
+ */
 export const pushLease = pgTable('push_lease', {
   providerChannelId: text('provider_channel_id').primaryKey(),
   tenantId: tenantId(),
@@ -100,4 +103,21 @@ export const pushLease = pgTable('push_lease', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   secretHash: text('secret_hash').notNull(),
   providerState: jsonb('provider_state'),
+  /** When the subscription was made; renewal is due at 80% of `created_at` → `expires_at`. */
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * An OAuth authorization in progress: the PKCE verifier the signed `state` refers to, kept
+ * server-side so it never travels in a URL. Single use, and only valid until `expires_at`.
+ */
+export const oauthFlow = pgTable('oauth_flow', {
+  id: text('id').primaryKey(),
+  tenantId: tenantId(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  provider: accountProvider('provider').notNull(),
+  verifier: text('verifier').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });

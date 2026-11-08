@@ -14,5 +14,17 @@ const CaldavCredentials = z.object({ provider: z.literal('caldav'), serverUrl: z
 /** iCloud: an Apple ID and an app-specific password. */
 const IcloudCredentials = z.object({ provider: z.literal('icloud'), appleId: z.string(), appSpecificPassword: z.string() });
 
-export const ProviderCredentials = z.discriminatedUnion('provider', [IcsCredentials, CaldavCredentials, IcloudCredentials]);
+/** A Google account connected through OAuth. `sub` is the stable Google identity (`provider_subject`). */
+const GoogleCredentials = z.object({
+  provider: z.literal('google'),
+  sub: z.string(),
+  email: z.string(),
+  accessToken: z.string(),
+  accessTokenExpiresAt: z.iso.datetime(),
+  refreshToken: z.string(),
+  scopes: z.array(z.string()),
+});
+export type GoogleCredentials = z.infer<typeof GoogleCredentials>;
+
+export const ProviderCredentials = z.discriminatedUnion('provider', [IcsCredentials, CaldavCredentials, IcloudCredentials, GoogleCredentials]);
 export type ProviderCredentials = z.infer<typeof ProviderCredentials>;

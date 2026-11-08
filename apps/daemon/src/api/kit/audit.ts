@@ -13,6 +13,7 @@ export type AuditAction =
   | 'account.update'
   | 'account.delete'
   | 'account.sync'
+  | 'account.reconnect'
   | 'feed.create'
   | 'feed.update'
   | 'feed.delete'

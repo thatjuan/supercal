@@ -14,6 +14,8 @@ import { requirePrincipal, type ApiEnv } from '../auth/principal.ts';
 import { createFeedService } from '../feeds/service.ts';
 import type { Bus } from '../bus.ts';
 import { createLogger } from '../log.ts';
+import { createStateSigner, type OAuthClient, type OAuthDeps } from '../oauth/common.ts';
+import { googleOAuthRoutes } from '../oauth/google.ts';
 import { createSyncDeps } from '../sync/index.ts';
 import { accountRoutes } from './accounts.ts';
 import { apiKeyRoutes } from './api-keys.ts';
@@ -41,13 +43,16 @@ export const openApiConfig = {
 /**
  * What the API runs on: Better Auth, the secret box for values stored encrypted, the bus that
  * feeds the live stream (`idleBus` where nothing streams, such as OpenAPI generation and tests),
- * and for connecting accounts the outbound transport and provider adapters (default: no LAN
- * exceptions, and the registered adapters).
+ * and for connecting accounts the outbound transport, provider adapters (default: no LAN
+ * exceptions, and the registered adapters) and OAuth settings (default: no OAuth providers).
  */
-export type ApiDeps = { auth: Auth; secrets: SecretBox; bus: Bus; stream?: StreamOptions; fetch?: GuardedFetch; adapters?: AdapterRegistry };
+export type ApiDeps = { auth: Auth; secrets: SecretBox; bus: Bus; stream?: StreamOptions; fetch?: GuardedFetch; adapters?: AdapterRegistry; oauth?: OAuthConfig };
+
+/** OAuth settings: `WEB_ORIGIN`, the state signing secret, and each configured provider's client. Redirect URIs are built on the auth's public URL. */
+export type OAuthConfig = { webOrigin?: string | undefined; stateSecret: string; google?: OAuthClient | undefined };
 
 /** Builds the API. Route groups are mounted after the docs, so the docs are public. */
-export function createApi({ auth, secrets, bus, stream, fetch, adapters }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
+export function createApi({ auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
   const feeds = createFeedService(secrets);
   const sync = createSyncDeps({
     secrets,
@@ -56,6 +61,12 @@ export function createApi({ auth, secrets, bus, stream, fetch, adapters }: ApiDe
     log: createLogger({ component: 'api' }),
     ...(adapters && { adapters }),
   });
+  const oauth: OAuthDeps = {
+    publicUrl: auth.publicUrl,
+    returnOrigins: [new URL(auth.publicUrl).origin, ...(oauthConfig?.webOrigin ? [new URL(oauthConfig.webOrigin).origin] : [])],
+    state: createStateSigner(oauthConfig?.stateSecret ?? crypto.randomUUID()),
+    google: oauthConfig?.google ?? null,
+  };
   const app = createApiApp();
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
   app.openAPIRegistry.registerComponent('securitySchemes', 'session', { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' });
@@ -70,6 +81,7 @@ export function createApi({ auth, secrets, bus, stream, fetch, adapters }: ApiDe
     c.set('auth', auth);
     c.set('feeds', feeds);
     c.set('sync', sync);
+    c.set('oauth', oauth);
     await next();
   });
   app.use('/api/v1/*', authenticate);
@@ -78,6 +90,7 @@ export function createApi({ auth, secrets, bus, stream, fetch, adapters }: ApiDe
     .route('/', tenantRoutes)
     .route('/', apiKeyRoutes)
     .route('/', accountRoutes)
+    .route('/', googleOAuthRoutes)
     .route('/', calendarRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)

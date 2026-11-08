@@ -54,6 +54,13 @@ export type PushLeaseInfo = {
   providerState: JsonValue | null;
 };
 
+/**
+ * What a push subscription is for and where notifications go. `targetId` is ours (calendar or
+ * account id), `providerTargetId` the provider's (e.g. the Google calendar id), and `token` a fresh
+ * secret the provider echoes back on every notification; the daemon stores only its hash.
+ */
+export type PushRequest = { target: PushTarget; targetId: string; providerTargetId: string; address: string; token: string };
+
 /** Structured logger; the daemon's logger satisfies it. */
 export type Logger = Record<'debug' | 'info' | 'warn' | 'error', (msg: string, fields?: Record<string, unknown>) => void>;
 
@@ -79,9 +86,13 @@ export interface ProviderAdapter<Cursor> {
    * validate it (it is versioned JSON) and start a snapshot when it is unusable.
    */
   sync(ctx: AdapterContext, calendar: SourceCalendarRef, cursor: Cursor | null): AsyncIterable<SyncPage | SyncEnd<Cursor>>;
+  /**
+   * Push subscriptions. `renew` may return a new subscription (Google: a new channel) or extend
+   * the old one (Graph); the daemon stores the result before tearing down a replaced lease.
+   */
   push?: {
-    subscribe(ctx: AdapterContext, target: { target: PushTarget; targetId: string }): Promise<PushLeaseInfo>;
-    renew(ctx: AdapterContext, lease: PushLeaseInfo): Promise<PushLeaseInfo>;
+    subscribe(ctx: AdapterContext, request: PushRequest): Promise<PushLeaseInfo>;
+    renew(ctx: AdapterContext, lease: PushLeaseInfo, request: PushRequest): Promise<PushLeaseInfo>;
     teardown(ctx: AdapterContext, lease: PushLeaseInfo): Promise<void>;
   };
 }

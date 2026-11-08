@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../../../..');
 const SCANNED = ['packages/providers/src', 'apps/daemon/src/sync'];
-// The transport itself, plus the Google and Graph clients, which only reach fixed Google/Microsoft API hosts.
-const EXEMPT = ['packages/providers/src/transport/', 'packages/providers/src/google/', 'packages/providers/src/microsoft/'];
+// The transport itself, plus the Google and Graph clients and the OAuth token calls, which only reach fixed Google/Microsoft hosts.
+const EXEMPT = ['packages/providers/src/transport/', 'packages/providers/src/google/', 'packages/providers/src/microsoft/', 'packages/providers/src/oauth.ts'];
 const FETCH_CALL = /\bfetch\s*\(/;
 
 test('user-influenced code fetches only through the guarded transport', async () => {

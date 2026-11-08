@@ -8,8 +8,8 @@
  *    touches (only `seen_generation`) and deletes. Nothing is normalised yet, so a failed later
  *    page leaves the cursor and every resource as they were; the next run replays.
  * 2. `end` is one fenced transaction: a snapshot deletes the objects it did not see, every dirty
- *    group is normalised from all its objects, resources whose group lost every object become
- *    deletes, and only real revision changes reach `recordChanges`. Then the cursor is stored.
+ *    group is normalised from all its objects, resources whose group lost every object (or now
+ *    publishes nothing) become deletes, and only real revision changes reach `recordChanges`. Then the cursor is stored.
  */
 import { lastModified, normalizers, organizer, revisionOf, sequence, spanOf, type Completeness, type EventResource, type Normalizer } from '@supercal/core';
 import {
@@ -161,17 +161,22 @@ async function resourceChanges(tx: TenantTx, job: TenantJob, calendar: SourceCal
     );
     for (const uid of groups) {
       const members = objects.filter((o) => o.groupUid === uid);
+      const before = stored.get(uid);
       let change: Upsert | null;
       try {
-        const { resource: data, completeness } = normalizer.normalize(members.map((o) => ({ id: o.providerObjectId, etag: o.etag ?? '', groupUid: uid, payload: o.payload })));
-        change = upsertOf(calendar, uid, data, completeness);
+        const normalized = normalizer.normalize(members.map((o) => ({ id: o.providerObjectId, etag: o.etag ?? '', groupUid: uid, payload: o.payload })));
+        if (!normalized) {
+          // The group publishes nothing (e.g. only cancelled instances are left).
+          if (before && !before.deleted) changes.push({ op: 'delete', sourceCalendarId: calendar.id, uid });
+          continue;
+        }
+        change = upsertOf(calendar, uid, normalized.resource, normalized.completeness);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         log.warn('normalisation failed', { calendarId: calendar.id, uid, providerObjectIds: members.map((o) => o.providerObjectId), error: reason });
         const last = stored.get(uid);
         change = last?.data && last.span ? upsertOf(calendar, uid, last.data, { incomplete: reason }, last.span) : null;
       }
-      const before = stored.get(uid);
       if (change && (!before || before.deleted || before.revision !== change.revision)) changes.push(change);
     }
     await tx

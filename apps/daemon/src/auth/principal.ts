@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { Forbidden, Unauthorized } from '../api/kit/problem.ts';
 import type { FeedService } from '../feeds/service.ts';
+import type { OAuthDeps } from '../oauth/common.ts';
 import type { SyncDeps } from '../sync/index.ts';
 import { OPERATOR_ROLE, type Auth } from './auth.ts';
 
@@ -23,7 +24,7 @@ export type Principal = {
   isOperator: boolean;
 };
 
-export type ApiEnv = { Variables: { principal: Principal; auth: Auth; feeds: FeedService; sync: SyncDeps } };
+export type ApiEnv = { Variables: { principal: Principal; auth: Auth; feeds: FeedService; sync: SyncDeps; oauth: OAuthDeps } };
 
 export const isTenantRole = (role: string): role is TenantRole => TENANT_ROLES.some((known) => known === role);
 
