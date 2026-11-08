@@ -64,6 +64,13 @@
       "when": 1794153830307,
       "tag": "0008_google_sinks",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794161497688,
+      "tag": "0009_hosted_calendars",
+      "breakpoints": true
     }
   ]
 }

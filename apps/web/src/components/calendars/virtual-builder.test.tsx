@@ -18,6 +18,11 @@ const account = (id: string, displayName: string): Account => ({
 
 const calendar = (id: string, accountId: string, name: string): Calendar => ({
   id,
+  kind: 'connected',
+  description: null,
+  sortOrder: 0,
+  updatedAt: '2026-11-08T00:00:00Z',
+  goneAt: null,
   accountId,
   name,
   color: '#2f80ed',

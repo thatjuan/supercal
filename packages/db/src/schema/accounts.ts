@@ -1,9 +1,10 @@
-import { boolean, jsonb, pgEnum, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
 import type { AccountId } from '../ids.ts';
 import { apikey, user } from './auth.ts';
 import { idColumn, tenantId } from './columns.ts';
 
-export const accountProvider = pgEnum('account_provider', ['google', 'microsoft', 'icloud', 'caldav', 'ics']);
+export const CONNECTED_PROVIDERS = ['google', 'microsoft', 'icloud', 'caldav', 'ics'] as const;
+export const accountProvider = pgEnum('account_provider', [...CONNECTED_PROVIDERS, 'hosted']);
 export type AccountProvider = (typeof accountProvider.enumValues)[number];
 
 /** Connection health of a calendar account, and of a sink writing to one. */
@@ -27,7 +28,7 @@ export const apiKeyTenant = pgTable('api_key_tenant', {
     .references(() => user.id, { onDelete: 'cascade' }),
 });
 
-/** A connected provider account. `credentials` is a secret-box ciphertext (see `secrets.ts`). */
+/** A calendar provider account. Credentials are encrypted; the hidden hosted account has none. */
 export const calendarAccount = pgTable('calendar_account', {
   id: idColumn('acc'),
   tenantId: tenantId(),
@@ -65,7 +66,7 @@ export type Freshness = {
 
 export const NO_FRESHNESS: Freshness = { lastSuccessAt: null, lastChangeAt: null, pushActive: false, expectedLatencyMs: null, stale: false };
 
-/** A calendar discovered on an account. */
+/** A connected or hosted calendar under its provider account. */
 export const sourceCalendar = pgTable(
   'source_calendar',
   {
@@ -78,6 +79,11 @@ export const sourceCalendar = pgTable(
     providerCalendarId: text('provider_calendar_id').notNull(),
     name: text('name').notNull(),
     color: text('color'),
+    description: text('description'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    syncEpoch: integer('sync_epoch').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    goneAt: timestamp('gone_at', { withTimezone: true }),
     timezone: text('timezone'),
     capabilities: jsonb('capabilities').$type<CalendarCapabilities>().notNull().default({ incremental: 'snapshot', push: false }),
     state: calendarState('state').notNull().default('active'),

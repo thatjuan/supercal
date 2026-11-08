@@ -13,13 +13,12 @@
  *    group is normalised from all its objects, resources whose group lost every object (or now
  *    publishes nothing) become deletes, and only real revision changes reach `recordChanges`. Then the cursor is stored.
  */
-import { lastModified, normalizers, organizer, revisionOf, sequence, spanOf, type Completeness, type EventResource, type Normalizer } from '@supercal/core';
+import { normalizers, type Normalizer } from '@supercal/core';
 import {
   calendarAccount,
   graphOccurrence,
   pushLease,
   recordChanges,
-  resource,
   sourceCalendar,
   sourceObject,
   syncTarget,
@@ -29,11 +28,11 @@ import {
   type SourceCalendar,
   type SourceCalendarId,
   type SourceFormat,
-  type Span,
   type TenantTx,
 } from '@supercal/db';
 import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type Provider, type SourceCalendarRef, type SyncEnd, type SyncPage } from '@supercal/providers';
 import { and, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
+import { normalizeDirtyGroups } from './changes.ts';
 import type { Logger } from '../log.ts';
 import { metrics } from '../ops/metrics.ts';
 import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
@@ -135,32 +134,6 @@ const occurrencesOf = (job: TenantJob, calendarId: SourceCalendarId) => async (m
   return new Map(rows.map((r) => [r.occurrenceId, r.originalStart]));
 };
 
-type Upsert = Extract<ResourceChange, { op: 'upsert' }>;
-
-const spanDates = ({ start, end }: ReturnType<typeof spanOf>): Span => ({
-  start: new Date(start.epochMilliseconds),
-  end: end === 'infinity' ? 'infinity' : new Date(end.epochMilliseconds),
-});
-
-/** The `ResourceChange` for a normalised group. Without `span`, computes it, throwing when the resource has no usable timing. */
-function upsertOf(calendar: SourceCalendar, uid: string, data: EventResource, completeness: Completeness, span?: Span): Upsert {
-  const main = data.master ?? data.overrides[0] ?? null;
-  const modified = main && lastModified(main);
-  return {
-    op: 'upsert',
-    sourceCalendarId: calendar.id,
-    uid,
-    resource: data,
-    // Completeness is part of the revision, so marking a resource incomplete is a change.
-    revision: completeness === 'complete' ? revisionOf(data) : `${revisionOf(data)}.incomplete`,
-    sequence: main && sequence(main),
-    lastModified: modified ? new Date(modified.epochMilliseconds) : null,
-    organizer: (main && organizer(main)?.address) ?? null,
-    span: span ?? spanDates(spanOf(data, calendar.timezone ?? 'UTC')),
-    completeness,
-  };
-}
-
 /**
  * The `end` transaction's work after the fence, up to (not including) `recordChanges`: the
  * snapshot sweep, normalisation of dirty groups and orphan deletes. Returns the real changes. A group
@@ -181,52 +154,7 @@ async function resourceChanges(tx: TenantTx, job: TenantJob, calendar: SourceCal
       );
   }
 
-  const changes: ResourceChange[] = [];
-  const dirty = (await tx.selectDistinct({ groupUid: sourceObject.groupUid }).from(sourceObject).where(and(ofCalendar, eq(sourceObject.dirty, true)))).map((d) => d.groupUid);
-  for (const groups of chunks(dirty)) {
-    const objects = await tx.select().from(sourceObject).where(and(ofCalendar, inArray(sourceObject.groupUid, groups)));
-    const stored = new Map(
-      (await tx.select().from(resource).where(and(eq(resource.sourceCalendarId, calendar.id), inArray(resource.uid, groups)))).map((r) => [r.uid, r]),
-    );
-    for (const uid of groups) {
-      const members = objects.filter((o) => o.groupUid === uid);
-      const before = stored.get(uid);
-      let change: Upsert | null;
-      try {
-        const normalized = normalizer.normalize(members.map((o) => ({ id: o.providerObjectId, etag: o.etag ?? '', groupUid: uid, payload: o.payload })));
-        if (!normalized) {
-          // The group publishes nothing (e.g. only cancelled instances are left).
-          if (before && !before.deleted) changes.push({ op: 'delete', sourceCalendarId: calendar.id, uid });
-          continue;
-        }
-        change = upsertOf(calendar, uid, normalized.resource, normalized.completeness);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        log.warn('normalisation failed', { calendarId: calendar.id, uid, providerObjectIds: members.map((o) => o.providerObjectId), error: reason });
-        const last = stored.get(uid);
-        change = last?.data && last.span ? upsertOf(calendar, uid, last.data, { incomplete: reason }, last.span) : null;
-      }
-      if (change && (!before || before.deleted || before.revision !== change.revision)) changes.push(change);
-    }
-    await tx
-      .update(sourceObject)
-      .set({ dirty: false, normalizerVersion: normalizer.version })
-      .where(and(ofCalendar, inArray(sourceObject.groupUid, groups)));
-  }
-
-  // Resources whose group has no objects left (deleted, swept, or moved away).
-  const orphans = await tx
-    .select({ uid: resource.uid })
-    .from(resource)
-    .where(
-      and(
-        eq(resource.sourceCalendarId, calendar.id),
-        eq(resource.deleted, false),
-        notExists(tx.select({ one: sql`1` }).from(sourceObject).where(and(ofCalendar, eq(sourceObject.groupUid, resource.uid)))),
-      ),
-    );
-  for (const { uid } of orphans) changes.push({ op: 'delete', sourceCalendarId: calendar.id, uid });
-  return changes;
+  return normalizeDirtyGroups(tx, calendar, normalizer, log, { objectNames: false });
 }
 
 /** Whether a push subscription currently covers the calendar (per calendar, or mailbox-wide). */

@@ -20,9 +20,22 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - Reconnect flow when credentials expire or are revoked; the account stays, its data stays visible but stale, and the dashboard says why.
 - Per source calendar: provider name, colour, time zone, and whether the provider is still sending it.
 
+### Hosted calendars
+
+- Create calendars whose events live in Supercal, alongside calendars imported from providers.
+- Manage their name, colour, description, time zone and order through the API. Hosted calendars
+  start unpublished; enable their publications to include them in feeds, ICS, read-only CalDAV,
+  virtual calendars and sinks.
+- Delete a hosted calendar reversibly for 30 days. Restore retains its events; publications stay
+  disabled and removed virtual memberships must be added again. After 30 days, deletion is permanent.
+- Store iCalendar events through one service layer, preserving raw payloads and unknown properties.
+  Event REST writes and writable CalDAV follow in #25 and #26; the dashboard adds no event editor.
+- Keep at most 100 retained hosted calendars per user, with up to 50,000 objects per calendar and
+  1 MiB per object. Attendees are stored as data; Supercal sends no invitations.
+
 ### Feeds and publications
 
-- Each user gets a default feed. Every source calendar is published to it unless the user turns it off. An account-level setting decides whether newly discovered calendars publish automatically.
+- Each user gets a default feed. Connected source calendars are published to it unless the user turns them off; hosted calendars start disabled. An account-level setting decides whether newly discovered calendars publish automatically.
 - A publication can be renamed and recoloured without touching the source.
 - **Virtual calendars** merge two or more source calendars (from any accounts) into one publication. A source calendar can sit in several virtual calendars and still be published on its own, or be hidden on its own while it still feeds a virtual calendar.
 - When the same event appears in more than one member of a virtual calendar (e.g. an invite to both work and personal), it is shown once.

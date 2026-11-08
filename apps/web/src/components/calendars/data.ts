@@ -9,7 +9,7 @@ import { $api, client, keyPath } from '../../api.ts';
 
 export type Feed = components['schemas']['Feed'];
 export type Account = components['schemas']['Account'];
-export type Calendar = components['schemas']['Calendar'];
+export type Calendar = Extract<components['schemas']['Calendar'], { kind: 'connected' }>;
 export type Publication = components['schemas']['Publication'];
 export type VirtualPublication = Extract<Publication, { kind: 'virtual' }>;
 export type Privacy = Publication['privacy'];
@@ -41,7 +41,7 @@ export function useFeedCalendars(feed: Feed | undefined) {
   const enabled = feed !== undefined;
   const publications = $api.useQuery('get', '/api/v1/feeds/{id}/publications', { params: { path: { id: feed?.id ?? '' } } }, { enabled });
   const accounts = $api.useQuery('get', '/api/v1/accounts');
-  const calendars = $api.useQuery('get', '/api/v1/calendars');
+  const calendars = $api.useQuery('get', '/api/v1/calendars', {}, { select: (data) => ({ items: data.items.filter((calendar) => calendar.kind === 'connected') }) });
 
   const items = publications.data?.items ?? [];
   const groups: AccountGroup[] = (accounts.data?.items ?? [])

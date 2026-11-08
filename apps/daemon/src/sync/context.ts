@@ -60,7 +60,7 @@ export class NoAdapterError extends Error {
 
 /** The adapter for `provider`; a target of a provider without one cannot run. */
 export function adapterFor(adapters: AdapterRegistry, provider: CalendarAccount['provider']): ProviderAdapter<unknown> {
-  const adapter = adapters[provider];
+  const adapter = provider === 'hosted' ? undefined : adapters[provider];
   if (!adapter) throw new NoAdapterError(`no adapter is registered for provider ${provider}`);
   return adapter;
 }

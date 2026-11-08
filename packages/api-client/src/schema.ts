@@ -253,7 +253,7 @@ export interface paths {
         };
         get: operations["listCalendars"];
         put?: never;
-        post?: never;
+        post: operations["createCalendar"];
         delete?: never;
         options?: never;
         head?: never;
@@ -270,6 +270,24 @@ export interface paths {
         get: operations["getCalendar"];
         put?: never;
         post?: never;
+        delete: operations["deleteCalendar"];
+        options?: never;
+        head?: never;
+        /** @description Updates a hosted calendar. Changing timezone does not recompute spans of floating events. */
+        patch: operations["updateCalendar"];
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Restores a deleted hosted calendar. Publications remain disabled and virtual memberships remain removed; the owner re-enables them. */
+        post: operations["restoreCalendar"];
         delete?: never;
         options?: never;
         head?: never;
@@ -633,17 +651,22 @@ export interface components {
             account: components["schemas"]["Account"];
             calendars: components["schemas"]["Calendar"][];
         };
-        Calendar: {
+        Calendar: components["schemas"]["HostedCalendar"] | components["schemas"]["ConnectedCalendar"];
+        HostedCalendar: {
             /** @example cal_01h455vb4pex5vsknk084sn02q */
             id: string;
-            /** @example acc_01h455vb4pex5vsknk084sn02q */
-            accountId: string;
+            description: string | null;
+            sortOrder: number;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            goneAt: string | null;
             name: string;
             color: string | null;
             /** @description IANA zone, when the provider names one */
             timezone: string | null;
             /**
-             * @description `gone`: no longer listed by the provider
+             * @description `gone`: removed by the provider or soft-deleted by the hosted calendar owner
              * @enum {string}
              */
             state: "active" | "gone";
@@ -662,6 +685,53 @@ export interface components {
                 stale: boolean;
             };
             publicationIds: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "hosted";
+            accountId: null;
+        };
+        ConnectedCalendar: {
+            /** @example cal_01h455vb4pex5vsknk084sn02q */
+            id: string;
+            description: string | null;
+            sortOrder: number;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            goneAt: string | null;
+            name: string;
+            color: string | null;
+            /** @description IANA zone, when the provider names one */
+            timezone: string | null;
+            /**
+             * @description `gone`: removed by the provider or soft-deleted by the hosted calendar owner
+             * @enum {string}
+             */
+            state: "active" | "gone";
+            capabilities: {
+                incremental: string;
+                push: boolean;
+            };
+            /** @description Observed, never promised */
+            freshness: {
+                /** Format: date-time */
+                lastSuccessAt: string | null;
+                pushActive: boolean;
+                /** @description Seconds until changes are expected to show (the current poll interval) */
+                expectedLatency: number | null;
+                /** @description The account cannot sync (e.g. reauth required); the last good data is still published */
+                stale: boolean;
+            };
+            publicationIds: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "connected";
+            /** @example acc_01h455vb4pex5vsknk084sn02q */
+            accountId: string;
         };
         NewAccount: components["schemas"]["NewIcsAccount"] | components["schemas"]["NewCaldavAccount"] | components["schemas"]["NewIcloudAccount"];
         NewIcsAccount: {
@@ -2461,6 +2531,80 @@ export interface operations {
             };
         };
     };
+    createCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    color?: string;
+                    timezone?: string;
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created hosted calendar; its publication starts disabled */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     getCalendar: {
         parameters: {
             query?: never;
@@ -2510,6 +2654,254 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Soft deleted; retained for 30 days */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    updateCalendar: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    color?: string;
+                    timezone?: string;
+                    description?: string;
+                    sortOrder?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated calendar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    restoreCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored calendar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

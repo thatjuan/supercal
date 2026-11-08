@@ -23,6 +23,7 @@ const BATCH = 1000;
 export type ResourceChange =
   | {
       op: 'upsert';
+      objectName?: string;
       sourceCalendarId: SourceCalendarId;
       uid: string;
       resource: EventResource;
@@ -80,6 +81,7 @@ export async function recordChanges(tx: TenantTx, changes: ResourceChange[]): Pr
       sourceCalendarId: c.sourceCalendarId,
       uid: c.uid,
       data: c.resource,
+      objectName: c.objectName ?? null,
       revision: c.revision,
       sequence: c.sequence ?? 0,
       lastModified: c.lastModified,
@@ -91,7 +93,7 @@ export async function recordChanges(tx: TenantTx, changes: ResourceChange[]): Pr
       ...stamp,
     }));
     const set = Object.fromEntries(
-      (['data', 'revision', 'sequence', 'lastModified', 'organizer', 'span', 'completeness', 'completenessReason', 'deleted'] as const).map(
+      (['objectName', 'data', 'revision', 'sequence', 'lastModified', 'organizer', 'span', 'completeness', 'completenessReason', 'deleted'] as const).map(
         (key) => [key, excluded(resource[key])],
       ),
     );
