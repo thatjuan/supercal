@@ -3,13 +3,14 @@
  * each request then uses one tenant transaction. Shared handlers read CollectionView; only device
  * logins can enter the hosted write path. Listings fetch metadata without rendering payloads.
  */
-import { assertIanaZone, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
+import { assertIanaZone, freeBusy, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
 import { Temporal } from '@js-temporal/polyfill';
-import { calendarAccount, sourceCalendar, sourceObject, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
+import { sourceCalendar, sourceObject, resourcesIn, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
 import { Hono, type Context } from 'hono';
 import { getConnInfo } from 'hono/bun';
 import { and, eq } from 'drizzle-orm';
 import { audit, ProblemError } from '../api/kit/index.ts';
+import { requireAccess, atLeast } from '../hosted/access.ts';
 import { membership, type Principal } from '../auth/principal.ts';
 import { createFeedService } from '../feeds/service.ts';
 import { createCalendar, deleteCalendar, getOrCreateHostedAccount } from '../hosted/calendars.ts';
@@ -196,12 +197,12 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
         email = account.ownerEmail;
       } else {
         const current = await membership(login.userId, login.tenantId);
-        const account = current && await loadUserAccount(tx, login.id, host);
+        principal = current ? { kind: 'user', via: 'davLogin', userId: login.userId, tenantId: login.tenantId, ...current } : null;
+        const account = principal && await loadUserAccount(tx, login.id, host, principal);
         if (!account || account.login.passwordHash !== login.passwordHash || account.login.userId !== login.userId) {
           feedAuth.forget(login.id);
           return unauthorized();
         }
-        principal = { kind: 'user', via: 'davLogin', userId: login.userId, tenantId: login.tenantId, ...current };
         collections = account.collections;
         username = account.login.username;
         displayName = account.login.name;
@@ -221,6 +222,8 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
         const conflict = error.code === 'uid-conflict' && error.conflictObjectName ? `<d:href>${esc(c.req.path.slice(0, c.req.path.lastIndexOf('/') + 1) + encodeURIComponent(error.conflictObjectName))}</d:href>` : '';
         return new Response(xmlWriter().document('d:error', `<${mapped.condition}>${conflict}</${mapped.condition}>`), { status: mapped.status, headers: XML_HEADERS });
       }
+      if (error instanceof ProblemError && error.status === 403) return davError(403, 'd:need-privileges');
+      if (error instanceof ProblemError && error.status === 404) return notFound();
       if (error instanceof ProblemError && error.slug === 'calendar-quota') return davError(507, 'd:quota-not-exceeded');
       throw error;
     });
@@ -272,6 +275,30 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     const body = parseXml(await c.req.text());
     if (!body) return c.body('expected an XML report body', 400);
     const { view, path } = node;
+    if (is(body, NS.CALDAV, 'free-busy-query')) {
+      if (!r.principal || !view.calendar) return davError(403, 'd:supported-report');
+      await requireAccess(tx, r.principal, view.calendar.id, 'free-busy');
+      const ranges = children(body, NS.CALDAV, 'time-range');
+      if (ranges.length !== 1) return c.body('expected exactly one time-range', 400);
+      const range = ranges[0];
+      const instant = (value: string | undefined) => {
+        const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value ?? '');
+        if (!m) throw new Error('Expected UTC DATE-TIME');
+        return Temporal.Instant.from(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`);
+      };
+      let from: Temporal.Instant, to: Temporal.Instant;
+      try {
+        from = instant(range?.attrs.start); to = instant(range?.attrs.end);
+        if (Temporal.Instant.compare(from, to) >= 0) throw new Error('Invalid window');
+      } catch { return c.body('expected a valid time-range with UTC start and end', 400); }
+      const rows = await resourcesIn(tx, [view.calendar.id], { from: new Date(from.epochMilliseconds), to: new Date(to.epochMilliseconds) });
+      const result = freeBusy(rows.map((row) => row.data), { from, to }, view.calendar.timezone ?? 'UTC');
+      if (result.truncated) return davError(403, 'd:number-of-matches-within-limits');
+      const stamp = (value: Temporal.Instant) => value.toString({ smallestUnit: 'second' }).replace(/[-:]/g, '');
+      const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Supercal//EN', 'BEGIN:VFREEBUSY', `DTSTART:${stamp(from)}`, `DTEND:${stamp(to)}`, `DTSTAMP:${stamp(Temporal.Now.instant())}`,
+        ...result.intervals.map((interval) => `FREEBUSY;FBTYPE=${interval.status === 'busy' ? 'BUSY' : 'BUSY-TENTATIVE'}:${stamp(interval.start)}/${stamp(interval.end)}`), 'END:VFREEBUSY', 'END:VCALENDAR', ''];
+      return c.body(lines.join('\r\n'), 200, { 'Content-Type': 'text/calendar; charset=utf-8' });
+    }
     const want = wanted(body);
     const w = xmlWriter();
     // Rendered objects carry the index's ETag, so a listing and a report agree.
@@ -373,12 +400,10 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     if (node.kind !== 'object' && node.kind !== 'collection') return davError(403, 'd:need-privileges');
     const calendar = node.view.calendar;
     if (!calendar || node.view.privileges === 'read') return davError(403, 'd:need-privileges');
-    // Recheck after acquiring the same lock used by REST, including soft-deletion races.
+    // Recheck the grant after the write lock, including concurrent revocation and deletion.
     await lockHostedCalendar(tx, calendar.id);
-    const [active] = await tx.select({ id: sourceCalendar.id }).from(sourceCalendar)
-      .innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId))
-      .where(and(eq(sourceCalendar.id, calendar.id), eq(sourceCalendar.state, 'active'), eq(calendarAccount.ownerUserId, principal.userId)));
-    if (!active) return notFound();
+    const { calendar: active, access } = await requireAccess(tx, principal, calendar.id, 'write');
+    if (active.state !== 'active') return notFound();
     const ifMatch = c.req.header('If-Match');
     if (node.kind === 'object') {
       if (!node.name.endsWith('.ics') || node.name.includes('/') || Buffer.byteLength(node.name) > 255) return davError(403, 'd:need-privileges');
@@ -395,8 +420,10 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
         await deleteObject(tx, calendar, { objectName: node.name, ...(ifMatch !== undefined && { ifMatch }) });
         return c.body(null, 204);
       }
-    } else if (node.view.privileges === 'manage') {
+    } else {
       if (c.req.method === 'DELETE') {
+        if (node.view.shared) return davError(403, 'd:need-privileges');
+        await requireAccess(tx, principal, calendar.id, 'owner');
         await deleteCalendar(tx, feeds, calendar.id);
         await audit(tx, principal, 'calendar.delete', { type: 'calendar', id: calendar.id });
         return c.body(null, 204);
@@ -405,6 +432,7 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
         const body = parseXml(await c.req.text());
         if (!is(body, NS.DAV, 'propertyupdate')) return c.body('expected a DAV:propertyupdate body', 400);
         const { entries, values, failed } = metadataProperties(body, false);
+        if (!atLeast(access, 'manage')) for (const { prop } of entries) failed.add(prop);
         if (!entries.length) return c.body('expected properties', 400);
         if (!failed.size) {
           await tx.update(sourceCalendar).set({ ...values, updatedAt: new Date() }).where(eq(sourceCalendar.id, calendar.id));

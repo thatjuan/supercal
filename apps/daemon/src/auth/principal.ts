@@ -1,6 +1,6 @@
 /**
  * The principal behind a management request (architecture §7). `requirePrincipal` resolves it for
- * every `/api/v1/*` route and sets `c.var.principal`; routes authorize with `policy.ts`.
+ * every `/api/v1/*` route and sets `c.var.principal`; routes authorize with `policy.ts` and `hosted/access.ts`.
  */
 import { apiKeyTenant, member, parseTenantId, user, withControl, type TenantId } from '@supercal/db';
 import { and, eq } from 'drizzle-orm';

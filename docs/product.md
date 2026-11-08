@@ -32,9 +32,34 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   Create, edit and delete events from calendar apps through read-write CalDAV; create and rename
   calendars there too. Each device gets its own named DAV login with a password shown once and
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
-  Event REST writes follow in #25; the dashboard adds no event editor.
+  The REST API also supports JSCalendar event reads and writes; the dashboard adds no event editor.
 - Keep at most 100 retained hosted calendars per user, with up to 50,000 objects per calendar and
   1 MiB per object. Attendees are stored as data; Supercal sends no invitations.
+
+### Calendar sharing and free-busy
+
+- Share a calendar with a colleague or everyone in the tenant through the API. Free-busy grants
+  expose busy time; read adds event details; write adds event editing; manage adds calendar
+  metadata, shares and published links. Only owners and tenant admins can grant or remove
+  manage access, delete a calendar or restore it. Imported calendars support free-busy and read.
+- Read grants show private and confidential events as “Busy”. Write and manage grants show
+  those events in full so editors can edit them. Shared calendar listings include the owner's
+  name; publication membership remains visible only to the owner and tenant admins.
+- Readable shared calendars appear in the recipient's device CalDAV home, named with the owner
+  in parentheses. Tenant admin status adds no device collections by itself; an admin needs an
+  explicit read-or-higher grant for a colleague's calendar. Writable hosted shares support event creation, editing and deletion. Calendar
+  apps cannot delete a shared calendar, even with manage access. Changing between read and
+  write requires a client resync because object addresses and ETags change.
+- Query up to 50 calendars for a window of at most 62 days through `POST /api/v1/free-busy`.
+  Results merge busy and tentative time, with busy taking precedence. Cancelled and transparent
+  events do not count; private events do. Readable device CalDAV collections also support
+  free-busy REPORT. Free-busy-only grants use REST and receive no event-change stream.
+- Revoke a grant for the recipient's next request. Removing a tenant member deletes personal
+  grants, so re-inviting them does not restore access. Tenant-wide grants apply to current members.
+- Sharing stays within one tenant; people outside it use published links. Invitation emails,
+  CalDAV sharing extensions and per-user names, colours and alerts are not included. Event
+  alarms are shared by everyone who can edit the event. A shared calendar cannot be republished
+  in the recipient's feed. The dashboard adds no sharing screen.
 
 ### Feeds and publications
 

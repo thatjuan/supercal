@@ -17,3 +17,20 @@ export async function seedHosted() {
   const calendar = await withTenant(DEVICE.tenantId, (tx) => createCalendar(tx, createFeedService(testSecrets), DEVICE.userId, { name: 'Hosted' }));
   return { login, calendar };
 }
+
+/** Two colleagues exercise shared device collections through real clients. */
+export async function seedShared(calendar: Awaited<ReturnType<typeof seedHosted>>['calendar']) {
+  const { calendarShare } = await import('@supercal/db');
+  const { writeObject } = await import('../../src/hosted/objects.ts');
+  const { eventIcs } = await import('./fixture.ts');
+  const read = { userId: 'shared_dav_reader', username: 'shared-reader-abcdefgh', password: 'shared-reader-password', access: 'read' } as const;
+  const write = { userId: 'shared_dav_writer', username: 'shared-writer-abcdefgh', password: 'shared-writer-password', access: 'write' } as const;
+  for (const colleague of [read, write]) {
+    await unsafeDb().insert(user).values({ id: colleague.userId, name: colleague.userId, email: `${colleague.userId}@example.test`, updatedAt: new Date() });
+    await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: DEVICE.tenantId, userId: colleague.userId, role: 'member', createdAt: new Date() });
+    await unsafeDb().insert(davLogin).values({ tenantId: DEVICE.tenantId, userId: colleague.userId, name: 'Shared client', username: colleague.username, passwordHash: await Bun.password.hash(colleague.password, { algorithm: 'argon2id' }) });
+    await withTenant(DEVICE.tenantId, (tx) => tx.insert(calendarShare).values({ tenantId: DEVICE.tenantId, calendarId: calendar.id, granteeUserId: colleague.userId, access: colleague.access, createdBy: DEVICE.userId }));
+  }
+  await withTenant(DEVICE.tenantId, (tx) => writeObject(tx, calendar, { objectName: 'private.ics', payload: eventIcs('private-shared', ['DTSTART:20261109T090000Z', 'DURATION:PT1H', 'CLASS:PRIVATE', 'SUMMARY:Secret']) }));
+  return { read, write };
+}

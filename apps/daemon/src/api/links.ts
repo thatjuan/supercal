@@ -1,11 +1,11 @@
 /** Published links: independent, view-only bearer URLs for one owned calendar. */
 import { createRoute, z } from '@hono/zod-openapi';
-import { calendarAccount, calendarLink, newId, privacy, sourceCalendar, withTenant, type CalendarLink, type SecretBox, type SourceCalendarId, type TenantTx } from '@supercal/db';
+import { calendarLink, newId, privacy, sourceCalendar, withTenant, type CalendarLink, type SecretBox, type SourceCalendarId, type TenantTx } from '@supercal/db';
 import { and, asc, count, eq } from 'drizzle-orm';
-import { canManageOwned } from '../auth/policy.ts';
+import { requireAccess } from '../hosted/access.ts';
 import type { Principal } from '../auth/principal.ts';
 import { newIcsToken, newUidSecret } from '../feeds/credentials.ts';
-import { audit, createApiApp, Forbidden, NotFound, ProblemError, problemResponses, typeId } from './kit/index.ts';
+import { audit, createApiApp, NotFound, ProblemError, problemResponses, typeId } from './kit/index.ts';
 import { calendarSubscribeLinks, SubscribeLinks } from './subscribe.ts';
 
 export const CalendarLinkInfo = z.object({
@@ -57,12 +57,8 @@ function toInfo(row: CalendarLink): z.infer<typeof CalendarLinkInfo> {
 
 /** Locks the calendar so concurrent link creations cannot exceed its quota. RLS hides other tenants. */
 async function managedCalendar(tx: TenantTx, principal: Principal, id: SourceCalendarId) {
-  const [row] = await tx.select({ calendar: sourceCalendar, ownerUserId: calendarAccount.ownerUserId })
-    .from(sourceCalendar).innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId))
-    .where(eq(sourceCalendar.id, id)).for('update', { of: sourceCalendar });
-  if (!row) throw new NotFound('No such calendar');
-  if (!canManageOwned(principal, row.ownerUserId)) throw new Forbidden('You can only manage your own calendars');
-  return row.calendar;
+  await tx.select({ id: sourceCalendar.id }).from(sourceCalendar).where(eq(sourceCalendar.id, id)).for('update');
+  return (await requireAccess(tx, principal, id, 'manage')).calendar;
 }
 
 export function linkRoutes(secrets: SecretBox) {

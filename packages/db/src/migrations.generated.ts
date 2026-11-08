@@ -13,6 +13,7 @@ import m8 from '../migrations/0008_google_sinks.sql' with { type: 'text' };
 import m9 from '../migrations/0009_hosted_calendars.sql' with { type: 'text' };
 import m10 from '../migrations/0010_calendar_links.sql' with { type: 'text' };
 import m11 from '../migrations/0011_dav_logins.sql' with { type: 'text' };
+import m12 from '../migrations/0012_calendar_shares.sql' with { type: 'text' };
 
 /** Every migration file, by name, plus the drizzle-kit journal. */
-export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2, '0003_tenant_organization.sql': m3, '0004_feeds.sql': m4, '0005_sync_engine.sql': m5, '0006_google_provider.sql': m6, '0007_ops_grants.sql': m7, '0008_google_sinks.sql': m8, '0009_hosted_calendars.sql': m9, '0010_calendar_links.sql': m10, '0011_dav_logins.sql': m11 } };
+export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2, '0003_tenant_organization.sql': m3, '0004_feeds.sql': m4, '0005_sync_engine.sql': m5, '0006_google_provider.sql': m6, '0007_ops_grants.sql': m7, '0008_google_sinks.sql': m8, '0009_hosted_calendars.sql': m9, '0010_calendar_links.sql': m10, '0011_dav_logins.sql': m11, '0012_calendar_shares.sql': m12 } };

@@ -54,3 +54,15 @@ export async function eventRecurrence(id: string, uid: string) {
   }
   return data.entries;
 }
+
+/** The share grantee union narrows on type. */
+export async function shareGrantees(id: string) {
+  const { data, error } = await client.GET('/api/v1/calendars/{id}/shares', { params: { path: { id } } });
+  if (error) return error;
+  return data.items.map(({ grantee }) => {
+    if (grantee.type === 'user') return grantee.userId;
+    // @ts-expect-error a tenant grant has no userId
+    void grantee.userId;
+    return 'tenant';
+  });
+}
