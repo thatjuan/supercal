@@ -27,6 +27,92 @@
       }
     },
     "schemas": {
+      "Instance": {
+        "type": "object",
+        "properties": {
+          "signup": {
+            "type": "string",
+            "enum": [
+              "open",
+              "invite",
+              "disabled"
+            ],
+            "description": "`SUPERCAL_SIGNUP`: who may create an account"
+          },
+          "setupRequired": {
+            "type": "boolean",
+            "description": "No user exists yet: whoever signs up first becomes the operator, whatever `signup` says"
+          },
+          "providers": {
+            "type": "object",
+            "properties": {
+              "google": {
+                "type": "boolean"
+              },
+              "microsoft": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "google",
+              "microsoft"
+            ],
+            "description": "OAuth account providers the operator has configured (client id and secret)"
+          }
+        },
+        "required": [
+          "signup",
+          "setupRequired",
+          "providers"
+        ]
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status"
+        ]
+      },
+      "FieldError": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ]
+      },
       "Me": {
         "type": "object",
         "properties": {
@@ -127,53 +213,6 @@
               "role"
             ]
           }
-        ]
-      },
-      "Problem": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri"
-          },
-          "title": {
-            "type": "string"
-          },
-          "status": {
-            "type": "integer"
-          },
-          "detail": {
-            "type": "string"
-          },
-          "instance": {
-            "type": "string"
-          },
-          "errors": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FieldError"
-            }
-          }
-        },
-        "required": [
-          "type",
-          "title",
-          "status"
-        ]
-      },
-      "FieldError": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "message"
         ]
       },
       "TenantList": {
@@ -1661,6 +1700,37 @@
     "parameters": {}
   },
   "paths": {
+    "/api/v1/instance": {
+      "get": {
+        "operationId": "getInstance",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "This install’s sign-up mode and providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "getMe",

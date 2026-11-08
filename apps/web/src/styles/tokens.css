@@ -1,0 +1,49 @@
+/*
+ * Supercal design tokens, taken from the approved shell (design/shell-direction-a.png, converted to
+ * design/shell-direction-a.html): a cool grey page, white hairline panels, dark ink and one green
+ * accent. The dark theme keeps the same roles. Each colour is `light-dark(light, dark)`, so the
+ * theme is only `color-scheme`: the system's by default, forced by `<html data-theme>` (theme.ts).
+ * Components use tokens through the Tailwind theme in app.css (`bg-surface`, `text-ink-2`,
+ * `border-line`…), never raw values. Calendar colours are user data, not tokens: see lib/color.ts.
+ */
+:root {
+  color-scheme: light dark;
+
+  --bg: light-dark(#f6f7f9, #0f1012);
+  --surface: light-dark(#ffffff, #17191c); /* keep in step with SURFACE in lib/color.ts */
+  --surface-2: light-dark(#eff1f3, #212429);
+  --line: light-dark(#e1e4e8, #2a2e33);
+  --line-strong: light-dark(#ccd0d6, #3b4047);
+  --ink: light-dark(#10121f, #eceef1);
+  --ink-2: light-dark(#3d4151, #b4b8c0);
+  --ink-3: light-dark(#646a78, #8b909a);
+
+  /* The accent is green: the active nav item, publish toggles, the Live pill and primary actions. */
+  --accent: light-dark(#07872f, #3ec46d);
+  --accent-ink: light-dark(#ffffff, #06200f);
+  --accent-soft: light-dark(#e3f3eb, #163322);
+  --accent-text: light-dark(#006b22, #7ddc9a); /* accent text on accent-soft */
+
+  /* Badge tones beside the accent, such as the privacy levels (Title only, Busy only). */
+  --info: light-dark(#0b3a75, #9cc8ff);
+  --info-soft: light-dark(#e4f1ff, #16263d);
+  --violet: light-dark(#3b2a7a, #c9b6ff);
+  --violet-soft: light-dark(#f1eaff, #261d3d);
+
+  --success: light-dark(#07872f, #6cc08e);
+  --warning: light-dark(#8a5200, #e6ae4f);
+  --warning-soft: light-dark(#fdf1dc, #33280f);
+  --danger: light-dark(#b42318, #f2877d);
+  --danger-soft: light-dark(#fdecea, #3a1c1a);
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
