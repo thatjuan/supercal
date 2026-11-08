@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
 import { $api } from '../../api.ts';
 import { AuthLayout } from '../../components/auth-layout.tsx';
 import { ProblemAlert, toProblem } from '../../components/ui/problem-alert.tsx';
 import { redirectSearch } from '../../lib/redirect.ts';
-import { SignUpForm } from './-sign-up-form.tsx';
+import { CheckEmail, SignUpForm } from './-sign-up-form.tsx';
 
 export const Route = createFileRoute('/(auth)/sign-up')({ validateSearch: redirectSearch, component: SignUp });
 
@@ -18,6 +19,7 @@ function SignUp() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const instance = $api.useQuery('get', '/api/v1/instance');
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const footer = (
     <>
@@ -27,6 +29,9 @@ function SignUp() {
       </Link>
     </>
   );
+
+  // Ahead of the instance checks: the first user's sign-up ends `setupRequired`, so the next refetch closes sign-up.
+  if (confirming) return <CheckEmail email={confirming} />;
 
   if (instance.error) {
     return (
@@ -53,6 +58,8 @@ function SignUp() {
       footer={footer}
     >
       <SignUpForm
+        callbackURL={redirect ?? '/'}
+        onConfirmationSent={setConfirming}
         onSignedUp={async () => {
           queryClient.clear();
           await navigate({ to: redirect ?? '/' });

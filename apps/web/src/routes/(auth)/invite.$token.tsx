@@ -1,7 +1,8 @@
 /**
  * An invitation link (`/invite/<invitation id>`). Signed in, it accepts the invitation and switches
  * to that tenant; signed out, it offers sign-up with the invitation (which `invite` mode requires)
- * or sign-in, which returns here.
+ * or sign-in, which returns here. Where addresses need confirming, sign-up ends in a notice and the
+ * mailed link returns here, signed in, to accept.
  */
 import type { Problem } from '@supercal/api-client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,7 +12,7 @@ import { authClient } from '../../auth.ts';
 import { AuthLayout } from '../../components/auth-layout.tsx';
 import { Button } from '../../components/ui/button.tsx';
 import { ProblemAlert, toProblem } from '../../components/ui/problem-alert.tsx';
-import { SignUpForm } from './-sign-up-form.tsx';
+import { CheckEmail, SignUpForm } from './-sign-up-form.tsx';
 
 export const Route = createFileRoute('/(auth)/invite/$token')({ component: Invite });
 
@@ -22,6 +23,7 @@ function Invite() {
   const queryClient = useQueryClient();
   const [problem, setProblem] = useState<Problem | null>(null);
   const [pending, setPending] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   /** Accepts the invitation, makes its tenant active and opens the dashboard there. */
   async function accept() {
@@ -33,6 +35,8 @@ function Invite() {
     await navigate({ to: '/' });
   }
 
+  // Ahead of `isPending`, which the sign-up's own session refetch turns back on.
+  if (confirming && !session.data) return <CheckEmail email={confirming} />;
   if (session.isPending) return <AuthLayout title="Invitation">{null}</AuthLayout>;
 
   if (session.data) {
@@ -70,7 +74,7 @@ function Invite() {
         </>
       }
     >
-      <SignUpForm invitationId={token} submitLabel="Create account and join" onSignedUp={accept} />
+      <SignUpForm invitationId={token} submitLabel="Create account and join" callbackURL={`/invite/${token}`} onSignedUp={accept} onConfirmationSent={setConfirming} />
     </AuthLayout>
   );
 }
