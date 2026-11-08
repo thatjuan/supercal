@@ -1,12 +1,12 @@
 import type { FeedId, TenantId } from '@supercal/db';
 import { beforeAll, expect, test } from 'bun:test';
-import { createFeedAuth, type FeedLogin } from './auth.ts';
+import { createFeedAuth, type DavLogin } from './auth.ts';
 
 const basic = (user: string, pass: string) => `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
-let login: FeedLogin;
+let login: DavLogin;
 
 beforeAll(async () => {
-  login = { feedId: 'feed_1' as FeedId, tenantId: 'org_1' as TenantId, passwordHash: await Bun.password.hash('secret', { algorithm: 'argon2id' }) };
+  login = { kind: 'feed', id: 'feed_1' as FeedId, tenantId: 'org_1' as TenantId, passwordHash: await Bun.password.hash('secret', { algorithm: 'argon2id' }) };
 });
 
 function setup() {
@@ -29,10 +29,10 @@ test('a verified login is cached for five minutes, then verified again', async (
   expect(lookups()).toBe(2);
 });
 
-test('forgetFeed drops cached logins of that feed', async () => {
+test('forget drops cached logins of that feed', async () => {
   const { auth, lookups } = setup();
   await auth.authenticate(basic('alice', 'secret'), 'ip');
-  auth.forgetFeed(login.feedId);
+  auth.forget(login.id);
   await auth.authenticate(basic('alice', 'secret'), 'ip');
   expect(lookups()).toBe(2);
 });

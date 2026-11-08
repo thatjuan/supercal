@@ -45,7 +45,7 @@ export type NewAccount = {
 /** The account, if visible in the tenant and manageable by `principal`. */
 export async function loadAccount(tx: TenantTx, principal: Principal, id: AccountId): Promise<CalendarAccount> {
   const [row] = await tx.select().from(calendarAccount).where(eq(calendarAccount.id, id));
-  if (!row) throw new NotFound('No such account');
+  if (!row || row.provider === 'hosted') throw new NotFound('No such account');
   if (!canManageOwned(principal, row.ownerUserId)) throw new Forbidden('You can only manage your own accounts');
   return row;
 }

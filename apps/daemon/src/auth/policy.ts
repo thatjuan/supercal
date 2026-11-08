@@ -1,7 +1,7 @@
 /**
  * Authorization helpers (architecture §7). Routes use these instead of inline role checks: members
  * manage their own resources, admins everything in the tenant, owners also tenant settings, and
- * the operator tenants across the install.
+ * the operator tenants across the install. Calendar capabilities use `hosted/access.ts`.
  */
 import { createMiddleware } from 'hono/factory';
 import { Forbidden } from '../api/kit/problem.ts';

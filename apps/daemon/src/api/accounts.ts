@@ -7,9 +7,9 @@
  * before anything is stored.
  */
 import { createRoute, z } from '@hono/zod-openapi';
-import { accountProvider, calendarAccount, connectionStatus, withTenant, type CalendarAccount } from '@supercal/db';
+import { CONNECTED_PROVIDERS, calendarAccount, connectionStatus, withTenant, type CalendarAccount } from '@supercal/db';
 import { AuthFailedError, EgressBlockedError, ICLOUD_SERVER_URL, ProviderThrottledError, ProviderUnavailableError, UnsupportedAuthError } from '@supercal/providers';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, ne } from 'drizzle-orm';
 import { hasRole } from '../auth/policy.ts';
 import { NoAdapterError } from '../sync/context.ts';
 import { connectAccount, deleteAccount, loadAccount, replaceCredentials, requestSync, updateAccount, type NewAccount as NewAccountInput } from '../sync/accounts.ts';
@@ -21,7 +21,7 @@ import { createApiApp, etagOf, ifMatchHeaders, ProblemError, problemResponses, r
 const Account = z
   .object({
     id: typeId('acc'),
-    provider: z.enum(accountProvider.enumValues),
+    provider: z.enum(CONNECTED_PROVIDERS),
     ownerUserId: z.string(),
     displayName: z.string(),
     email: z.string().nullable(),
@@ -117,17 +117,20 @@ function credentialsFor(account: CalendarAccount, input: CredentialsUpdate) {
 
 const AccountPatch = z.object({ displayName: DisplayName.optional(), autoPublish: z.boolean().optional() });
 
-const toAccount = ({ id, provider, ownerUserId, displayName, email, serverUrl, status, statusDetail, autoPublish }: CalendarAccount) => ({
-  id,
-  provider,
-  ownerUserId,
-  displayName,
-  email,
-  serverUrl,
-  status,
-  statusDetail,
-  autoPublish,
-});
+const toAccount = ({ id, provider, ownerUserId, displayName, email, serverUrl, status, statusDetail, autoPublish }: CalendarAccount) => {
+  if (provider === 'hosted') throw new Error('Hosted accounts are hidden');
+  return {
+    id,
+    provider,
+    ownerUserId,
+    displayName,
+    email,
+    serverUrl,
+    status,
+    statusDetail,
+    autoPublish,
+  };
+};
 
 const APPLE_APP_PASSWORDS = 'https://support.apple.com/en-us/102654';
 
@@ -241,7 +244,7 @@ export const accountRoutes = createApiApp()
       tx
         .select()
         .from(calendarAccount)
-        .where(hasRole(principal, 'admin') ? undefined : eq(calendarAccount.ownerUserId, principal.userId))
+        .where(and(ne(calendarAccount.provider, 'hosted'), hasRole(principal, 'admin') ? undefined : eq(calendarAccount.ownerUserId, principal.userId)))
         .orderBy(asc(calendarAccount.id)),
     );
     return c.json({ items: rows.map(toAccount) }, 200);

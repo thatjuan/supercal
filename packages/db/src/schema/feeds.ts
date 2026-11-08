@@ -41,6 +41,23 @@ export const feed = pgTable(
   (t) => [uniqueIndex('feed_default_unique').on(t.tenantId, t.ownerUserId).where(sql`is_default`)],
 );
 
+/** A bearer URL publishing one calendar, with an independent token and privacy UID key. */
+export const calendarLink = pgTable('calendar_link', {
+  id: idColumn('lnk'),
+  tenantId: tenantId(),
+  calendarId: text('calendar_id')
+    .$type<SourceCalendarId>()
+    .notNull()
+    .references(() => sourceCalendar.id, { onDelete: 'cascade' }),
+  name: text('name'),
+  tokenHash: text('token_hash').notNull().unique(),
+  privacy: privacy('privacy').notNull(),
+  uidSecret: text('uid_secret').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdBy: text('created_by').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** A calendar in a feed: one source (passthrough) or a merge of several (virtual). */
 export const publication = pgTable(
   'publication',

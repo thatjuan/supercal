@@ -128,6 +128,13 @@ describe('RemoveDialog', () => {
   };
   const calendar = (id: string, publicationIds: string[]): Calendar => ({
     id,
+    kind: 'connected',
+  access: 'owner',
+  owner: { id: 'user_1', name: 'Owner' },
+    description: null,
+    sortOrder: 0,
+    updatedAt: '2026-11-08T00:00:00Z',
+    goneAt: null,
     accountId: 'acc_1',
     name: id,
     color: null,

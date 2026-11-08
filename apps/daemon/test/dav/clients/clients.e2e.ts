@@ -10,13 +10,14 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEVICE, seedHosted, seedShared } from '../hosted-fixture.ts';
 import { ALICE, seed } from '../fixture.ts';
 
 const here = import.meta.dir;
 const MAIN = join(here, '../../../src/main.ts');
 
 /** Seeds a scratch database, starts a daemon on it, runs `cmd` against it, and tears both down. */
-async function runClient(name: string, cmd: string[]) {
+async function runClient(name: string, cmd: string[], hosted = false) {
   const scratch = await scratchDatabase(`clients_${name}`);
   const workdir = await mkdtemp(join(tmpdir(), `supercal-${name}-`));
   let daemon: ReturnType<typeof Bun.spawn> | undefined;
@@ -24,6 +25,8 @@ async function runClient(name: string, cmd: string[]) {
     await migrate(scratch.url);
     connectDb(scratch.url);
     await seed();
+    const hostedWorld = hosted ? await seedHosted() : undefined;
+    const sharedWorld = name === 'shared_caldav' && hostedWorld ? await seedShared(hostedWorld.calendar) : undefined;
     await closeDb();
 
     const env = { ...process.env, DATABASE_URL: scratch.url, PORT: '0', SUPERCAL_INSECURE_DEV: '1', SUPERCAL_ROLES: 'dav', SUPERCAL_MIGRATE: 'off' };
@@ -32,7 +35,7 @@ async function runClient(name: string, cmd: string[]) {
     const port = await listeningPort(proc.stdout);
 
     const run = Bun.spawnSync(cmd, {
-      env: { ...env, DAV_URL: `http://localhost:${port}/`, DAV_USER: ALICE.username, DAV_PASS: ALICE.password, MUTATE: join(here, 'mutate.ts'), WORKDIR: workdir },
+      env: { ...env, DAV_URL: `http://localhost:${port}/`, DAV_USER: hosted ? DEVICE.username : ALICE.username, DAV_PASS: hosted ? DEVICE.password : ALICE.password, HOSTED_CALENDAR: hostedWorld?.calendar.id ?? '', SHARED_READ_USER: sharedWorld?.read.username ?? '', SHARED_READ_PASS: sharedWorld?.read.password ?? '', SHARED_WRITE_USER: sharedWorld?.write.username ?? '', SHARED_WRITE_PASS: sharedWorld?.write.password ?? '', SHARED_UPGRADE: join(here, 'shared-upgrade.ts'), MUTATE: join(here, 'mutate.ts'), WORKDIR: workdir },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -62,6 +65,30 @@ async function listeningPort(stdout: ReadableStream<Uint8Array>): Promise<number
 }
 
 describe.skipIf(!testDatabaseUrl)('real CalDAV clients', () => {
+  test('python caldav shared calendars and free-busy', async () => {
+    const result = await runClient('shared_caldav', ['uv', 'run', '--quiet', '--with', 'caldav==3.7.0', 'python', join(here, 'shared_caldav.py')], true);
+    expect(result.output).toContain('OK');
+    expect(result.exitCode).toBe(0);
+  }, 120_000);
+
+  test('python caldav read-write hosted calendar', async () => {
+    const result = await runClient('hosted_caldav', ['uv', 'run', '--quiet', '--with', 'caldav==3.7.0', 'python', join(here, 'hosted_caldav.py')], true);
+    expect(result.output).toContain('OK');
+    expect(result.exitCode).toBe(0);
+  }, 120_000);
+
+  test('tsdav read-write hosted calendar', async () => {
+    const result = await runClient('hosted_tsdav', ['bun', join(here, 'hosted_tsdav.ts')], true);
+    expect(result.output).toContain('OK');
+    expect(result.exitCode).toBe(0);
+  }, 120_000);
+
+  test('vdirsyncer two-way hosted calendar', async () => {
+    const result = await runClient('hosted_vdirsyncer', ['sh', join(here, 'hosted_vdirsyncer.sh')], true);
+    expect(result.output).toContain('OK');
+    expect(result.exitCode).toBe(0);
+  }, 300_000);
+
   test('python caldav 3.7.0', async () => {
     const { exitCode, output } = await runClient('caldav', ['uv', 'run', '--quiet', '--with', 'caldav==3.7.0', 'python', join(here, 'caldav_lib.py')]);
     expect(output).toContain('OK');

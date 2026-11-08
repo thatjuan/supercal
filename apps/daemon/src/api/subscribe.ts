@@ -19,9 +19,9 @@ const FRESHNESS = {
   outlook: 'about 3–6 hours, sometimes longer',
 } as const;
 
-const SubscribeLinks = z
+export const SubscribeLinks = z
   .object({ google: z.url(), outlookPersonal: z.url(), outlookWork: z.url() })
-  .openapi('SubscribeLinks', { description: 'One-click links that subscribe to the combined feed (`all.ics`)' });
+  .openapi('SubscribeLinks', { description: 'One-click links for subscribing to an ICS calendar URL' });
 
 const SubscribeInfo = z
   .object({
@@ -88,9 +88,13 @@ const param = (value: string) => encodeURIComponent(value).replaceAll(encodeURIC
 
 /** One-click links for the combined feed. Google takes the webcal URL, Outlook the https one. */
 export function subscribeLinks(publicUrl: string, feedName: string, token: string): z.infer<typeof SubscribeLinks> {
-  const url = `${publicUrl}${icsPath(token, 'all')}`;
+  return calendarSubscribeLinks(`${publicUrl}${icsPath(token, 'all')}`, feedName);
+}
+
+/** One-click subscriptions for an absolute ICS URL. */
+export function calendarSubscribeLinks(url: string, name: string): z.infer<typeof SubscribeLinks> {
   const webcal = url.replace(/^https?:/, 'webcal:');
-  const outlook = (host: string) => `https://${host}/calendar/0/addfromweb?url=${param(url)}&name=${param(feedName)}`;
+  const outlook = (host: string) => `https://${host}/calendar/0/addfromweb?url=${param(url)}&name=${param(name)}`;
   return {
     google: `https://calendar.google.com/calendar/render?cid=${param(webcal)}`,
     outlookPersonal: outlook('outlook.live.com'),

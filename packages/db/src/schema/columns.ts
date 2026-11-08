@@ -16,15 +16,15 @@ export const idColumn = <P extends IdPrefix>(prefix: P) =>
     .primaryKey()
     .$defaultFn(() => newId(prefix));
 
-/** A time span; `end: 'infinity'` is unbounded (an endless RRULE), as in `@supercal/core`. Bounds are `[start, end)`. */
+/** A time span; `end: 'infinity'` is unbounded (an endless RRULE), as in `@supercal/core`. Bounds are `[start, end)`; a zero-duration event is the closed point `[start, start]`. */
 export type Span = { start: Date; end: Date | 'infinity' };
 
-const RANGE = /^\[(?:"([^"]+)"|([^,]+)),(?:"([^"]+)"|([^)]+))\)$/;
+const RANGE = /^\[(?:"([^"]+)"|([^,]+)),(?:"([^"]+)"|([^\]\)]+))[\]\)]$/;
 
 /** Postgres `tstzrange`, which Drizzle has no native column for. */
 export const tstzrange = customType<{ data: Span; driverData: string }>({
   dataType: () => 'tstzrange',
-  toDriver: ({ start, end }) => `[${start.toISOString()},${end === 'infinity' ? end : end.toISOString()})`,
+  toDriver: ({ start, end }) => `[${start.toISOString()},${end === 'infinity' ? end : end.toISOString()}${end !== 'infinity' && start.getTime() === end.getTime() ? ']' : ')'}`,
   fromDriver: (value) => {
     const match = RANGE.exec(value);
     const start = match?.[1] ?? match?.[2];

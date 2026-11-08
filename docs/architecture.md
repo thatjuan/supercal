@@ -1,6 +1,6 @@
 # Supercal: architecture
 
-Status: decided, 2026-11-07. Supersedes the hypotheses in `docs/brief.md`. Product scope is in `docs/product.md`. Evidence for every decision marked *(spike)* is in `spikes/*/FINDINGS.md`: `feed` (Meridian), `ingest` (Astrolabe), `platform` (Gnomon).
+Status: decided, 2026-11-08. Supersedes the hypotheses in `docs/brief.md`. Product scope is in `docs/product.md`. Evidence for every decision marked *(spike)* is in `spikes/*/FINDINGS.md`: `feed` (Meridian), `ingest` (Astrolabe), `platform` (Gnomon).
 
 ## 1. Shape
 
@@ -45,14 +45,15 @@ Status: decided, 2026-11-07. Supersedes the hypotheses in `docs/brief.md`. Produ
 
 Vocabulary from `docs/brief.md`: tenant, account, source calendar, feed, publication (passthrough or virtual), sink.
 
-- **Everything published is a publication.** "The user chose not to publish calendar X" means X's passthrough publication in that feed is disabled. When an account discovers a calendar, a passthrough publication is created in the owner's default feed, enabled if the account's `auto_publish` is on.
+- **Every calendar in a feed is a publication.** "The user chose not to publish calendar X" means X's passthrough publication in that feed is disabled. When an account discovers a calendar, a passthrough publication is created in the owner's default feed, enabled if the account's `auto_publish` is on.
+- A hosted calendar is a source calendar whose provider is Supercal. Its events live in Supercal, under one hidden `hosted` account per user (§17). Connected calendars retain their provider as the authority.
 - A virtual publication references ≥2 source calendars from any accounts of the same owner and tenant. A source calendar can appear in any number of publications.
 - A feed belongs to one user in one tenant. Admins can manage feeds of members in their tenant.
 
 ### Identifiers
 
 - Tenant = Better Auth `organization`. `tenant_id` is **text** (Better Auth IDs are opaque strings) *(platform)*.
-- Our own entities use prefixed TypeIDs as text: `acc_…`, `cal_…`, `feed_…`, `pub_…`, `snk_…`. Exposed as-is in the API. Branded TS types in `packages/db` prevent mixing.
+- Our own entities use prefixed TypeIDs as text: `acc_…`, `cal_…`, `feed_…`, `pub_…`, `snk_…`, `lnk_…`, `shr_…` (calendar share), `dvl_…` (device DAV login). Exposed as-is in the API. Branded TS types in `packages/db` prevent mixing.
 - Three identities of an event are distinct and never conflated *(ingest)*: provider object id (`source_object` key within a source calendar), iCalendar UID (used for merging and output), and recurrence identity (RECURRENCE-ID / original start).
 
 ## 4. Data model (Postgres)
@@ -64,14 +65,17 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
 | Table | Purpose / key columns |
 | --- | --- |
 | `api_key_tenant` | `api_key_id` PK → apikey, `tenant_id`, `user_id`. Immutable binding written only by our API *(platform: key metadata is user-editable, so never trust it)*. |
-| `calendar_account` | `id`, `owner_user_id`, `provider` (`google`, `microsoft`, `icloud`, `caldav`, `ics`), `display_name`, `provider_subject` (stable provider identity), `email`, `server_url`, `credentials` (encrypted, §7), `status` (`active`, `reauth_required`, `error`, `disabled`), `status_detail`, `auto_publish`. |
-| `source_calendar` | `id`, `account_id`, `provider_calendar_id`, `name`, `color`, `timezone`, `capabilities` jsonb (incremental mode, push), `state` (`active`, `gone`), `freshness` jsonb (last success, push active, expected latency). Unique `(account_id, provider_calendar_id)`. |
-| `source_object` | Raw layer: exactly what the provider returned, for every provider. PK `(source_calendar_id, provider_object_id)`. `format` (`ical`, `google`, `graph`), `payload` (iCalendar text or JSON), `etag` (provider revision: CalDAV etag, Google etag, Graph changeKey), `group_uid` (the iCalendar UID this object contributes to), `original_start` (for exceptions), `seen_generation`, `dirty`, `normalizer_version`. Kept for every provider so re-normalisation never needs a refetch *(ingest review)*. |
-| `resource` | Derived layer: one iCalendar object (master + overrides) per UID per source calendar. PK `(source_calendar_id, uid)`, so a passthrough collection can never hold two objects with one UID (RFC 4791 §5.3.2.1) *(feed review)*. `data` jsonb (`EventResource` as jCal), `revision` (hash of `data`), `sequence`, `last_modified`, `organizer`, `span` tstzrange, `completeness` (`complete`, `incomplete` + reason), `deleted` (tombstone), `seq` bigint, `changed_at`. Indexes: GiST `span`, `(source_calendar_id, seq)`. |
+| `calendar_account` | `id`, `owner_user_id`, `provider` (`google`, `microsoft`, `icloud`, `caldav`, `ics`, `hosted`), `display_name`, `provider_subject` (stable provider identity), `email`, `server_url`, `credentials` (encrypted, §7), `status` (`active`, `reauth_required`, `error`, `disabled`), `status_detail`, `auto_publish`. |
+| `source_calendar` | `id`, `account_id`, `provider_calendar_id`, `name`, `color`, `timezone`, `description`, `sort_order` (default 0), `sync_epoch` (default 0), `updated_at`, `gone_at` (hosted soft deletion), `capabilities` jsonb (incremental mode, push), `state` (`active`, `gone`), `freshness` jsonb (last success, push active, expected latency). Unique `(account_id, provider_calendar_id)`. |
+| `source_object` | Raw layer: exactly what the provider returned, for every connected provider; the authoritative iCalendar payload for hosted calendars. PK `(source_calendar_id, provider_object_id)`. `format` (`ical`, `google`, `graph`), `payload` (iCalendar text or JSON), `etag` (provider revision: CalDAV etag, Google etag, Graph changeKey), `group_uid` (the iCalendar UID this object contributes to), `original_start` (for exceptions), `seen_generation`, `dirty`, `normalizer_version`. Kept for every provider so re-normalisation never needs a refetch *(ingest review)*. |
+| `resource` | Derived layer: one iCalendar object (master + overrides) per UID per source calendar. PK `(source_calendar_id, uid)`, so a passthrough collection can never hold two objects with one UID (RFC 4791 §5.3.2.1) *(feed review)*. `object_name` (hosted CalDAV name, retained on tombstones; null for imported calendars), `data` jsonb (`EventResource` as jCal), `revision` (hash of `data`), `sequence`, `last_modified`, `organizer`, `span` tstzrange, `completeness` (`complete`, `incomplete` + reason), `deleted` (tombstone), `seq` bigint, `changed_at`. Indexes: GiST `span`, `(source_calendar_id, seq)`. |
 | `graph_occurrence` | `(source_calendar_id, master_id, occurrence_id)` PK, `original_start`. Resolves Graph `cancelledOccurrences` ids *(ingest)*. |
 | `sync_target` | The scheduler. `id`, `kind` (`discover`, `events`, `push_renew`, `sink`), `target_id`, `cursor` jsonb (versioned, with query fingerprint), `next_run_at`, `lease_until`, `lease_owner`, `lease_version`, `wake_generation`, `attempts`, `last_error`, `retry_after`, `last_success_at`. Unique `(kind, target_id)`. |
 | `push_lease` | `account_id`, `target` (`account` for Graph mailbox-wide subscriptions, `calendar` or `calendar-list` for Google), `target_id`, `provider_channel_id`, `provider_resource_id`, `expires_at`, `secret_hash`, `provider_state`. Overlap allowed during Google renewal. |
 | `feed` | `id`, `owner_user_id`, `name`, `is_default`, `caldav_username` (unique, `[a-z0-9-]`), `caldav_password_hash` (argon2id), `ics_token_hash` (sha256), `uid_secret` (encrypted; HMAC key for privacy UIDs). At most one default feed per user and tenant (partial unique index). |
+| `calendar_share` | `id` (`shr`), `tenant_id`, `calendar_id` (cascade), nullable `grantee_user_id` (cascade; null means every tenant member), ordered `access` (`free-busy`, `read`, `write`, `manage`), `created_by`, `created_at`, `updated_at`. Partial unique indexes separate personal and tenant grants for Postgres 14; `(tenant_id, grantee_user_id)` indexes listing. |
+| `calendar_link` | `id`, `calendar_id` (cascade), optional `name`, unique `token_hash` (sha256), immutable `privacy`, `uid_secret` (encrypted per-link HMAC key), nullable `expires_at`, `created_by`, `created_at`. Several independent view-only URLs may publish one hosted or imported calendar. |
+| `dav_login` | Per-device credential: `id` (`dvl_…`), `tenant_id`, `user_id` (cascades), `name`, globally unique `username`, argon2id `password_hash`, `last_used_at` (updated at most hourly), `created_at`. |
 | `publication` | `id`, `feed_id`, `kind` (`passthrough`, `virtual`), `slug`, `name`, `color`, `privacy` (`full`, `title-only`, `busy-only`), `filters` jsonb (`hideDeclined`, `hideCancelled`, `hideAllDay`), `keep_alarms`, `enabled`, `sort_order`, `epoch`, `config_version`, `status` (`ok`, `disabled-invalid`) + `status_detail` (set when Supercal disables it, e.g. a virtual publication left with one source). Slug unique per feed. |
 | `publication_source` | `(publication_id, source_calendar_id)` PK, `priority`. |
 | `sink`, `sink_event` | `sink(id, publication_id, account_id, provider, provider_subject, provider_calendar_id, status)`; `sink_event(sink_id, uid, provider_event_id, applied_revision)`. |
@@ -94,9 +98,11 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
   3. *Privacy*, by allowlist, never blocklist *(feed)*:
      - `busy-only`: keep only timing, recurrence, STATUS and TRANSP; set SUMMARY "Busy"; drop TRANSP:TRANSPARENT masters, and turn transparent overrides into EXDATE; drop CREATED/LAST-MODIFIED/SEQUENCE/CLASS (they leak edit history and flags). DTSTAMP is required by RFC 5545, so it stays but is set to a constant (`19700101T000000Z`).
      - `title-only`: busy-only plus SUMMARY and COLOR; source CLASS PRIVATE/CONFIDENTIAL falls back to busy for that event.
-     - `full`: everything.
-     - All modes strip VALARM unless `keep_alarms`.
-  4. *UID*: passthrough + full keeps the source UID. Virtual + full → `b64url(sha256(pubId‖uid))[:26]@supercal`. Title-only/busy-only → `b64url(hmac(feed.uid_secret, pubId‖uid))[:26]@supercal`. A feed never repeats a UID across its collections, because iCloud rejects that and KOrganizer collapses it *(feed)*.
+     - Every spec names an audience: `owner` (feeds and sinks), `member` (another person in the tenant), or `public` (anyone holding a URL).
+     - `full`: owners retain everything; members retain everything for public events. PRIVATE/CONFIDENTIAL events become busy-only for members and the public, including the transparent-event rule above. Owners retain full private events; title-only always reduces private events to busy-only.
+     - Public `full` uses `TITLE_PROPS` plus DESCRIPTION, LOCATION, URL, CATEGORIES, GEO, CONFERENCE, CREATED, LAST-MODIFIED, SEQUENCE and DTSTAMP. Only TZID and RANGE parameters survive. ATTENDEE, ORGANIZER, COMMENT, CONTACT, ATTACH, all X- properties and all subcomponents (including VALARM) are absent. DTSTAMP is preserved in this mode.
+     - Owner/member full strips VALARM unless `keep_alarms`; title-only and busy-only always strip it.
+  4. *UID*: passthrough + full keeps the source UID. Virtual + full → `b64url(sha256(pubId‖uid))[:26]@supercal`. Title-only/busy-only → `b64url(hmac(feed.uid_secret, pubId‖uid))[:26]@supercal`. A feed never repeats a UID across its collections, because iCloud rejects that and KOrganizer collapses it *(feed)*. Published links use their own id and `calendar_link.uid_secret`, so two title-only or busy-only links on the same calendar produce unlinkable UIDs.
   5. *Href*: `<b64url(sha256(outputUid))[:22]>.ics`.
 
 ## 6. Change log, sync tokens, caching
@@ -106,14 +112,15 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
   2. `nextval('change_seq')` per change, then upsert/tombstone `resource` rows with that `seq`.
   3. `pg_notify('supercal_changes', '{"t":"<tenantId>","s":"<maxSeq>"}')`. The payload is bounded: identifiers only, never id lists *(platform review)*.
 
-  The sync runner (§8) fences before calling it. Maintenance jobs (re-normalisation) go through the same runner, so there is one write path and one lock order.
+  The sync runner (§8) fences before calling it. Connected-calendar re-normalisation goes through the same runner; hosted re-normalisation calls the shared group normalizer directly under its calendar lock (§17). Both finish with `recordChanges`.
 - **Lease fencing** lives in the sync runner: every transaction that writes `source_object`, `resource` or a cursor starts with `SELECT … FROM sync_target WHERE id = $1 AND lease_owner = $2 AND lease_version = $3 AND lease_until > clock_timestamp() FOR UPDATE`. No row means the lease was lost, so the transaction rolls back. Use `clock_timestamp()`, not `now()`, which is frozen at transaction start *(platform, review)*.
 - **The change log is `resource` itself.** Each row holds its latest state and the `seq` of its last change, and deletions are tombstones. "What changed since N" is `seq > N` over the relevant source calendars. That serves CalDAV sync-collection, SSE replay (`Last-Event-ID`) and sink catch-up, with no separate append-only log.
 - **CalDAV sync-token / getctag**: `https://<host>/ns/sync/<pubId>/<epoch>/<seq>`, where `seq` = max seq over the publication's sources, read **in the same statement** as the changed rows *(feed)*. A membership, privacy, filter or UID-affecting change bumps `epoch`. Tokens with an old epoch, or a seq below `tombstone_floor`, get `403 valid-sync-token`, and clients resync (the 403 path was verified with python caldav and tsdav; vdirsyncer does not use sync tokens and syncs by etag listing).
 - **Cosmetic changes** (name, colour, sort order) bump `config_version` only, so clients do not do a full resync.
 - **Object ETag**: `hash(pubId, epoch, uid, max(seq of copies), RENDER_VERSION)`, derived without rendering, because etag-listing clients PROPFIND the whole collection every poll *(feed)*. `RENDER_VERSION` is a code constant bumped whenever projection or serialisation output changes. `config_version` is deliberately excluded, so a rename does not make clients re-download every object *(feed review)*.
-- **Hrefs are computed, not stored.** `href = b64url(sha256(outputUid))[:22]`, and `outputUid` derives from the source UID alone (§5). GET and multiget resolve an href by hashing the publication's UIDs (no rendering; ~ms for 5k) *(feed review: the lookup table is unnecessary)*.
+- **Publication hrefs are computed, not stored.** `href = b64url(sha256(outputUid))[:22]`, and `outputUid` derives from the source UID alone (§5). GET and multiget resolve an href by hashing the publication's UIDs (no rendering; ~ms for 5k) *(feed review: the lookup table is unnecessary)*.
 - **ICS ETag**: `pubId.epoch.seq.config_version.RENDER_VERSION` per publication (one segment per publication for the combined feed). 304s cost one aggregate query. Rendered bodies are cached compressed (br, gzip) in a size-bounded in-process LRU keyed by ETag. A changed ETag is a cache miss, so no invalidation is needed. Measured: 5,000 events render in ~200 ms; cached responses take ~9 ms *(feed)*.
+- **Published-link ICS ETag**: `"lnk.<id>.<sync_epoch>.<maxSeq>.<calendar.updated_at ms>.<RENDER_VERSION>"`. One aggregate query reads the active calendar and its newest resource sequence (including tombstones). Last-Modified is the later of the calendar update time and newest resource change. Links share the feed handler's conditional responses, compression and byte-bounded cache. Owner output is unchanged, so `RENDER_VERSION` remains 1.
 - **Tombstones** are purged by a periodic job. In one transaction it raises `tombstone_floor`, then deletes tombstones below it. It allocates no sequence numbers, so it needs no tenant lock.
 
 ## 7. Security
@@ -129,6 +136,25 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
   - admins: everything in the tenant
   - owners: also tenant settings and membership
   - operator: tenants across the install
+- **Calendar grants.** `hosted/access.ts` computes the highest of ownership, tenant administration,
+  a personal grant and a tenant-wide grant. `effectiveAccess`, `requireAccess` and
+  `accessibleCalendars` share that calculation; the listing uses one query. Grants require
+  current tenant membership and never cross tenants. Owners and tenant admins have `owner`
+  access; only they can grant, downgrade or revoke `manage`. Better Auth's existing
+  `afterRemoveMember` organization hook deletes the departing user's personal grants through
+  `withTenant`, then publishes auth revocation. Re-invitation does not restore old grants.
+
+  | Capability | free-busy | read | write | manage | owner/admin |
+  | --- | --- | --- | --- | --- | --- |
+  | Query busy time and appear in calendar listing | yes | yes | yes | yes | yes |
+  | Read events, CalDAV collections and event stream | | yes | yes | yes | yes |
+  | See private events in full; create, edit and delete events | | | yes | yes | yes |
+  | Rename/recolour calendar; manage shares and published links | | | | yes | yes |
+  | Delete and restore calendar | | | | | yes |
+
+  Imported calendars accept only `free-busy` and `read` grants; granting `write` or `manage`
+  returns 422 `calendar-not-hosted`. Feed ownership rules stay unchanged: a sharee cannot
+  republish another person's calendar in a feed.
 - **Tenant isolation**, two layers:
   1. Every tenant query runs through `withTenant(principal, fn)`. It opens a transaction, does `SET LOCAL ROLE supercal_app` (NOLOGIN, NOBYPASSRLS, not an owner) and `set_config('app.tenant_id', $1, true)`, and hands `fn` a branded `TenantTx`. Repository functions only accept `TenantTx`.
   2. RLS `ENABLE` + `FORCE` with `USING`/`WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), ''))`.
@@ -140,17 +166,24 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
     - `sync_target`: claim/renew across tenants
     - `push_lease`: webhook routing
     - `feed`: lookup by `caldav_username` / `ics_token_hash`
+    - `calendar_link`: lookup by `token_hash`, with SELECT limited to `id`, `tenant_id`, `token_hash` and `expires_at`
+    - `dav_login`: only `id`, `tenant_id`, `user_id`, `username`, `password_hash` for device authentication
     - `api_key_tenant`: key → tenant resolution
     - `drizzle.__drizzle_migrations`: the migrations check in `/readyz`
     - Better Auth tables
 
-    It never reads `resource`, `source_object` or credentials. Once the tenant is resolved, the request continues in `withTenant`.
+    It never reads `resource`, `source_object` or provider credentials. Once the tenant is resolved, the request continues in `withTenant`.
   - **Recommended production setup**: `DATABASE_URL` is a login that is a member of both roles and owns nothing; `DATABASE_MIGRATION_URL` is the schema owner. **Single-URL mode** (one owner login for both) is supported for small self-hosts and documented as weaker: `SET LOCAL ROLE` still enforces RLS, but a code path that escapes the wrapper keeps owner/DDL rights *(platform review)*.
 - **Secrets at rest.** Envelope AES-256-GCM via WebCrypto. A per-value data key is wrapped by a versioned master key from `SUPERCAL_KEYS=v2:…,v1:…`. The authenticated context binds tenant, record and field. Old-key records are lazily re-encrypted with compare-and-swap *(platform)*.
 - **Feed credentials.**
   - The CalDAV app password is argon2id via `Bun.password`, with a 5-minute cache of successful verifications. Failed verifications are rate-limited per username and IP.
   - The ICS token is 32 random bytes; its sha256 is stored. Rotation revokes immediately.
   - Feed credentials never grant API access, and API credentials never open feeds.
+  - A published link has its own 32-byte ICS token, stored only as a sha256 hash, and its own encrypted UID key bound to the `calendar_link` row. Only creation returns the token and subscription URLs; listing and updating return metadata. Revocation deletes the link. Unknown, expired, revoked and gone-calendar links all return an empty 404 before conditional or cached responses.
+- **DAV logins.** Each device has a named login owned by one user in one tenant, separate from feed credentials. `POST /api/v1/dav-logins` returns a username, password and server URL once; `GET` lists only the caller's logins without secrets; `DELETE /api/v1/dav-logins/{id}` permits the owner or a tenant admin and revokes immediately. At most 20 logins per user and tenant; creation and deletion are audited.
+  - Usernames are `<handle>-dav-<8 random [a-z0-9]>`; feed usernames end in six random characters, keeping the sets disjoint. Passwords use the same argon2id hashing, five-minute verification cache and throttling as feed passwords.
+  - Every request reloads the credential hash and checks current tenant membership and bans. Revocation broadcasts `dav-login-revoked` to drop caches across replicas; the row check also catches missed notifications. The acting principal has `via: 'davLogin'` in audit entries.
+  - A DAV login grants access to the user's own active hosted calendars and calendars explicitly shared at read or above. It grants neither management API nor feed access; API keys cannot authenticate to DAV. Tenant admin status alone adds no collections to a device login; admins need a personal or tenant-wide read-or-higher grant for a colleague’s calendar, and retain their effective admin access on those collections.
 - **Outbound fetches.** Every user-influenced request (ICS, CalDAV, discovery, redirects, multiget hrefs) goes through `guardedFetch` *(ingest)*:
   - Resolve DNS. Reject mixed or non-global answers (loopback, private, link-local and metadata, CGNAT, ULA, multicast, IPv4-mapped forms).
   - Dial the vetted IP, and check the certificate against the original hostname with `checkServerIdentity`.
@@ -230,14 +263,24 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 
 ## 9. Feed delivery (`dav` role)
 
-- **CalDAV**, read-only *(feed)*:
+- **CalDAV feed logins**, read-only *(feed)*:
   - Endpoints: `/.well-known/caldav` → `/dav/`; principal `/dav/<username>/`; home `/dav/<username>/cal/`; one collection per enabled publication `/dav/<username>/cal/<pubSlug>/`.
   - Properties: `current-user-principal`, `principal-URL`, `calendar-home-set`, `calendar-user-address-set`, `displayname`, Apple `calendar-color` (`#RRGGBBAA`) and `calendar-order`, CS `getctag`, `sync-token`, `supported-calendar-component-set` (VEVENT), `supported-report-set`, and `current-user-privilege-set` limited to `read` (clients show the calendars read-only).
   - Reports: `calendar-query` (time-range on `span`), `calendar-multiget`, `sync-collection`.
   - PROPFIND on `/` and `/dav/` answers `current-user-principal`, because python caldav starts discovery at the root *(feed review)*. `Depth: infinity` gets 403 with `<d:propfind-finite-depth/>` (RFC 4918 §9.1).
   - Writes get 403 `need-privileges`.
   - Responses: `DAV: 1, 3, calendar-access`; trailing slashes on collections; namespace-correct XML parsing.
+- **Hosted CalDAV with a device login** uses the same principal and home paths. Its collections are `/dav/<username>/cal/<segment>/`, where `segment` is `source_calendar.provider_calendar_id`. REST-created calendars use their `cal_…` id; MKCALENDAR preserves the client's chosen segment, rejecting `cal_` prefixes reserved for shared calendars. The home lists the user's active hosted calendars plus calendars explicitly shared at read or above (§17).
+  - The shared `CollectionView` interface supplies listing indexes, objects, range queries and sync behavior to one set of PROPFIND, REPORT and GET handlers. Feed collections project and merge UIDs as before. Hosted indexes read names, UIDs and ETags without payloads; GET and reports return the submitted iCalendar verbatim, with the same revision ETag as direct REST access.
+  - User homes advertise `bind` and `unbind` in addition to read privileges. Writable collections add `write-content`; managed collections also add `write` and `write-properties`. Hosted properties include calendar description, a generated VTIMEZONE and the 1 MiB maximum resource size. No scheduling properties or scheduling capability are advertised.
+  - PUT requires `text/calendar`, accepts client object names up to 255 UTF-8 bytes ending in `.ics` with no decoded slash, and honors `If-Match` and `If-None-Match: *`. It returns 201 for creation or 204 for replacement, with ETag. Object DELETE honors `If-Match` and returns 204.
+  - MKCALENDAR creates at the requested URI; an existing segment gets 403 `resource-must-be-null`. PROPPATCH supports display name, Apple color/order, description and timezone, applying the set atomically: an unsupported or invalid property gets 403 and the remaining properties get 424 in the 207 response. Colors lose their alpha and are stored as lowercase `#rrggbb`. Collection DELETE soft-deletes through the hosted service. Every mutation audits its DAV principal.
+  - Object writes use `writeObject` and `deleteObject`, as REST does. CalDAV validation conditions accompany 403 errors; a duplicate UID includes the existing href. Quota returns 507 `quota-not-exceeded`, stale preconditions return 412, and missing objects return 404. MOVE, COPY, LOCK, UNLOCK, MKCOL and POST return 403 `need-privileges`. Feed logins remain read-only. Authenticated user OPTIONS advertises the supported write methods; unauthenticated OPTIONS retains the read-only response.
+  - Direct sync tokens are `https://<host>/ns/sync/<calId>/<sync_epoch>/<seq>`. Incremental sync preserves client names on changes and tombstones. Recreating a deleted UID at a different name increments the epoch and invalidates old tokens, preventing a stranded old href.
 - **ICS**: `/ics/<token>/<pubSlug>.ics` and `/ics/<token>/all.ics` (combined: deduped by source UID, first publication by `sort_order` wins, §5). `NAME` + `X-WR-CALNAME`, `REFRESH-INTERVAL;VALUE=DURATION:PT1H` + `X-PUBLISHED-TTL:PT1H`, no `X-WR-TIMEZONE`. ETag/Last-Modified/304, br/gzip, `Vary: Accept-Encoding`.
+- **Published calendar links**: `GET|HEAD /ics/l/<token>.ics` publishes one hosted or imported calendar directly from `resource`, using `audience: public`, the link's privacy and no filters or alarms. It uses the calendar's name and the same name/refresh properties as a feed publication. A gone calendar returns an empty 404; restoring it makes retained links serve again.
+  - `GET|POST /api/v1/calendars/{id}/links` and `PATCH|DELETE /api/v1/calendars/{id}/links/{linkId}` use `canManageOwned`. Creation requires an explicit privacy mode, accepts a label and future expiry, and limits each calendar to 20 links under a calendar row lock (409 `link-quota`). A patch may change the label or future expiry, or clear either with null; privacy is immutable in the API and database permissions. Create another link to change privacy.
+  - Creation returns the ICS URL, webcal URL and Google/Outlook subscribe links. The token appears only in this response. Mutations audit `link.create`, `link.update` and `link.delete` with identifiers only.
 - **Subscribe helpers** (API): CalDAV settings; ICS and webcal URLs; Google `calendar.google.com/calendar/render?cid=` link; Outlook `addfromweb` links (to be verified by hand); an unsigned `com.apple.caldav.account` `.mobileconfig` without the password, served as `application/x-apple-aspen-config`.
 
 ## 10. Real-time fan-out
@@ -276,11 +319,14 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 - **Resources**:
   - `GET /me`.
   - `GET|POST /tenants` (operator), `GET|PATCH /tenant` (current).
+  - `GET|POST /dav-logins`, `DELETE /dav-logins/{id}` (per-device CalDAV credentials, password returned once).
   - `GET|POST /api-keys`, `DELETE /api-keys/{id}`.
   - `GET|POST /accounts`, `GET|PATCH|DELETE /accounts/{id}`, `POST /accounts/{id}/sync`. POST covers caldav, icloud and ics: credentials are verified and calendars discovered before 201.
   - `POST /accounts/oauth/{google|microsoft}/start` → `{ authorizationUrl }`; `GET /oauth/{provider}/callback` → redirect to `returnTo` (allowlisted).
   - `POST /accounts/{id}/reconnect`.
-  - `GET /calendars`, `GET /calendars/{id}`.
+  - `GET|POST /calendars`, `GET|PATCH|DELETE /calendars/{id}`, `POST /calendars/{id}/restore` (mutations: hosted only, §17).
+  - `GET|POST /calendars/{id}/events`, `GET|PUT|PATCH|DELETE /calendars/{id}/events/{uid}`, `POST /calendars/{id}/events/{uid}/split` (JSCalendar 2.0; mutations: hosted only, §17).
+  - `GET /calendars/{id}/occurrences?from&to`, `GET /calendars/{id}/changes?since&limit`, `GET /calendars/{id}/export.ics`, `POST /calendars/{id}/import?onConflict=skip|replace` (import: hosted only).
   - `GET|POST /feeds`, `GET|PATCH|DELETE /feeds/{id}`, `POST /feeds/{id}/credentials/{caldav|ics}/rotate` (returns the secret once), `GET /feeds/{id}/subscribe`, `GET /feeds/{id}/mobileconfig`.
   - `GET|POST /feeds/{id}/publications`, `GET|PATCH|DELETE /publications/{id}`, `PUT /feeds/{id}/publications/order`.
   - `GET /feeds/{id}/occurrences?from&to&publicationId` (expanded, projected JSON for preview).
@@ -341,3 +387,277 @@ Config is parsed once with Zod at boot. Invalid config exits with a message nami
 - Graph: cold import of a series whose occurrences were already cancelled before Supercal saw it (`cancelledOccurrences` ids have no documented original start). Until a real-account investigation settles a recovery strategy, such resources are published from what is known and marked `incomplete`. Absence from a windowed `instances` listing is never treated as cancellation, because a moved exception can sit outside the window *(ingest review)*. Also Graph month-end, leap-day and non-aligned start dates.
 - Google: actual watch-channel maximum TTL, and invitation behaviour of sink writes.
 - Outlook `addfromweb` link format.
+
+
+## 17. Hosted calendars, sharing and free-busy
+
+A hosted calendar is a source calendar whose provider is Supercal. Each user has one hidden
+`calendar_account` with `provider = 'hosted'`, `display_name = 'Supercal'`, `auto_publish = false`
+and null credentials. Hosted `source_calendar` rows live under that account. There is no
+adapter, `sync_target`, credential or second event model. Discovery and the scheduler have
+nothing to run for this account.
+
+```
+REST (#25) ──┐
+             ├─► writeObject ─► source_object (raw iCalendar) ─► normalizeIcal ─► recordChanges
+CalDAV (#26) ┘                                                                      │
+                                                resource + change log ◄─────────────┘
+                                                         │
+                          feeds, ICS, read-only CalDAV, SSE, virtual calendars, sinks
+```
+
+### Standards
+
+Draft states were read from the IETF datatracker on 2026-11-08.
+
+| Standard | State | Decision |
+| --- | --- | --- |
+| iCalendar: RFC 5545, RFC 7986 | Published | Stored format and interchange format. Already used. |
+| jCal: RFC 7265 | Published | Internal form in `resource.data`. Already used. |
+| CalDAV: RFC 4791, with WebDAV RFC 4918, RFC 6578 (sync), RFC 3744 (privileges), RFC 5397 (principal) | Published | Implemented read-write for hosted calendars (#26). Supercal adds no calendar UI, so calendar apps are how people edit, and CalDAV is what those apps speak. |
+| JSCalendar 2.0: `draft-ietf-calext-jscalendarbis-22`, obsoletes RFC 8984 | IETF Last Call | JSON event format of the REST API (#25), pinned to this revision. |
+| JSCalendar and iCalendar mapping: `draft-ietf-calext-jscalendar-icalendar-29` | IETF Last Call | The conversion rules for #25, including `JSPROP` for properties with no iCalendar equivalent. |
+| JMAP Calendars: `draft-ietf-jmap-calendars-33` | RFC Editor queue, blocked | Not implemented now. Stalwart and Cyrus implement it on the server, client work is limited to early projects, and we found no shipping support in Apple Calendar or Thunderbird. JSCalendar events and share levels that map onto JMAP rights (#28) keep a later JMAP facade small. |
+| CalDAV sharing: `draft-pot-caldav-sharing-01` | Expired in 2016 | Not implemented. Shares are managed through the REST API, and a shared calendar appears as an ordinary collection in the recipient's calendar home, which every client already understands. |
+| Scheduling: RFC 6638, iTIP RFC 5546, iMIP RFC 6047 | Published | Not implemented. Attendees are stored as data and Supercal sends no invitations. The server does not advertise `calendar-auto-schedule`. |
+
+The table records the milestone's protocol decisions. Storage (#24) supplies the service layer
+and calendar management routes; event REST routes (#25) add the JSCalendar conversion below;
+writable CalDAV (#26) and published links (#27) add the other two ways in and out (§9). Sharing and
+free-busy (#28) and real-client verification (#29) build on the same storage.
+
+### Storage and validation
+
+For a hosted calendar, `source_object` is the only copy of the event: there is no provider to
+refetch from. One object holds one UID, including its master, recurrence overrides and referenced
+VTIMEZONEs. The object name is `provider_object_id`; `format` is `ical`; `payload` holds the
+submitted text verbatim. The derived `resource` row holds jCal and the object's name, including
+on its tombstone. Unknown and X- properties survive normalization; raw line folding survives in
+the authoritative payload.
+
+`validateObject` in `packages/core` runs before writing. Objects may be at most 1 MiB of UTF-8
+and contain only VEVENT and VTIMEZONE at the VCALENDAR level. Parse errors, missing timing,
+and unknown TZIDs without a supplied VTIMEZONE are `invalid-calendar-data`. Other components
+(including VTODO, VJOURNAL and VFREEBUSY) are `unsupported-component`. METHOD, zero events,
+or multiple UIDs are `invalid-object`; exceeding the byte limit is `too-large`. Timing is checked
+with `spanOf`; time zone failures are never replaced with UTC.
+
+Migration 0009 adds `hosted` to `account_provider`, the calendar metadata and lifecycle columns,
+and `resource.object_name`. There are no new tenant tables or RLS policies; existing table grants
+cover the new columns. All pending migrations run in one transaction, so no index or seed may
+use the newly added enum value in that transaction. Account uniqueness instead uses an advisory lock.
+
+### Single write path
+
+`writeObject(tx, calendar, { objectName, payload, ifMatch?, ifNoneMatch? })` and
+`deleteObject(tx, calendar, { objectName, ifMatch? })` accept an authorized caller's `TenantTx`;
+protocol handlers authorize first. Every write takes `pg_advisory_xact_lock(HOSTED_WRITE_LOCK,
+hashtext(calendar.id))` before touching objects. The lock order is calendar first, then the tenant
+lock in `recordChanges`, which is the last database work in the transaction.
+
+After validation, writes load the object and its resource and check preconditions. `ifNoneMatch:
+'*'` rejects an existing live object; `ifMatch` rejects an absent object or a differing ETag.
+An existing object's UID cannot change, and no other live object in the calendar may hold the
+same UID. `uid-conflict` carries the conflicting object name when another object owns it.
+New objects are limited to 50,000 per calendar. Calendar serialization makes the UID and quota
+checks safe across concurrent connections.
+
+The shared `upsertOf` builds a resource change from `normalizers.ical`. The raw object is upserted
+with the revision as `etag`, its UID as `group_uid`, `dirty = false` and the current normalizer
+version. `recordChanges` receives its `objectName`; delete changes leave that name intact while
+removing the raw object. Deleting an absent object returns `not-found`.
+
+A direct event ETag is `"<resource.revision>"`, shared by REST and writable CalDAV. Changes to
+insignificant folding can update the stored raw payload while retaining the revision and ETag;
+`recordChanges` drops such resource no-ops. Projected feed publications retain their own ETags
+(§6), because their privacy, merge and UID rules affect output.
+
+### Sync epoch
+
+If UID `u1` at `a.ics` is deleted and recreated at `b.ics`, its resource tombstone at `a.ics` is
+overwritten. An incremental client could otherwise learn only about `b.ics` and retain `a.ics`.
+That write increments `source_calendar.sync_epoch`, invalidating outstanding direct-calendar
+tokens and requiring a full resync. Recreating the UID at the same name does not increment it.
+Direct-calendar tokens include this epoch in #25 and #26.
+
+### Lifecycle and API
+
+`getOrCreateHostedAccount` takes `HOSTED_ACCOUNT_LOCK` for the user before finding or inserting
+the account. `createCalendar` holds the same lock while enforcing 100 retained calendars per user
+and uses the calendar's own `cal_…` id as `provider_calendar_id`. Client-created calendars in #26
+can use other values. Capabilities are `{ incremental: 'hosted', push: false }`.
+
+Creation calls `ensurePassthroughPublication`. Because the account does not auto-publish, the
+publication starts disabled: an owner with feed and DAV logins avoids seeing the calendar twice.
+The owner may enable it, and events then flow through the existing read and delivery pipeline.
+
+- `POST /api/v1/calendars` accepts `name`, optional `#rrggbb` color, description and IANA timezone
+  (default `UTC`), and returns 201 and an ETag.
+- `PATCH /api/v1/calendars/{id}` accepts name, color, timezone, description and sort order, honoring
+  `If-Match`. Changing timezone does not recompute spans of existing floating events.
+- `DELETE /api/v1/calendars/{id}` sets `state = 'gone'` and `gone_at`, retaining event data.
+  `onCalendarGone` disables passthrough publications, removes virtual memberships and bumps the
+  affected publication epochs.
+- `POST /api/v1/calendars/{id}/restore` clears `gone_at` and sets `state = 'active'`; an active
+  calendar returns 409. Publications and virtual memberships remain as deletion left them, so
+  the owner re-enables publications and restores memberships explicitly.
+
+Calendar PATCH requires `manage`; deletion and restoration require `owner` through
+`hosted/access.ts`. Mutations audit `calendar.create`, `calendar.update`,
+`calendar.delete` and `calendar.restore`, and reject connected calendars with 409
+`calendar-not-hosted`. Exceeding the calendar quota returns 409 `calendar-quota`.
+
+Calendar reads retain gone calendars for restoration and expose a `kind` discriminator,
+nullable `accountId` (null for hosted), description, sort order, update time and deletion time.
+Hosted freshness is `{ lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false }`.
+The hosted account is absent from account listings, and every account-by-id route returns 404
+for it. The public Account provider union remains the five connected providers. The dashboard
+continues grouping by visible accounts and adds no hosted calendar screen.
+
+### Maintenance
+
+`normalizeDirtyGroups` is shared with the sync runner. Re-normalization marks stale objects dirty
+in batches, wakes connected calendars' event targets, and rebuilds hosted calendars directly in
+separate transactions under their calendar locks. `rebuildHostedCalendar` ends with
+`recordChanges`, carrying object names. Rows left dirty by an interrupted maintenance run are also
+rebuilt at the next run. A failed group keeps its last good data, marked incomplete.
+
+The daily `purge-hosted-calendars` job visits each tenant and permanently deletes hosted calendars
+whose `gone_at` is older than 30 days. Foreign keys cascade to raw objects, resources and
+publication-source links. Restoring a calendar before retention expires preserves its data.
+
+### REST events and JSCalendar conversion
+
+The direct event API uses JSCalendar 2.0, pinned to
+[`draft-ietf-calext-jscalendarbis-22`](https://datatracker.ietf.org/doc/html/draft-ietf-calext-jscalendarbis-22)
+and the conversion rules in
+[`draft-ietf-calext-jscalendar-icalendar-29`](https://datatracker.ietf.org/doc/html/draft-ietf-calext-jscalendar-icalendar-29).
+`packages/core/src/jscalendar` converts to and from the existing jCal `EventResource`; it adds
+no storage model or migration. Reads cover hosted and connected calendars. Writes require an
+active hosted calendar and use `writeObject` or `deleteObject`, with the same revision ETag as
+CalDAV. The UID is the only event identifier, including when it contains percent-encoded path
+characters; new object names are the first 22 base64url characters of SHA-256 over the UID plus
+`.ics`.
+
+`fromJSCalendar` changes mapped property groups on a copy of the previous resource. Unmapped
+properties, child components and unknown parameters survive PATCH, including on an override
+with the same recurrence id. PUT builds a replacement from scratch. Unknown JSON properties
+and unmapped nested fields use `JSPROP` with a quoted `JSPTR` and a JSON-encoded TEXT value;
+these properties add missing JSON fields and cannot overwrite fields already mapped from
+standard iCalendar properties. A top-level null vendor value is treated as absent, because the
+mapping draft forbids a null `JSPROP` value. Version 1.0 fields `recurrenceRules`,
+`excludedRecurrenceRules` and `timeZones` are rejected, as are `method` and versions other than
+`2.0`; validation errors identify the field or patch pointer. Unknown and vendor properties
+with valid names remain accepted.
+
+The mapped properties cover event text, timing, status, transparency, classification, color,
+keywords, priority, revision metadata, locations, conference links, attachments, participants,
+recurrence, relations and alarms. Location details can use VLOCATION, participant details can
+use PARTICIPANT, and link relations select ATTACH, IMAGE, URL or LINK according to mapping
+§3.4. Description content type and other unsupported presentation details remain in JSPROP.
+Participants are stored as data; these writes send no invitations.
+
+Time arithmetic uses Temporal. An all-day event uses DATE only when it has no zone and every
+temporal value has a zero time part; a floating event uses a local DATE-TIME. Zoned writes
+require an IANA zone, convert recurrence `until` to UTC in RRULE, and generate missing
+VTIMEZONEs before serialization. A source's custom TZID remains in jCal but has no JSCalendar
+`timeZone`. DTEND and DURATION both read as `duration`; `endTimeZone` writes a DTEND.
+The span index stores a zero-duration event as a closed point, so it is readable and overlaps
+windows containing that instant.
+
+Override JSON values are patches against the occurrence's inherited master fields, with its
+start shifted to the recurrence id. A changed occurrence writes a complete RECURRENCE-ID
+VEVENT, an exclusion writes EXDATE, and an empty patch writes RDATE. RDATE PERIOD values also
+preserve their duration on read. A resource with one detached instance reads as an Event with
+`recurrenceId` and, when known, `recurrenceIdTimeZone`; several detached instances read as a
+Group, as required by mapping §2.1.2. GET, list and changes expose the same union. PATCH of a
+resource without a master returns `event-has-no-master`.
+
+REST writes set `updated`, DTSTAMP and Supercal's product identifier; creates also set `created`.
+Client values for these fields do not control stored metadata. SEQUENCE starts at zero and
+increments when start, duration, time zone or recurrence rule changes; changing a title alone
+retains it. Import applies the same metadata policy to each component.
+
+Splitting a series writes both objects in one transaction, links the original with a `next`
+relation and the new series with a `first` relation, and divides overrides at the split point.
+The patch applies to the new event last. The split must be an occurrence after the first;
+non-recurring events and invalid split points return 422. Expansion counts rule instances
+before EXDATE subtraction when dividing COUNT, as RFC 5545 requires. UNTIL is shortened to the
+last retained occurrence before the split. Wall times stay in the event's zone across DST.
+
+Lists page by UID with an opaque versioned cursor; optional time bounds filter the coarse span.
+The direct changes token carries version, calendar sync epoch and a decimal bigint sequence.
+`changesSince` supplies each page and position from one statement. Initial reads omit tombstones;
+malformed tokens, epoch mismatches and positions below `tombstone_floor` return 410
+`sync-token-expired`. Direct occurrences use the feed preview's expansion and UTC formatting,
+with a 366-day window and a 5,000-item cap reported through `truncated`.
+
+Export streams one VCALENDAR from live `resource.data`, emitting each TZID once. Import accepts
+up to 8 MiB of `text/calendar`, groups VEVENTs by UID and writes the batch in one transaction;
+per-UID savepoints isolate invalid objects. `onConflict=skip` leaves existing events and change
+sequences untouched; `replace` replaces their objects. Import reports created, updated, skipped
+and failed UIDs, and rejects a calendar with no VEVENT. Audits record UIDs and never event contents.
+
+### Calendar sharing
+
+`GET|POST /api/v1/calendars/{id}/shares` and
+`PATCH|DELETE /api/v1/calendars/{id}/shares/{shareId}` require `manage`. The grantee is a
+union on `type`: `{ type: 'user', userId }` or `{ type: 'tenant' }`. Listing includes a
+colleague's name and email. Non-members return 404, sharing with the owner returns 422,
+and duplicate grants return 409 with the existing `id`. PATCH honors `If-Match`.
+Grant changes audit `share.create`, `share.update` and `share.delete` and apply on the next
+request. Managers cannot change or remove an existing `manage` grant, including their own.
+
+Calendar list and get include effective `access` and `owner: { id, name }`. Free-busy grants
+receive only id, name, colour, kind, time zone, state, access and owner, with empty
+`publicationIds` and neutral freshness. Other metadata is absent. Publication ids are empty
+for all sharees; owners and tenant admins see them. The dashboard still groups by its visible
+accounts, so shared calendars add no screen.
+
+REST event reads use one shared projection before JSCalendar conversion, occurrence expansion
+or iCalendar export. Exactly `read` uses `audience: 'member'`: private and confidential events
+become Busy under the existing projection rules. Editors see stored details. Read ETags remain
+stored revisions for conditional reads, and changes tombstones retain source UIDs. With `since`,
+a live event now hidden by the member projection is also returned as a UID-only tombstone,
+so the client discards its cached details; initial reads omit hidden events. Full
+passthrough specs need no UID secret; other privacy modes reject a null key. SSE rechecks
+accessible calendars on every wake, delivering resource changes at `read` and above.
+
+Device CalDAV homes include calendars with actual personal or tenant-wide grants at `read`
+and above under their `cal_…` segment, retaining the caller’s effective access. Tenant admin
+status alone never adds a colleague’s calendar, and even admins need an actual readable grant;
+free-busy grants have no collection. Own provider-calendar segments resolve first. Shared
+display names append the owner's name. Read collections use the member projection and a
+synthetic `<calId>.r` publication id, while writable hosted collections preserve stored names,
+payloads and ETags. Crossing between read and write invalidates the old sync token, requiring a
+resync for the changed hrefs and ETags. Every mutation rechecks its access level. A write
+sharee's PROPPATCH returns 403 per property, and DELETE of a shared collection returns 403
+`need-privileges`, even for a manager. Feed logins retain their original views.
+
+The access levels map to `CalendarRights` in
+[draft-ietf-jmap-calendars-33](https://www.ietf.org/archive/id/draft-ietf-jmap-calendars-33.html):
+free-busy maps to `mayReadFreeBusy`; read adds `mayReadItems`; write adds `mayWriteAll`,
+`mayUpdatePrivate` and `mayRSVP`; manage adds `mayShare`; owner adds `mayDelete`.
+This is a rights mapping for a later facade, not a JMAP endpoint.
+
+### Free-busy queries
+
+`core.freeBusy` expands recurrence using the calendar zone, clips intervals to the window and
+merges equal statuses. Busy wins where it overlaps tentative time. Cancelled and transparent
+occurrences do not count; private events do. Expansion bounds propagate as `truncated`.
+Floating and all-day times use the calendar zone, including daylight-saving transitions.
+
+`POST /api/v1/free-busy` accepts UTC/offset `from`, `to` and up to 50 `calendarIds`; windows
+must be positive and at most 62 days. Each calendar returns `busy` intervals with `start`,
+`end` and `status` (`busy` or `tentative`), plus `truncated`. Missing, inaccessible and gone
+calendars all return `{ error: 'not-accessible' }`. Resource reads run in one tenant transaction.
+
+Device CalDAV collections advertise and handle the
+[RFC 4791 §7.10 free-busy-query REPORT](https://www.rfc-editor.org/rfc/rfc4791.html#section-7.10).
+Exactly one valid UTC time-range is required. The response is 200 `text/calendar`, with one
+VFREEBUSY containing DTSTART, DTEND, DTSTAMP and BUSY or BUSY-TENTATIVE periods. Expansion
+truncation returns 403 `number-of-matches-within-limits`. Feed logins return 403
+`supported-report`; free-busy-only grantees use REST.
+
+Cross-tenant sharing, invitation emails, CalDAV sharing extensions and per-user names, colours
+and alerts are outside this interface. Event alarms belong to the event and editors share them.

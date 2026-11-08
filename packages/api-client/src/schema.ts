@@ -253,7 +253,7 @@ export interface paths {
         };
         get: operations["listCalendars"];
         put?: never;
-        post?: never;
+        post: operations["createCalendar"];
         delete?: never;
         options?: never;
         head?: never;
@@ -270,6 +270,225 @@ export interface paths {
         get: operations["getCalendar"];
         put?: never;
         post?: never;
+        delete: operations["deleteCalendar"];
+        options?: never;
+        head?: never;
+        /** @description Updates a hosted calendar. Changing timezone does not recompute spans of floating events. */
+        patch: operations["updateCalendar"];
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Restores a deleted hosted calendar. Publications remain disabled and virtual memberships remain removed; the owner re-enables them. */
+        post: operations["restoreCalendar"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCalendarLinks"];
+        put?: never;
+        post: operations["createCalendarLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/links/{linkId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteCalendarLink"];
+        options?: never;
+        head?: never;
+        patch: operations["updateCalendarLink"];
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        get: operations["listEvents"];
+        put?: never;
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        post: operations["createEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/events/{uid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        get: operations["getEvent"];
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        put: operations["putEvent"];
+        post?: never;
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        delete: operations["deleteEvent"];
+        options?: never;
+        head?: never;
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        patch: operations["patchEvent"];
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/events/{uid}/split": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        post: operations["splitEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/occurrences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        get: operations["calendarOccurrences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        get: operations["calendarChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/export.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["exportCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["importCalendar"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCalendarShares"];
+        put?: never;
+        post: operations["createCalendarShare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/shares/{shareId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteCalendarShare"];
+        options?: never;
+        head?: never;
+        patch: operations["updateCalendarShare"];
+        trace?: never;
+    };
+    "/api/v1/free-busy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["queryFreeBusy"];
         delete?: never;
         options?: never;
         head?: never;
@@ -367,6 +586,38 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dav-logins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listDavLogins"];
+        put?: never;
+        post: operations["createDavLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dav-logins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteDavLogin"];
         options?: never;
         head?: never;
         patch?: never;
@@ -633,23 +884,34 @@ export interface components {
             account: components["schemas"]["Account"];
             calendars: components["schemas"]["Calendar"][];
         };
-        Calendar: {
+        Calendar: components["schemas"]["HostedCalendar"] | components["schemas"]["ConnectedCalendar"];
+        HostedCalendar: {
             /** @example cal_01h455vb4pex5vsknk084sn02q */
             id: string;
-            /** @example acc_01h455vb4pex5vsknk084sn02q */
-            accountId: string;
+            description?: string | null;
+            sortOrder?: number;
+            /** Format: date-time */
+            updatedAt?: string;
+            /** Format: date-time */
+            goneAt?: string | null;
             name: string;
             color: string | null;
             /** @description IANA zone, when the provider names one */
             timezone: string | null;
             /**
-             * @description `gone`: no longer listed by the provider
+             * @description `gone`: removed by the provider or soft-deleted by the hosted calendar owner
              * @enum {string}
              */
             state: "active" | "gone";
-            capabilities: {
+            capabilities?: {
                 incremental: string;
                 push: boolean;
+            };
+            /** @enum {string} */
+            access: "free-busy" | "read" | "write" | "manage" | "owner";
+            owner: {
+                id: string;
+                name: string;
             };
             /** @description Observed, never promised */
             freshness: {
@@ -662,6 +924,59 @@ export interface components {
                 stale: boolean;
             };
             publicationIds: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "hosted";
+            accountId?: null;
+        };
+        ConnectedCalendar: {
+            /** @example cal_01h455vb4pex5vsknk084sn02q */
+            id: string;
+            description?: string | null;
+            sortOrder?: number;
+            /** Format: date-time */
+            updatedAt?: string;
+            /** Format: date-time */
+            goneAt?: string | null;
+            name: string;
+            color: string | null;
+            /** @description IANA zone, when the provider names one */
+            timezone: string | null;
+            /**
+             * @description `gone`: removed by the provider or soft-deleted by the hosted calendar owner
+             * @enum {string}
+             */
+            state: "active" | "gone";
+            capabilities?: {
+                incremental: string;
+                push: boolean;
+            };
+            /** @enum {string} */
+            access: "free-busy" | "read" | "write" | "manage" | "owner";
+            owner: {
+                id: string;
+                name: string;
+            };
+            /** @description Observed, never promised */
+            freshness: {
+                /** Format: date-time */
+                lastSuccessAt: string | null;
+                pushActive: boolean;
+                /** @description Seconds until changes are expected to show (the current poll interval) */
+                expectedLatency: number | null;
+                /** @description The account cannot sync (e.g. reauth required); the last good data is still published */
+                stale: boolean;
+            };
+            publicationIds: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "connected";
+            /** @example acc_01h455vb4pex5vsknk084sn02q */
+            accountId?: string;
         };
         NewAccount: components["schemas"]["NewIcsAccount"] | components["schemas"]["NewCaldavAccount"] | components["schemas"]["NewIcloudAccount"];
         NewIcsAccount: {
@@ -738,6 +1053,659 @@ export interface components {
         CalendarList: {
             items: components["schemas"]["Calendar"][];
         };
+        CalendarLink: {
+            /** @example lnk_01h455vb4pex5vsknk084sn02q */
+            id: string;
+            name: string | null;
+            /** @enum {string} */
+            privacy: "full" | "title-only" | "busy-only";
+            /** Format: date-time */
+            expiresAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CreatedCalendarLink: components["schemas"]["CalendarLink"] & {
+            token: string;
+            /** Format: uri */
+            url: string;
+            /** Format: uri */
+            webcalUrl: string;
+            subscribe: components["schemas"]["SubscribeLinks"];
+        };
+        /** @description One-click links for subscribing to an ICS calendar URL */
+        SubscribeLinks: {
+            /** Format: uri */
+            google: string;
+            /** Format: uri */
+            outlookPersonal: string;
+            /** Format: uri */
+            outlookWork: string;
+        };
+        /** @description JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Several detached recurrence instances read as a Group per mapping draft-ietf-calext-jscalendar-icalendar-29 §2.1.2. */
+        JSCalendar: ({
+            /** @enum {string} */
+            "@type": "Event";
+            /**
+             * @default 2.0
+             * @enum {string}
+             */
+            version: "2.0";
+            uid?: string;
+            title?: string;
+            description?: string;
+            descriptionContentType?: string;
+            locale?: string;
+            start: string;
+            duration?: string;
+            timeZone?: string;
+            endTimeZone?: string;
+            showWithoutTime?: boolean;
+            status?: ("confirmed" | "tentative" | "cancelled") | string;
+            freeBusyStatus?: ("free" | "busy") | string;
+            privacy?: ("public" | "private" | "secret") | string;
+            color?: string;
+            keywords?: {
+                [key: string]: true;
+            };
+            priority?: number;
+            sequence?: number;
+            created?: string;
+            updated?: string;
+            prodId?: string;
+            locations?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Location";
+                    name?: string;
+                    description?: string;
+                    coordinates?: string;
+                    locationTypes?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            mainLocationId?: string;
+            virtualLocations?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "VirtualLocation";
+                    uri: string;
+                    name?: string;
+                    description?: string;
+                    features?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            links?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Link";
+                    href: string;
+                    title?: string;
+                    contentType?: string;
+                    size?: number;
+                    rel?: string;
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            participants?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Participant";
+                    name?: string;
+                    email?: string;
+                    calendarAddress?: string;
+                    kind?: string;
+                    roles?: {
+                        [key: string]: true;
+                    };
+                    participationStatus?: string;
+                    expectReply?: boolean;
+                    delegatedTo?: {
+                        [key: string]: true;
+                    };
+                    delegatedFrom?: {
+                        [key: string]: true;
+                    };
+                    memberOf?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            organizerCalendarAddress?: string;
+            recurrenceRule?: {
+                /** @enum {string} */
+                "@type"?: "RecurrenceRule";
+                /** @enum {string} */
+                frequency: "yearly" | "monthly" | "weekly" | "daily" | "hourly" | "minutely" | "secondly";
+                interval?: number;
+                count?: number;
+                until?: string;
+                /** @enum {string} */
+                firstDayOfWeek?: "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su";
+                rscale?: string;
+                /** @enum {string} */
+                skip?: "omit" | "backward" | "forward";
+                byDay?: ({
+                    /** @enum {string} */
+                    "@type"?: "NDay";
+                    /** @enum {string} */
+                    day: "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su";
+                    nthOfPeriod?: number;
+                } & {
+                    [key: string]: unknown;
+                })[];
+                byMonth?: string[];
+                byMonthDay?: number[];
+                byYearDay?: number[];
+                byWeekNo?: number[];
+                byHour?: number[];
+                byMinute?: number[];
+                bySecond?: number[];
+                bySetPosition?: number[];
+            } & {
+                [key: string]: unknown;
+            };
+            recurrenceOverrides?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            recurrenceId?: string;
+            recurrenceIdTimeZone?: string;
+            relatedTo?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Relation";
+                    relation?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            alerts?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Alert";
+                    /**
+                     * @default display
+                     * @enum {string}
+                     */
+                    action: "display" | "email";
+                    trigger: ({
+                        /**
+                         * @default OffsetTrigger
+                         * @enum {string}
+                         */
+                        "@type": "OffsetTrigger";
+                        offset: string;
+                        /** @enum {string} */
+                        relativeTo?: "start" | "end";
+                    } & {
+                        [key: string]: unknown;
+                    }) | ({
+                        /** @enum {string} */
+                        "@type": "AbsoluteTrigger";
+                        when: string;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                    acknowledged?: string;
+                    relatedTo?: {
+                        [key: string]: {
+                            /** @enum {string} */
+                            "@type"?: "Relation";
+                            relation?: {
+                                [key: string]: true;
+                            };
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+        } & {
+            [key: string]: unknown;
+        }) | {
+            /** @enum {string} */
+            "@type": "Group";
+            /** @enum {string} */
+            version: "2.0";
+            uid: string;
+            entries: ({
+                /** @enum {string} */
+                "@type": "Event";
+                /**
+                 * @default 2.0
+                 * @enum {string}
+                 */
+                version: "2.0";
+                uid?: string;
+                title?: string;
+                description?: string;
+                descriptionContentType?: string;
+                locale?: string;
+                start: string;
+                duration?: string;
+                timeZone?: string;
+                endTimeZone?: string;
+                showWithoutTime?: boolean;
+                status?: ("confirmed" | "tentative" | "cancelled") | string;
+                freeBusyStatus?: ("free" | "busy") | string;
+                privacy?: ("public" | "private" | "secret") | string;
+                color?: string;
+                keywords?: {
+                    [key: string]: true;
+                };
+                priority?: number;
+                sequence?: number;
+                created?: string;
+                updated?: string;
+                prodId?: string;
+                locations?: {
+                    [key: string]: {
+                        /** @enum {string} */
+                        "@type"?: "Location";
+                        name?: string;
+                        description?: string;
+                        coordinates?: string;
+                        locationTypes?: {
+                            [key: string]: true;
+                        };
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                mainLocationId?: string;
+                virtualLocations?: {
+                    [key: string]: {
+                        /** @enum {string} */
+                        "@type"?: "VirtualLocation";
+                        uri: string;
+                        name?: string;
+                        description?: string;
+                        features?: {
+                            [key: string]: true;
+                        };
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                links?: {
+                    [key: string]: {
+                        /** @enum {string} */
+                        "@type"?: "Link";
+                        href: string;
+                        title?: string;
+                        contentType?: string;
+                        size?: number;
+                        rel?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                participants?: {
+                    [key: string]: {
+                        /** @enum {string} */
+                        "@type"?: "Participant";
+                        name?: string;
+                        email?: string;
+                        calendarAddress?: string;
+                        kind?: string;
+                        roles?: {
+                            [key: string]: true;
+                        };
+                        participationStatus?: string;
+                        expectReply?: boolean;
+                        delegatedTo?: {
+                            [key: string]: true;
+                        };
+                        delegatedFrom?: {
+                            [key: string]: true;
+                        };
+                        memberOf?: {
+                            [key: string]: true;
+                        };
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                organizerCalendarAddress?: string;
+                recurrenceRule?: {
+                    /** @enum {string} */
+                    "@type"?: "RecurrenceRule";
+                    /** @enum {string} */
+                    frequency: "yearly" | "monthly" | "weekly" | "daily" | "hourly" | "minutely" | "secondly";
+                    interval?: number;
+                    count?: number;
+                    until?: string;
+                    /** @enum {string} */
+                    firstDayOfWeek?: "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su";
+                    rscale?: string;
+                    /** @enum {string} */
+                    skip?: "omit" | "backward" | "forward";
+                    byDay?: ({
+                        /** @enum {string} */
+                        "@type"?: "NDay";
+                        /** @enum {string} */
+                        day: "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su";
+                        nthOfPeriod?: number;
+                    } & {
+                        [key: string]: unknown;
+                    })[];
+                    byMonth?: string[];
+                    byMonthDay?: number[];
+                    byYearDay?: number[];
+                    byWeekNo?: number[];
+                    byHour?: number[];
+                    byMinute?: number[];
+                    bySecond?: number[];
+                    bySetPosition?: number[];
+                } & {
+                    [key: string]: unknown;
+                };
+                recurrenceOverrides?: {
+                    [key: string]: {
+                        [key: string]: unknown;
+                    };
+                };
+                recurrenceId?: string;
+                recurrenceIdTimeZone?: string;
+                relatedTo?: {
+                    [key: string]: {
+                        /** @enum {string} */
+                        "@type"?: "Relation";
+                        relation?: {
+                            [key: string]: true;
+                        };
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+                alerts?: {
+                    [key: string]: {
+                        /** @enum {string} */
+                        "@type"?: "Alert";
+                        /**
+                         * @default display
+                         * @enum {string}
+                         */
+                        action: "display" | "email";
+                        trigger: ({
+                            /**
+                             * @default OffsetTrigger
+                             * @enum {string}
+                             */
+                            "@type": "OffsetTrigger";
+                            offset: string;
+                            /** @enum {string} */
+                            relativeTo?: "start" | "end";
+                        } & {
+                            [key: string]: unknown;
+                        }) | ({
+                            /** @enum {string} */
+                            "@type": "AbsoluteTrigger";
+                            when: string;
+                        } & {
+                            [key: string]: unknown;
+                        });
+                        acknowledged?: string;
+                        relatedTo?: {
+                            [key: string]: {
+                                /** @enum {string} */
+                                "@type"?: "Relation";
+                                relation?: {
+                                    [key: string]: true;
+                                };
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        };
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            } & {
+                [key: string]: unknown;
+            })[];
+        };
+        /** @description JSCalendar 2.0 Event per draft-ietf-calext-jscalendarbis-22; unknown properties are preserved. */
+        JSEvent: {
+            /** @enum {string} */
+            "@type": "Event";
+            /**
+             * @default 2.0
+             * @enum {string}
+             */
+            version: "2.0";
+            uid?: string;
+            title?: string;
+            description?: string;
+            descriptionContentType?: string;
+            locale?: string;
+            start: string;
+            duration?: string;
+            timeZone?: string;
+            endTimeZone?: string;
+            showWithoutTime?: boolean;
+            status?: ("confirmed" | "tentative" | "cancelled") | string;
+            freeBusyStatus?: ("free" | "busy") | string;
+            privacy?: ("public" | "private" | "secret") | string;
+            color?: string;
+            keywords?: {
+                [key: string]: true;
+            };
+            priority?: number;
+            sequence?: number;
+            created?: string;
+            updated?: string;
+            prodId?: string;
+            locations?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Location";
+                    name?: string;
+                    description?: string;
+                    coordinates?: string;
+                    locationTypes?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            mainLocationId?: string;
+            virtualLocations?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "VirtualLocation";
+                    uri: string;
+                    name?: string;
+                    description?: string;
+                    features?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            links?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Link";
+                    href: string;
+                    title?: string;
+                    contentType?: string;
+                    size?: number;
+                    rel?: string;
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            participants?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Participant";
+                    name?: string;
+                    email?: string;
+                    calendarAddress?: string;
+                    kind?: string;
+                    roles?: {
+                        [key: string]: true;
+                    };
+                    participationStatus?: string;
+                    expectReply?: boolean;
+                    delegatedTo?: {
+                        [key: string]: true;
+                    };
+                    delegatedFrom?: {
+                        [key: string]: true;
+                    };
+                    memberOf?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            organizerCalendarAddress?: string;
+            recurrenceRule?: {
+                /** @enum {string} */
+                "@type"?: "RecurrenceRule";
+                /** @enum {string} */
+                frequency: "yearly" | "monthly" | "weekly" | "daily" | "hourly" | "minutely" | "secondly";
+                interval?: number;
+                count?: number;
+                until?: string;
+                /** @enum {string} */
+                firstDayOfWeek?: "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su";
+                rscale?: string;
+                /** @enum {string} */
+                skip?: "omit" | "backward" | "forward";
+                byDay?: ({
+                    /** @enum {string} */
+                    "@type"?: "NDay";
+                    /** @enum {string} */
+                    day: "mo" | "tu" | "we" | "th" | "fr" | "sa" | "su";
+                    nthOfPeriod?: number;
+                } & {
+                    [key: string]: unknown;
+                })[];
+                byMonth?: string[];
+                byMonthDay?: number[];
+                byYearDay?: number[];
+                byWeekNo?: number[];
+                byHour?: number[];
+                byMinute?: number[];
+                bySecond?: number[];
+                bySetPosition?: number[];
+            } & {
+                [key: string]: unknown;
+            };
+            recurrenceOverrides?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            recurrenceId?: string;
+            recurrenceIdTimeZone?: string;
+            relatedTo?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Relation";
+                    relation?: {
+                        [key: string]: true;
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            alerts?: {
+                [key: string]: {
+                    /** @enum {string} */
+                    "@type"?: "Alert";
+                    /**
+                     * @default display
+                     * @enum {string}
+                     */
+                    action: "display" | "email";
+                    trigger: ({
+                        /**
+                         * @default OffsetTrigger
+                         * @enum {string}
+                         */
+                        "@type": "OffsetTrigger";
+                        offset: string;
+                        /** @enum {string} */
+                        relativeTo?: "start" | "end";
+                    } & {
+                        [key: string]: unknown;
+                    }) | ({
+                        /** @enum {string} */
+                        "@type": "AbsoluteTrigger";
+                        when: string;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                    acknowledged?: string;
+                    relatedTo?: {
+                        [key: string]: {
+                            /** @enum {string} */
+                            "@type"?: "Relation";
+                            relation?: {
+                                [key: string]: true;
+                            };
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        PatchObject: {
+            [key: string]: unknown;
+        };
+        CalendarShare: {
+            /** @example shr_01h455vb4pex5vsknk084sn02q */
+            id: string;
+            grantee: components["schemas"]["CalendarGrantee"];
+            /** @enum {string} */
+            access: "free-busy" | "read" | "write" | "manage";
+            user: {
+                id: string;
+                name: string;
+                email: string;
+            } | null;
+            createdBy: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            etag: string;
+        };
+        CalendarGrantee: {
+            /** @enum {string} */
+            type: "user";
+            userId: string;
+        } | {
+            /** @enum {string} */
+            type: "tenant";
+        };
         AuditEntryPage: {
             items: components["schemas"]["AuditEntry"][];
             nextCursor: string | null;
@@ -759,7 +1727,7 @@ export interface components {
             kind: "user";
             userId: string;
             /** @enum {string} */
-            via: "session" | "apiKey";
+            via: "session" | "apiKey" | "davLogin";
         };
         FeedList: {
             items: components["schemas"]["Feed"][];
@@ -818,6 +1786,27 @@ export interface components {
             /** @description Only for full-privacy publications */
             location?: string;
             color: string | null;
+        };
+        DavLogin: {
+            /** @example dvl_01h455vb4pex5vsknk084sn02q */
+            id: string;
+            name: string;
+            username: string;
+            /** Format: date-time */
+            lastUsedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CreatedDavLogin: {
+            /** @example dvl_01h455vb4pex5vsknk084sn02q */
+            id: string;
+            name: string;
+            username: string;
+            /** Format: date-time */
+            createdAt: string;
+            password: string;
+            /** Format: uri */
+            serverUrl: string;
         };
         PublicationList: {
             items: components["schemas"]["Publication"][];
@@ -975,15 +1964,6 @@ export interface components {
                 google: string;
                 outlook: string;
             };
-        };
-        /** @description One-click links that subscribe to the combined feed (`all.ics`) */
-        SubscribeLinks: {
-            /** Format: uri */
-            google: string;
-            /** Format: uri */
-            outlookPersonal: string;
-            /** Format: uri */
-            outlookWork: string;
         };
         SinkList: {
             items: components["schemas"]["Sink"][];
@@ -2414,7 +3394,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Calendars of the accounts you manage */
+            /** @description Accessible calendars, including free-busy grants */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2443,6 +3423,80 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    color?: string;
+                    timezone?: string;
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created hosted calendar; its publication starts disabled */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2510,6 +3564,2259 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Soft deleted; retained for 30 days */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    updateCalendar: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    color?: string;
+                    timezone?: string;
+                    description?: string;
+                    sortOrder?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated calendar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    restoreCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored calendar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Calendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listCalendarLinks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published links, without secrets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CalendarLink"][];
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createCalendarLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string | null;
+                    /** Format: date-time */
+                    expiresAt?: string | null;
+                    /** @enum {string} */
+                    privacy: "full" | "title-only" | "busy-only";
+                };
+            };
+        };
+        responses: {
+            /** @description Created link; the token is shown only once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedCalendarLink"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteCalendarLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                linkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked immediately */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    updateCalendarLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                linkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string | null;
+                    /** Format: date-time */
+                    expiresAt?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated link; privacy is immutable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarLink"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listEvents: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Events ordered by UID; span filtering is coarse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            etag: string;
+                            event: components["schemas"]["JSCalendar"];
+                        }[];
+                        nextCursor: string | null;
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JSEvent"];
+            };
+        };
+        responses: {
+            /** @description Created event */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JSCalendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getEvent: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-none-match"?: string;
+            };
+            path: {
+                id: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event; ETag is shared with writable CalDAV */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JSCalendar"];
+                };
+            };
+            /** @description Not modified */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putEvent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JSEvent"];
+            };
+        };
+        responses: {
+            /** @description Replaced event */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JSCalendar"];
+                };
+            };
+            /** @description Created event */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JSCalendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteEvent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted event */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    patchEvent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchObject"];
+            };
+        };
+        responses: {
+            /** @description Patched event */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JSCalendar"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    splitEvent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    at: string;
+                    uid?: string;
+                    patch?: components["schemas"]["PatchObject"];
+                };
+            };
+        };
+        responses: {
+            /** @description Atomically split this and following occurrences */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        original: {
+                            etag: string;
+                            event: components["schemas"]["JSCalendar"];
+                        };
+                        next: {
+                            etag: string;
+                            event: components["schemas"]["JSCalendar"];
+                        };
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    calendarOccurrences: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UTC occurrences; at most 366 days and 5,000 items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            uid: string;
+                            recurrenceId: string;
+                            start: string;
+                            end: string;
+                            timeZone: string | null;
+                            allDay: boolean;
+                            title: string;
+                            status: string;
+                            location?: string;
+                        }[];
+                        truncated: boolean;
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    calendarChanges: {
+        parameters: {
+            query?: {
+                since?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Incremental changes; omit since to restart without tombstones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        changes: ({
+                            etag: string;
+                            event: components["schemas"]["JSCalendar"];
+                            uid: string;
+                            /** @enum {boolean} */
+                            deleted: false;
+                        } | {
+                            uid: string;
+                            /** @enum {boolean} */
+                            deleted: true;
+                        })[];
+                        next: string;
+                        hasMore: boolean;
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    exportCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All live events as one iCalendar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    importCalendar: {
+        parameters: {
+            query?: {
+                onConflict?: "skip" | "replace";
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/calendar": string;
+            };
+        };
+        responses: {
+            /** @description Each UID is imported in one transaction; invalid events are reported individually */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        created: number;
+                        updated: number;
+                        skipped: number;
+                        failed: {
+                            uid: string;
+                            reason: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Content too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listCalendarShares: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Grants, including colleague names and emails */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CalendarShare"][];
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createCalendarShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    grantee: components["schemas"]["CalendarGrantee"];
+                    /** @enum {string} */
+                    access: "free-busy" | "read" | "write" | "manage";
+                };
+            };
+        };
+        responses: {
+            /** @description Created grant */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarShare"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Existing grant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"] & {
+                        /** @example shr_01h455vb4pex5vsknk084sn02q */
+                        id: string;
+                    };
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteCalendarShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                shareId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked on the next request */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    updateCalendarShare: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description ETag from a previous read; 412 when it is stale */
+                "if-match"?: string;
+            };
+            path: {
+                id: string;
+                shareId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    access: "free-busy" | "read" | "write" | "manage";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated grant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarShare"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    queryFreeBusy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date-time */
+                    from: string;
+                    /** Format: date-time */
+                    to: string;
+                    calendarIds: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Busy intervals; inaccessible and absent calendars are indistinguishable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        calendars: {
+                            [key: string]: {
+                                busy: {
+                                    /** Format: date-time */
+                                    start: string;
+                                    /** Format: date-time */
+                                    end: string;
+                                    /** @enum {string} */
+                                    status: "busy" | "tentative";
+                                }[];
+                                truncated: boolean;
+                            } | {
+                                /** @enum {string} */
+                                error: "not-accessible";
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3096,6 +6403,191 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OccurrenceList"];
                 };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listDavLogins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your device logins, without secrets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DavLogin"][];
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createDavLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created login; the password is shown only here */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedDavLogin"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteDavLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked immediately */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Bad request */
             400: {

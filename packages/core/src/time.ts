@@ -5,7 +5,7 @@
  * calendar zone (default UTC) for span and expansion only; they stay floating in output.
  */
 import { Temporal } from "@js-temporal/polyfill";
-import { getProp, getProps, propParam, propType, propValues, recurrenceId, rrule } from "./accessors.ts";
+import { getProp, getProps, propParam, propParams, propType, propValues, recurrenceId, rrule } from "./accessors.ts";
 import { rruleWallTimes, vtimezoneUtcOffset } from "./ical.ts";
 import type { EventResource, JCalComponent, JCalProperty, JCalValue, Occurrence } from "./model.ts";
 
@@ -71,7 +71,8 @@ function converter(resource: EventResource, calendarZone: string) {
 
   const pointOf = (p: JCalProperty, value: JCalValue, zone = propParam(p, "tzid") ?? calendarZone): Point | null => {
     // PERIOD values (RDATE) are "start/end"; only the start is used.
-    const v = typeof value === "string" ? value.split("/")[0] : undefined;
+    const [first] = Array.isArray(value) ? value : [value];
+    const v = typeof first === "string" ? first.split("/")[0] : undefined;
     if (!v) return null;
     if (propType(p) === "date" || /^\d{4}-\d{2}-\d{2}$/.test(v)) return { wall: Temporal.PlainDate.from(v), zone: calendarZone, utc: false };
     if (v.endsWith("Z")) return { wall: Temporal.PlainDateTime.from(v.slice(0, -1)), zone: "UTC", utc: true };
@@ -164,7 +165,7 @@ export function expandOccurrences(resource: EventResource, window: TimeWindow, c
     const horizon = window.to.epochMilliseconds + backShift;
     const until = untilCheck(master, masterStart, cv);
 
-    const bases: { point: Point; instant: Temporal.Instant }[] = [];
+    const bases: { point: Point; instant: Temporal.Instant; length?: Length }[] = [];
     const rule = rrule(master);
     if (rule) {
       let n = 0;
@@ -182,11 +183,22 @@ export function expandOccurrences(resource: EventResource, window: TimeWindow, c
     for (const p of getProps(master, "rdate"))
       for (const v of propValues(p)) {
         const point = cv.pointOf(p, v, propParam(p, "tzid") ?? masterStart.zone);
-        if (point) bases.push({ point, instant: cv.instantOf(point) });
+        if (point) {
+          const parts = Array.isArray(v) ? v : typeof v === 'string' ? v.split('/') : [];
+          const end = parts[1];
+          const periodProperty: JCalProperty | undefined = typeof end === 'string'
+            ? end.startsWith('P') ? ['duration', {}, 'duration', end] : ['dtend', propParams(p), 'date-time', end]
+            : undefined;
+          const length = periodProperty ? cv.lengthOf(['vevent', [periodProperty], []], point) : null;
+          const instant = cv.instantOf(point);
+          const prior = bases.find((base) => base.instant.equals(instant));
+          if (prior && length) prior.length = length;
+          else if (!prior) bases.push({ point, instant, ...(length && { length }) });
+        }
       }
 
     const seen = new Set<number>();
-    for (const { point, instant } of bases) {
+    for (const { point, instant, length } of bases) {
       const key = instant.epochMilliseconds;
       if (seen.has(key) || excluded.has(key) || exact.has(key)) continue;
       seen.add(key);
@@ -197,7 +209,7 @@ export function expandOccurrences(resource: EventResource, window: TimeWindow, c
         const ms = range.occurrence.end.epochMilliseconds - range.occurrence.start.epochMilliseconds;
         found.push({ recurrenceId, start, end: start.add({ milliseconds: ms }), allDay: range.occurrence.allDay, component: range.component });
       } else {
-        found.push({ recurrenceId, start: instant, end: cv.endOf(point, masterLength), allDay: point.wall instanceof Temporal.PlainDate, component: master });
+        found.push({ recurrenceId, start: instant, end: cv.endOf(point, length ?? masterLength), allDay: point.wall instanceof Temporal.PlainDate, component: master });
       }
     }
   }

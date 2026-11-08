@@ -14,7 +14,7 @@ type AccountList = components['schemas']['AccountList'];
 type PublicationList = components['schemas']['PublicationList'];
 
 export const accountsQuery = $api.queryOptions('get', '/api/v1/accounts');
-export const calendarsQuery = $api.queryOptions('get', '/api/v1/calendars');
+export const calendarsQuery = $api.queryOptions('get', '/api/v1/calendars', {}, { select: (data) => ({ items: data.items.filter((calendar) => calendar.kind === 'connected') }) });
 export const instanceQuery = $api.queryOptions('get', '/api/v1/instance');
 
 /** Refetches every account and calendar query, after a connect, reconnect or removal. */
@@ -24,7 +24,7 @@ export const refreshAccounts = (client: QueryClient) =>
 /** Calendars grouped by account id. */
 export function calendarsByAccount(calendars: readonly Calendar[] | undefined): Map<string, Calendar[]> {
   const groups = new Map<string, Calendar[]>();
-  for (const calendar of calendars ?? []) groups.set(calendar.accountId, [...(groups.get(calendar.accountId) ?? []), calendar]);
+  for (const calendar of calendars ?? []) if (calendar.accountId) groups.set(calendar.accountId, [...(groups.get(calendar.accountId) ?? []), calendar]);
   return groups;
 }
 

@@ -5,6 +5,7 @@ test.each([
   ['https://cal.example.com/ics/tok123/feed.ics?key=abc#x', 'https://cal.example.com/ics/…?…#…'],
   ['https://user:pass@example.com/calendar.ics', 'https://example.com/calendar.ics'],
   ['/ics/tok123', '/ics/…'],
+  ['/ics/l/tok123.ics', '/ics/…'],
   ['/dav/calendars/home?depth=1', '/dav/calendars/home?…'],
   ['ya29.secret-token', '…'],
 ])('redact(%p)', (input, expected) => {

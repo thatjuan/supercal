@@ -26,6 +26,7 @@ const spec = (over: Partial<PublicationSpec> = {}): PublicationSpec => ({
   id: "pub_test",
   kind: "passthrough",
   privacy: "full",
+  audience: "owner",
   filters: { hideDeclined: false, hideCancelled: false, hideAllDay: false },
   keepAlarms: false,
   ownerAddresses: ["mailto:me@example.com"],
@@ -83,6 +84,52 @@ describe("ported from the feed spike", () => {
     expect(out).toContain("RANGE=THISANDFUTURE");
     expect(await projectText(spec({ keepAlarms: true }), source([byUid("weekly-sync@example.com")]))).toContain("BEGIN:VALARM");
     expect(await projectText(spec(), source([byUid("flight@example.com")]))).toContain("CLASS:PRIVATE");
+  });
+
+  test("public full: allows public details and strips people, comments, extensions and alarms", async () => {
+    const input = source(parse(calendar([
+      "UID:public@example.com", "DTSTAMP:20260101T000000Z", "DTSTART:20260105T090000Z", "DURATION:PT1H",
+      'SUMMARY;ALTREP="https://private.example.com":Planning', "DESCRIPTION:Public description", "LOCATION:Office",
+      "URL:https://example.com", "CATEGORIES:Work", "GEO:49.2;-123.1", "CONFERENCE:https://meet.example.com",
+      "CREATED:20250101T000000Z", "LAST-MODIFIED:20260101T000000Z", "SEQUENCE:3",
+      "ATTENDEE:mailto:guest@example.com", "ORGANIZER:mailto:host@example.com", "COMMENT:Secret comment",
+      "CONTACT:Private contact", "ATTACH:https://private.example.com/file", "X-SECRET:Private extension",
+      "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT10M", "DESCRIPTION:Private alarm", "END:VALARM",
+    ])));
+    const out = await projectText(spec({ audience: "public", keepAlarms: true }), input);
+    for (const p of ["ATTENDEE", "ORGANIZER", "COMMENT", "CONTACT", "ATTACH", "X-SECRET"])
+      expect(names(out).has(p)).toBe(false);
+    for (const p of ["SUMMARY", "DESCRIPTION", "LOCATION", "URL", "CATEGORIES", "GEO", "CONFERENCE", "CREATED", "LAST-MODIFIED", "SEQUENCE", "DTSTAMP"])
+      expect(names(out).has(p)).toBe(true);
+    expect(out).not.toContain("VALARM");
+    expect(out).not.toContain("ALTREP");
+    expect(out).not.toContain("private.example.com");
+    expect(out).toContain("DTSTAMP:20260101T000000Z");
+  });
+
+  test("private and confidential full events are Busy for members/public and unchanged for owners", async () => {
+    for (const classification of ["PRIVATE", "CONFIDENTIAL"]) {
+      const input = source(parse(calendar([
+        "UID:private", "DTSTAMP:20260101T000000Z", "DTSTART:20260105T090000Z", "DURATION:PT1H",
+        `CLASS:${classification}`, "SUMMARY:Secret meeting", "DESCRIPTION:Private notes", "ATTENDEE:mailto:guest@example.com",
+      ])));
+      const owner = await projectText(spec({ audience: "owner" }), input);
+      expect(owner).toContain("SUMMARY:Secret meeting");
+      expect(owner).toContain("ATTENDEE:mailto:guest@example.com");
+      for (const audience of ["member", "public"] as const) {
+        const out = await projectText(spec({ audience }), input);
+        expect(out).toContain("SUMMARY:Busy");
+        for (const p of ["CLASS", "DESCRIPTION", "ATTENDEE", "CREATED", "LAST-MODIFIED", "SEQUENCE"])
+          expect(names(out).has(p)).toBe(false);
+        expect(out).not.toContain("Secret meeting");
+        expect(out).toContain("DTSTAMP:19700101T000000Z");
+      }
+    }
+    const transparent = source(parse(calendar([
+      "UID:free", "DTSTAMP:20260101T000000Z", "DTSTART:20260105T090000Z", "DURATION:PT1H", "CLASS:PRIVATE", "TRANSP:TRANSPARENT",
+    ])));
+    expect(await project(spec({ audience: "public" }), transparent)).toHaveLength(0);
+    expect(await project(spec({ audience: "owner" }), transparent)).toHaveLength(1);
   });
 
   test("busy-only: allowlist, SUMMARY=Busy, recurrence structure kept", async () => {

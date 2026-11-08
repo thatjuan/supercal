@@ -22,9 +22,14 @@ import { accountRoutes } from './accounts.ts';
 import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
 import { calendarRoutes } from './calendars.ts';
+import { davLoginRoutes } from './dav-logins.ts';
+import { freeBusyRoutes } from './free-busy.ts';
+import { shareRoutes } from './shares.ts';
+import { eventRoutes } from './events.ts';
 import { feedRoutes } from './feeds.ts';
 import { instanceRoutes, type Signup } from './instance.ts';
 import { createApiApp } from './kit/index.ts';
+import { linkRoutes } from './links.ts';
 import { meRoutes } from './me.ts';
 import { publicationRoutes } from './publications.ts';
 import { sinkRoutes } from './sinks.ts';
@@ -115,8 +120,13 @@ export function createApi(
     .route('/', googleOAuthRoutes)
     .route('/', microsoftOAuthRoutes)
     .route('/', calendarRoutes)
+    .route('/', linkRoutes(secrets))
+    .route('/', eventRoutes)
+    .route('/', shareRoutes)
+    .route('/', freeBusyRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)
+    .route('/', davLoginRoutes)
     .route('/', publicationRoutes)
     .route('/', subscribeRoutes)
     .route('/', sinkRoutes)
