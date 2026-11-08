@@ -25,6 +25,7 @@ export type OAuthDeps = {
   returnOrigins: string[];
   state: StateSigner;
   google: OAuthClient | null;
+  microsoft: OAuthClient | null;
 };
 
 /** A registered OAuth client and its endpoints (overridden in tests). */
@@ -81,6 +82,16 @@ export function allowedReturnTo(returnTo: string, origins: readonly string[]): s
   const url = URL.parse(returnTo, isPath ? base : undefined);
   return url && (url.protocol === 'https:' || url.protocol === 'http:') && origins.includes(url.origin) ? url.href : null;
 }
+
+/** Thrown inside a callback for a failure the browser is sent back with, as `error=<code>`. */
+export class CallbackFailure extends Error {
+  constructor(readonly code: string) {
+    super(code);
+  }
+}
+
+/** A provider's error code reduced to `[a-z0-9_]`, safe to put in the redirect; `fallback` when nothing is left. */
+export const errorCode = (code: string, fallback: string) => code.replace(/[^a-z0-9_]/g, '') || fallback;
 
 /** `returnTo` with `params` added to its query, for the callback's final redirect. */
 export function redirectWith(returnTo: string, params: Record<string, string>): string {

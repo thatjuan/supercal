@@ -16,6 +16,7 @@ import type { Bus } from '../bus.ts';
 import { createLogger } from '../log.ts';
 import { createStateSigner, type OAuthClient, type OAuthDeps } from '../oauth/common.ts';
 import { googleOAuthRoutes } from '../oauth/google.ts';
+import { microsoftOAuthRoutes } from '../oauth/microsoft.ts';
 import { createSyncDeps } from '../sync/index.ts';
 import { accountRoutes } from './accounts.ts';
 import { apiKeyRoutes } from './api-keys.ts';
@@ -49,7 +50,7 @@ export const openApiConfig = {
 export type ApiDeps = { auth: Auth; secrets: SecretBox; bus: Bus; stream?: StreamOptions; fetch?: GuardedFetch; adapters?: AdapterRegistry; oauth?: OAuthConfig };
 
 /** OAuth settings: `WEB_ORIGIN`, the state signing secret, and each configured provider's client. Redirect URIs are built on the auth's public URL. */
-export type OAuthConfig = { webOrigin?: string | undefined; stateSecret: string; google?: OAuthClient | undefined };
+export type OAuthConfig = { webOrigin?: string | undefined; stateSecret: string; google?: OAuthClient | undefined; microsoft?: OAuthClient | undefined };
 
 /** Builds the API. Route groups are mounted after the docs, so the docs are public. */
 export function createApi({ auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
@@ -66,6 +67,7 @@ export function createApi({ auth, secrets, bus, stream, fetch, adapters, oauth: 
     returnOrigins: [new URL(auth.publicUrl).origin, ...(oauthConfig?.webOrigin ? [new URL(oauthConfig.webOrigin).origin] : [])],
     state: createStateSigner(oauthConfig?.stateSecret ?? crypto.randomUUID()),
     google: oauthConfig?.google ?? null,
+    microsoft: oauthConfig?.microsoft ?? null,
   };
   const app = createApiApp();
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
@@ -91,6 +93,7 @@ export function createApi({ auth, secrets, bus, stream, fetch, adapters, oauth: 
     .route('/', apiKeyRoutes)
     .route('/', accountRoutes)
     .route('/', googleOAuthRoutes)
+    .route('/', microsoftOAuthRoutes)
     .route('/', calendarRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)

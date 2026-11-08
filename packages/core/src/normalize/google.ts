@@ -7,11 +7,9 @@
  */
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
-import { parseCalendar } from "../ical.ts";
-import { assertIanaZone } from "../time.ts";
-import { addMissingTimezones } from "../vtimezone.ts";
 import type { EventResource } from "../model.ts";
 import type { Completeness, SourceObject } from "./ical.ts";
+import { compact, EMAIL, escapeText, quoteParam, toResource, utcStamp, validZone, webUrl } from "./lines.ts";
 
 const GoogleTime = z.object({ date: z.string().optional(), dateTime: z.string().optional(), timeZone: z.string().optional() });
 const GooglePerson = z.object({
@@ -58,21 +56,7 @@ const STATUS: Record<string, string> = { confirmed: "CONFIRMED", tentative: "TEN
 const TRANSP: Record<string, string> = { opaque: "OPAQUE", transparent: "TRANSPARENT" };
 
 const RECURRENCE_LINE = /^(RRULE|RDATE|EXDATE)(;[^:\r\n]*)?:[^\r\n]+$/;
-const ZONE = /^[A-Za-z0-9_+\-/]+$/;
-const EMAIL = /^[^\s"<>:;,\\]+@[^\s"<>:;,\\]+$/;
 const HTML = /<\/?[a-z][^>]*>/i;
-
-const escapeText = (s: string) =>
-  s.replaceAll("\\", "\\\\").replace(/\r\n?/g, "\n").replaceAll("\n", "\\n").replaceAll(";", "\\;").replaceAll(",", "\\,");
-const quoteParam = (s: string) => `"${s.replace(/["\x00-\x1f\x7f]/g, "")}"`;
-const compact = (s: string) => s.replace(/[-:]/g, "");
-const utcStamp = (instant: string) => `${compact(Temporal.Instant.from(instant).toString({ smallestUnit: "second" }))}`;
-
-function validZone(zone: string): string {
-  if (!ZONE.test(zone)) throw new RangeError(`invalid time zone ${zone}`);
-  assertIanaZone(zone);
-  return zone;
-}
 
 /**
  * A DATE or DATE-TIME property for a Google time: all-day `date` as VALUE=DATE, a `dateTime` in
@@ -107,12 +91,7 @@ function personLine(name: "ORGANIZER" | "ATTENDEE", person: GooglePerson): strin
   return `${[name, ...params].join(";")}:mailto:${person.email}`;
 }
 
-function conferenceUrl(e: GoogleEvent): string | null {
-  const uri = e.conferenceData?.entryPoints?.find((p) => p.entryPointType === "video")?.uri ?? e.hangoutLink;
-  if (!uri) return null;
-  const url = URL.parse(uri);
-  return url && (url.protocol === "https:" || url.protocol === "http:") ? url.href : null;
-}
+const conferenceUrl = (e: GoogleEvent) => webUrl(e.conferenceData?.entryPoints?.find((p) => p.entryPointType === "video")?.uri ?? e.hangoutLink);
 
 /** The VEVENT lines of one Google event (without BEGIN/END). */
 function eventLines(uid: string, e: GoogleEvent, zone: string | undefined, extra: string[]): string[] {
@@ -174,10 +153,5 @@ export function normalizeGoogle(objects: SourceObject[]): { resource: EventResou
     blocks.push(eventLines(uid, e, own.zone, [slotLine("RECURRENCE-ID", e.originalStartTime, own)]));
   }
 
-  const text = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Supercal//EN", ...blocks.flatMap((lines) => ["BEGIN:VEVENT", ...lines, "END:VEVENT"]), "END:VCALENDAR", ""].join("\r\n");
-  const parsed = parseCalendar(text);
-  const resource = parsed.resources.find((r) => r.uid === uid);
-  if (!resource) throw new RangeError(`no VEVENT for ${uid}: ${parsed.errors.map((e) => e.message).join("; ")}`);
-  const problems = parsed.errors.map((e) => `${e.component}: ${e.message}`);
-  return { resource: addMissingTimezones(resource), completeness: problems.length ? { incomplete: problems.join("; ") } : "complete" };
+  return toResource(uid, blocks);
 }

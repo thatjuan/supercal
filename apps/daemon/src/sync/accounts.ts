@@ -87,8 +87,8 @@ export async function connectAccount(deps: SyncDeps, principal: Principal, input
     if (!account) throw new Error('account insert returned no row');
     const calendars = await applyListing(tx, deps.feeds, account, infos, { sweep: false });
     await wakeTargets(tx, [await ensureTarget(tx, account, 'discover', account.id)]);
-    // The calendar-list watch, which wakes discovery when calendars are added or removed.
-    if (adapter.capabilities.calendarDiscovery === 'push') await wakeTargets(tx, [await ensureTarget(tx, account, 'push_renew', account.id)]);
+    // The account's subscription: a calendar-list watch that wakes discovery, or a mailbox-wide one for events.
+    if (adapter.capabilities.calendarDiscovery === 'push' || adapter.capabilities.push === 'account') await wakeTargets(tx, [await ensureTarget(tx, account, 'push_renew', account.id)]);
     await audit(tx, principal, 'account.create', { type: 'account', id }, { provider, displayName: input.displayName, calendars: calendars.length });
     return { account, calendars };
   });

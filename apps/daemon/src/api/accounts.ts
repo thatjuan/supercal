@@ -13,6 +13,7 @@ import { hasRole } from '../auth/policy.ts';
 import { NoAdapterError } from '../sync/context.ts';
 import { connectAccount, deleteAccount, loadAccount, requestSync, updateAccount, type NewAccount as NewAccountInput } from '../sync/accounts.ts';
 import { AuthorizationUrl, OAuthStart, startGoogleFlow } from '../oauth/google.ts';
+import { startMicrosoftFlow } from '../oauth/microsoft.ts';
 import { Calendar, toCalendars } from './calendars.ts';
 import { createApiApp, etagOf, ifMatchHeaders, ProblemError, problemResponses, requireIfMatch, typeId, Unprocessable } from './kit/index.ts';
 
@@ -234,7 +235,9 @@ export const accountRoutes = createApiApp()
   .openapi(reconnect, async (c) => {
     const { principal, oauth } = c.var;
     const account = await withTenant(principal.tenantId, (tx) => loadAccount(tx, principal, c.req.valid('param').id));
+    const { returnTo } = c.req.valid('json');
+    if (account.provider === 'microsoft') return c.json({ authorizationUrl: await startMicrosoftFlow(oauth, principal, returnTo, account.email) }, 200);
     if (account.provider !== 'google') throw new Unprocessable(`${account.provider} accounts do not reconnect through OAuth`, 'unsupported-provider');
-    const authorizationUrl = await startGoogleFlow(oauth, principal, c.req.valid('json').returnTo, account.email);
+    const authorizationUrl = await startGoogleFlow(oauth, principal, returnTo, account.email);
     return c.json({ authorizationUrl }, 200);
   });
