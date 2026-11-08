@@ -526,12 +526,20 @@
         "oneOf": [
           {
             "$ref": "#/components/schemas/NewIcsAccount"
+          },
+          {
+            "$ref": "#/components/schemas/NewCaldavAccount"
+          },
+          {
+            "$ref": "#/components/schemas/NewIcloudAccount"
           }
         ],
         "discriminator": {
           "propertyName": "provider",
           "mapping": {
-            "ics": "#/components/schemas/NewIcsAccount"
+            "ics": "#/components/schemas/NewIcsAccount",
+            "caldav": "#/components/schemas/NewCaldavAccount",
+            "icloud": "#/components/schemas/NewIcloudAccount"
           }
         }
       },
@@ -558,6 +566,67 @@
         "required": [
           "provider",
           "url"
+        ]
+      },
+      "NewCaldavAccount": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "caldav"
+            ]
+          },
+          "serverUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "The CalDAV server; discovery starts at its /.well-known/caldav"
+          },
+          "username": {
+            "type": "string",
+            "minLength": 1
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Basic auth only; stored encrypted"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "provider",
+          "serverUrl",
+          "username",
+          "password"
+        ]
+      },
+      "NewIcloudAccount": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "icloud"
+            ]
+          },
+          "appleId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "appSpecificPassword": {
+            "type": "string",
+            "minLength": 1,
+            "description": "An app-specific password from appleid.apple.com; stored encrypted"
+          }
+        },
+        "required": [
+          "provider",
+          "appleId",
+          "appSpecificPassword"
         ]
       },
       "CalendarList": {

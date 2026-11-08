@@ -6,7 +6,8 @@
 import { calendarAccount, closeDb, connectDb, member, migrate, organization, publication, sourceCalendar, syncTarget, user, type AccountId, type PublicationId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { AuthFailedError } from '@supercal/providers';
+import { AuthFailedError, caldavAdapter, icloudAdapter } from '@supercal/providers';
+import { DavFixture } from '@supercal/providers/test/dav-fixture';
 import { createFakeAdapter, fakeEvent } from '@supercal/providers/test/fake';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { eq, inArray, sql } from 'drizzle-orm';
@@ -32,11 +33,14 @@ const fake = createFakeAdapter();
 let scratch: Awaited<ReturnType<typeof scratchDatabase>> | undefined;
 let fixture: ReturnType<typeof testAuth> | undefined;
 let app: ReturnType<typeof createApi>;
+/** The API with the real CalDAV and iCloud adapters over a scripted CalDAV server. */
+const dav = new DavFixture().collection('/u/cals/work/', { name: 'Work' });
+let davApp: ReturnType<typeof createApi>;
 
 type Json = Record<string, unknown> & { id: string };
-async function call(path: string, { method = 'GET', body, ifMatch }: { method?: string; body?: unknown; ifMatch?: string } = {}) {
+async function call(path: string, { method = 'GET', body, ifMatch, via = app }: { method?: string; body?: unknown; ifMatch?: string; via?: typeof app } = {}) {
   const headers: Record<string, string> = { 'content-type': 'application/json', ...(ifMatch && { 'if-match': ifMatch }) };
-  const res = await app.request(path, { method, headers, ...(body !== undefined && { body: JSON.stringify(body) }) });
+  const res = await via.request(path, { method, headers, ...(body !== undefined && { body: JSON.stringify(body) }) });
   const text = await res.text();
   return { status: res.status, etag: res.headers.get('etag') ?? '', body: (text ? JSON.parse(text) : null) as Json & { items: Json[]; account: Json; calendars: Json[] } };
 }
@@ -51,6 +55,7 @@ describe.skipIf(!testDatabaseUrl)('accounts and calendars API', () => {
     connectDb(scratch.url);
     fixture = testAuth('invite', scratch.url);
     app = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus, adapters: { ics: fake.adapter } }, injectPrincipal);
+    davApp = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus, fetch: dav.asGuardedFetch(), adapters: { caldav: caldavAdapter, icloud: icloudAdapter } }, injectPrincipal);
     const db = unsafeDb();
     const now = new Date();
     await db.insert(organization).values({ id: tenantId, name: 'T', slug: tenantId, createdAt: now });
@@ -147,5 +152,34 @@ describe.skipIf(!testDatabaseUrl)('accounts and calendars API', () => {
       { enabled: false, epoch: 2 },
       { enabled: false, epoch: 2 },
     ]);
+  });
+
+  test('a CalDAV server is discovered from its URL; the password is stored encrypted only', async () => {
+    as('alice');
+    const created = await call('/api/v1/accounts', { method: 'POST', via: davApp, body: { provider: 'caldav', serverUrl: 'https://dav.test/', username: 'alice', password: 'hunter2' } });
+    expect(created.status).toBe(201);
+    expect(created.body.account).toMatchObject({ provider: 'caldav', displayName: 'alice on dav.test', serverUrl: 'https://dav.test/' });
+    expect(created.body.calendars.map((c) => c.name)).toEqual(['Work']);
+    const [stored] = await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, created.body.account.id as AccountId));
+    expect(stored?.credentials).not.toContain('hunter2');
+  });
+
+  test('a Digest-only CalDAV server is a 422 unsupported-auth', async () => {
+    as('bob');
+    dav.quirks.status = 401;
+    dav.quirks.challenge = 'Digest realm="dav", nonce="n"';
+    const rejected = await call('/api/v1/accounts', { method: 'POST', via: davApp, body: { provider: 'caldav', serverUrl: 'https://dav.test/', username: 'bob', password: 'x' } });
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.type).toBe('https://supercal.dev/problems/unsupported-auth');
+  });
+
+  test('rejected iCloud credentials are a 422 pointing at app-specific passwords', async () => {
+    as('bob');
+    dav.quirks.status = 401;
+    dav.quirks.challenge = 'Basic realm="iCloud"';
+    const rejected = await call('/api/v1/accounts', { method: 'POST', via: davApp, body: { provider: 'icloud', appleId: 'bob@icloud.com', appSpecificPassword: 'wrong' } });
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.type).toBe('https://supercal.dev/problems/invalid-credentials');
+    expect(rejected.body.detail).toContain('https://support.apple.com/en-us/102654');
   });
 });

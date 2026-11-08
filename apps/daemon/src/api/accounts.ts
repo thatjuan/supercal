@@ -6,7 +6,7 @@
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import { accountProvider, calendarAccount, connectionStatus, withTenant, type CalendarAccount } from '@supercal/db';
-import { AuthFailedError, EgressBlockedError, ProviderThrottledError, ProviderUnavailableError } from '@supercal/providers';
+import { AuthFailedError, EgressBlockedError, ICLOUD_SERVER_URL, ProviderThrottledError, ProviderUnavailableError, UnsupportedAuthError } from '@supercal/providers';
 import { asc, eq } from 'drizzle-orm';
 import { hasRole } from '../auth/policy.ts';
 import { NoAdapterError } from '../sync/context.ts';
@@ -40,16 +40,48 @@ const NewIcsAccount = z
   })
   .openapi('NewIcsAccount');
 
-const NewAccount = z.discriminatedUnion('provider', [NewIcsAccount]).openapi('NewAccount');
+const NewCaldavAccount = z
+  .object({
+    provider: z.literal('caldav'),
+    serverUrl: z.url({ protocol: /^https?$/ }).openapi({ description: 'The CalDAV server; discovery starts at its /.well-known/caldav' }),
+    username: z.string().min(1),
+    password: z.string().min(1).openapi({ description: 'Basic auth only; stored encrypted' }),
+    displayName: DisplayName.optional(),
+  })
+  .openapi('NewCaldavAccount');
+
+const NewIcloudAccount = z
+  .object({
+    provider: z.literal('icloud'),
+    appleId: z.string().min(1),
+    appSpecificPassword: z.string().min(1).openapi({ description: 'An app-specific password from appleid.apple.com; stored encrypted' }),
+  })
+  .openapi('NewIcloudAccount');
+
+const NewAccount = z.discriminatedUnion('provider', [NewIcsAccount, NewCaldavAccount, NewIcloudAccount]).openapi('NewAccount');
 type NewAccount = z.infer<typeof NewAccount>;
 
+type Variants = { [P in NewAccount['provider']]: Extract<NewAccount, { provider: P }> };
+
 /** Each variant's credentials and account columns. */
-const fromInput = {
+const fromInput: { [P in keyof Variants]: (input: Variants[P]) => NewAccountInput } = {
   ics: ({ url, displayName }) => {
     const host = new URL(url).host;
     return { credentials: { provider: 'ics', url }, displayName: displayName ?? host, serverUrl: host };
   },
-} satisfies { [P in NewAccount['provider']]: (input: Extract<NewAccount, { provider: P }>) => NewAccountInput };
+  caldav: ({ serverUrl, username, password, displayName }) => ({
+    credentials: { provider: 'caldav', serverUrl, username, password },
+    displayName: displayName ?? `${username} on ${new URL(serverUrl).host}`,
+    serverUrl,
+  }),
+  icloud: ({ appleId, appSpecificPassword }) => ({
+    credentials: { provider: 'icloud', appleId, appSpecificPassword },
+    displayName: 'iCloud',
+    email: appleId.includes('@') ? appleId : null,
+    serverUrl: ICLOUD_SERVER_URL,
+  }),
+};
+const accountInput = <P extends keyof Variants>(provider: P, input: Variants[P]) => fromInput[provider](input);
 
 const AccountPatch = z.object({ displayName: DisplayName.optional(), autoPublish: z.boolean().optional() });
 
@@ -65,8 +97,17 @@ const toAccount = ({ id, provider, ownerUserId, displayName, email, serverUrl, s
   autoPublish,
 });
 
-/** Provider failures while connecting, as problems: rejected credentials are a 422 `invalid-credentials`. */
-function connectProblem(error: unknown): unknown {
+const APPLE_APP_PASSWORDS = 'https://support.apple.com/en-us/102654';
+
+/**
+ * Provider failures while connecting, as problems: rejected credentials are a 422
+ * `invalid-credentials` (for iCloud with a pointer to app-specific passwords), and a server
+ * offering only Digest auth a 422 `unsupported-auth`.
+ */
+function connectProblem(error: unknown, provider: NewAccount['provider']): unknown {
+  if (error instanceof UnsupportedAuthError) return new Unprocessable(error.message, 'unsupported-auth');
+  if (error instanceof AuthFailedError && provider === 'icloud')
+    return new Unprocessable(`iCloud rejected the credentials: ${error.message}. Use an app-specific password, not your Apple ID password: ${APPLE_APP_PASSWORDS}`, 'invalid-credentials');
   if (error instanceof AuthFailedError) return new Unprocessable(`The provider rejected the credentials: ${error.message}`, 'invalid-credentials');
   if (error instanceof EgressBlockedError) return new Unprocessable(error.message, 'egress-blocked');
   if (error instanceof NoAdapterError) return new Unprocessable(error.message, 'unsupported-provider');
@@ -152,8 +193,8 @@ export const accountRoutes = createApiApp()
   .openapi(createAccount, async (c) => {
     const input = c.req.valid('json');
     const { principal, sync } = c.var;
-    const { account, calendars } = await connectAccount(sync, principal, fromInput[input.provider](input)).catch((error: unknown) => {
-      throw connectProblem(error);
+    const { account, calendars } = await connectAccount(sync, principal, accountInput(input.provider, input)).catch((error: unknown) => {
+      throw connectProblem(error, input.provider);
     });
     const items = await withTenant(principal.tenantId, (tx) => toCalendars(tx, calendars));
     return c.json({ account: toAccount(account), calendars: items }, 201, { ETag: etagOf(account) });

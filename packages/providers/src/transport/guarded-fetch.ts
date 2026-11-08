@@ -38,7 +38,8 @@ const DECODERS = { gzip: gunzipSync, deflate: inflateSync, br: brotliDecompressS
 
 const isDecodable = (encoding: string): encoding is keyof typeof DECODERS => Object.hasOwn(DECODERS, encoding);
 
-const hostMatches = (host: string, patterns: string[]) =>
+/** Whether `host` matches an exact pattern (`caldav.icloud.com`) or a `*.icloud.com` subdomain pattern. */
+export const hostMatches = (host: string, patterns: string[]) =>
   patterns.some((pattern) => (pattern.startsWith('*.') ? host.endsWith(pattern.slice(1).toLowerCase()) : host === pattern.toLowerCase()));
 
 function authorization(credentials: NonNullable<GuardedRequest['credentials']>): string {
