@@ -311,6 +311,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 | `GOOGLE_CLIENT_ID/SECRET` | no | Enables Google accounts and sinks. |
 | `MICROSOFT_CLIENT_ID/SECRET` | no | Enables Microsoft accounts. |
 | `SUPERCAL_EGRESS_ALLOW` | no | Operator LAN allowlist: `origin=cidr,…`. |
+| `SUPERCAL_ICS_CACHE_MB` | no | Bound on the in-process cache of rendered ICS bodies (default 64). |
 | `RESEND_API_KEY`, `MAIL_FROM` | no | Enables magic links, invites, verification mail. |
 | `WEB_ORIGIN` | dev | Extra trusted origin for the Vite dev server. |
 

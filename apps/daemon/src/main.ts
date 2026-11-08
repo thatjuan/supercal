@@ -29,7 +29,7 @@ const roles = config.SUPERCAL_ROLES;
 // The live stream turns off the idle timeout for its own requests (`server.timeout(req, 0)`), and
 // closes when `stopAbort` aborts, since `server.stop()` waits for open streams.
 const stopAbort = new AbortController();
-const server = Bun.serve({ port: config.PORT, fetch: createApp(roles, { auth, secrets, bus, stream: { signal: stopAbort.signal } }).fetch });
+const server = Bun.serve({ port: config.PORT, fetch: createApp(roles, { auth, secrets, bus, stream: { signal: stopAbort.signal }, icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024 }).fetch });
 log.info('listening', { port: server.port, roles: [...roles] });
 
 const worker = roles.has('worker') ? startWorker(stopAbort.signal, log.child({ role: 'worker' })) : Promise.resolve();
