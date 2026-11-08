@@ -27,42 +27,61 @@ const egressAllow = z
   .transform((value) => value.split(',').map((entry) => entry.trim()).filter(Boolean))
   .pipe(z.array(egressRule));
 
-const configSchema = z
+/** Variables that must be set unless `SUPERCAL_INSECURE_DEV=1`. */
+export const PRODUCTION_REQUIRED = ['SUPERCAL_PUBLIC_URL', 'SUPERCAL_KEYS', 'BETTER_AUTH_SECRET'] as const;
+
+/**
+ * Every environment variable the daemon reads. Each description is the operator documentation:
+ * `bun run docs:config` renders them into the table in `docs/self-hosting.md`.
+ */
+export const configSchema = z
   .object({
-    PORT: z.coerce.number({ error: 'must be a port number' }).int().min(0).max(65_535).default(4316),
-    DATABASE_URL: required,
-    DATABASE_MIGRATION_URL: optional,
-    SUPERCAL_PUBLIC_URL: url.optional(),
-    SUPERCAL_KEYS: optional,
-    BETTER_AUTH_SECRET: optional,
-    SUPERCAL_ROLES: rolesSchema.default(new Set(['api', 'dav', 'worker'])),
-    SUPERCAL_MIGRATE: z.enum(['auto', 'off']).default('auto'),
-    SUPERCAL_SIGNUP: z.enum(['open', 'invite', 'disabled']).default('invite'),
+    PORT: z.coerce.number({ error: 'must be a port number' }).int().min(0).max(65_535).default(4316).describe('Port the HTTP server listens on.'),
+    DATABASE_URL: required.describe('Postgres connection URL the daemon runs on. Recommended: a login that is a member of `supercal_app` and `supercal_control` and owns nothing.'),
+    DATABASE_MIGRATION_URL: optional.describe('Postgres URL of the schema owner, used only to apply migrations. Defaults to `DATABASE_URL` (single-URL mode).'),
+    SUPERCAL_PUBLIC_URL: url
+      .optional()
+      .describe('Public https base URL, used in feed links, OAuth redirect URIs and push webhooks. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
+    SUPERCAL_KEYS: optional.describe('Master keys for secrets at rest, `v2:<base64 32 bytes>,v1:…`; the first one encrypts. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
+    BETTER_AUTH_SECRET: optional.describe('Secret that signs sessions and OAuth state; at least 32 random characters. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
+    SUPERCAL_ROLES: rolesSchema.prefault('api,dav,worker').describe('Comma list of roles this process runs: `api` (API and dashboard), `dav` (CalDAV and ICS feeds), `worker` (sync).'),
+    SUPERCAL_MIGRATE: z.enum(['auto', 'off']).default('auto').describe('`auto` applies migrations at boot under an advisory lock; `off` leaves them to `supercal migrate`.'),
+    SUPERCAL_SIGNUP: z.enum(['open', 'invite', 'disabled']).default('invite').describe('Who may create an account: anyone (`open`), invitees (`invite`) or nobody (`disabled`). The first user always may, and becomes the operator.'),
     SUPERCAL_INSECURE_DEV: z
       .enum(['0', '1'])
       .default('0')
-      .transform((flag) => flag === '1'),
-    GOOGLE_CLIENT_ID: optional,
-    GOOGLE_CLIENT_SECRET: optional,
-    MICROSOFT_CLIENT_ID: optional,
-    MICROSOFT_CLIENT_SECRET: optional,
-    SUPERCAL_EGRESS_ALLOW: egressAllow.default([]),
-    /** Bound on cached ICS bodies, in MiB. */
-    SUPERCAL_ICS_CACHE_MB: z.coerce.number({ error: 'must be a number of MiB' }).min(0).default(64),
-    SUPERCAL_SYNC_CONCURRENCY: z.coerce.number({ error: 'must be a number' }).int().min(1).max(256).default(8),
-    RESEND_API_KEY: optional,
-    MAIL_FROM: optional,
-    WEB_ORIGIN: url.optional(),
-    SUPERCAL_WEB_DIR: optional,
+      .transform((flag) => flag === '1')
+      .describe('`1` allows plain http, a built-in development key and insecure cookies. Never in production.'),
+    GOOGLE_CLIENT_ID: optional.describe('Google OAuth client id; enables Google accounts. Set together with `GOOGLE_CLIENT_SECRET`.'),
+    GOOGLE_CLIENT_SECRET: optional.describe('Google OAuth client secret.'),
+    MICROSOFT_CLIENT_ID: optional.describe('Microsoft Entra application (client) id; enables Microsoft accounts. Set together with `MICROSOFT_CLIENT_SECRET`.'),
+    MICROSOFT_CLIENT_SECRET: optional.describe('Microsoft Entra client secret value.'),
+    SUPERCAL_EGRESS_ALLOW: egressAllow.prefault('').describe('LAN servers accounts may reach, as `https://host[:port]=cidr` entries separated by commas.'),
+    SUPERCAL_ICS_CACHE_MB: z.coerce.number({ error: 'must be a number of MiB' }).min(0).default(64).describe('Memory bound, in MiB, of the cache of rendered ICS feeds.'),
+    SUPERCAL_SYNC_CONCURRENCY: z.coerce
+      .number({ error: 'must be a number' })
+      .int()
+      .min(1)
+      .max(256)
+      .default(8)
+      .describe('Sync jobs a worker process runs at once (at most 2 per account).'),
+    SUPERCAL_METRICS_TOKEN: optional.describe('When set, `/metrics` requires `Authorization: Bearer <token>`.'),
+    RESEND_API_KEY: optional.describe('Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email.'),
+    MAIL_FROM: optional.describe('Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend.'),
+    WEB_ORIGIN: url.optional().describe('Extra trusted origin for the Vite dev server, such as `http://localhost:5173`. Development only.'),
+    SUPERCAL_WEB_DIR: optional.describe('Directory of the built dashboard. Defaults to `web/` next to the binary; the image sets `/app/web`.'),
   })
   .superRefine((config, ctx) => {
     if (!config.SUPERCAL_INSECURE_DEV) {
-      for (const key of ['SUPERCAL_PUBLIC_URL', 'SUPERCAL_KEYS', 'BETTER_AUTH_SECRET'] as const) {
+      for (const key of PRODUCTION_REQUIRED) {
         if (config[key] === undefined) ctx.addIssue({ code: 'custom', path: [key], message: 'is required unless SUPERCAL_INSECURE_DEV=1' });
       }
       if (config.SUPERCAL_PUBLIC_URL?.startsWith('http:')) {
         ctx.addIssue({ code: 'custom', path: ['SUPERCAL_PUBLIC_URL'], message: 'must use https: unless SUPERCAL_INSECURE_DEV=1' });
       }
+    }
+    if ((config.RESEND_API_KEY === undefined) !== (config.MAIL_FROM === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['MAIL_FROM'], message: 'must be set together with RESEND_API_KEY' });
     }
     for (const provider of ['GOOGLE', 'MICROSOFT'] as const) {
       const id = `${provider}_CLIENT_ID` as const;

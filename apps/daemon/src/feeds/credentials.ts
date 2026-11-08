@@ -3,7 +3,8 @@
  * user once, and what is stored: an argon2id hash for the CalDAV password, a sha256 hex digest
  * for the ICS token. Feed credentials never grant API access.
  */
-import type { SecretBox, SecretContext } from '@supercal/db';
+import { feed as feedTable, type FeedId, type SecretBox, type SecretContext, type TenantTx } from '@supercal/db';
+import { and, eq } from 'drizzle-orm';
 
 const HANDLE_MAX = 24;
 const SUFFIX_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -67,8 +68,17 @@ const uidSecretContext = (tenantId: SecretContext['tenantId'], feedId: string): 
 export const newUidSecret = (secrets: SecretBox, feed: { tenantId: SecretContext['tenantId']; id: string }) =>
   secrets.encrypt(Buffer.from(randomBytes(32)).toString('base64url'), uidSecretContext(feed.tenantId, feed.id));
 
-/** Decrypts a feed's `uid_secret` into the HMAC key projection uses for privacy UIDs. */
-export async function openUidSecret(secrets: SecretBox, feed: { tenantId: SecretContext['tenantId']; id: string; uidSecret: string }) {
-  const { plaintext } = await secrets.decrypt(feed.uidSecret, uidSecretContext(feed.tenantId, feed.id));
+/**
+ * Decrypts a feed's `uid_secret` into the HMAC key projection uses for privacy UIDs. A secret
+ * sealed under an older master key is re-encrypted under the active one in `tx` (compare-and-swap
+ * on the old ciphertext), so the old key can be retired once every feed has been read.
+ */
+export async function openUidSecret(secrets: SecretBox, feed: { tenantId: SecretContext['tenantId']; id: FeedId; uidSecret: string }, tx: TenantTx) {
+  const { plaintext, reencrypted } = await secrets.decrypt(feed.uidSecret, uidSecretContext(feed.tenantId, feed.id));
+  if (reencrypted)
+    await tx
+      .update(feedTable)
+      .set({ uidSecret: reencrypted })
+      .where(and(eq(feedTable.id, feed.id), eq(feedTable.uidSecret, feed.uidSecret)));
   return crypto.subtle.importKey('raw', Buffer.from(plaintext, 'base64url'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 }

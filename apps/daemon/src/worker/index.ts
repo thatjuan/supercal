@@ -15,11 +15,13 @@ export type WorkerOptions = {
   adapters?: AdapterRegistry;
   /** See `SyncDeps.pushBaseUrl`. */
   pushBaseUrl?: string | null;
+  /** See `SchedulerOptions.onTick`. */
+  onTick?: () => void;
 };
 
 /** Runs the worker role until `signal` aborts: registers the maintenance jobs, then runs the sync scheduler. */
-export async function startWorker(signal: AbortSignal, log: Logger, { secrets, bus, fetch, concurrency, adapters, pushBaseUrl }: WorkerOptions): Promise<void> {
+export async function startWorker(signal: AbortSignal, log: Logger, { secrets, bus, fetch, concurrency, adapters, pushBaseUrl, onTick }: WorkerOptions): Promise<void> {
   await registerMaintenance();
   const deps = createSyncDeps({ secrets, fetch, log, pushBaseUrl, ...(adapters && { adapters }) });
-  await startScheduler({ handlers: syncHandlers(deps), log, signal, bus, concurrency });
+  await startScheduler({ handlers: syncHandlers(deps), log, signal, bus, concurrency, ...(onTick && { onTick }) });
 }

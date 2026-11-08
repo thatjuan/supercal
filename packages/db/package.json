@@ -10,6 +10,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
     "migrate": "bun scripts/migrate.ts",
+    "embed": "bun scripts/embed-migrations.ts",
     "db:generate": "drizzle-kit generate && bun scripts/embed-migrations.ts",
     "db:check": "drizzle-kit check"
   },

@@ -63,7 +63,7 @@ export async function loadAccount(tx: TenantTx, secrets: SecretBox, feedId: Feed
         .where(inArray(publicationSource.publicationId, pubs.map((p) => p.id)))
         .orderBy(asc(publicationSource.priority))
     : [];
-  const uidSecret = await openUidSecret(secrets, row.feed);
+  const uidSecret = await openUidSecret(secrets, row.feed, tx);
   const publications = pubs.map((p): Pub => {
     const own = sources
       .filter((s) => s.publicationId === p.id)

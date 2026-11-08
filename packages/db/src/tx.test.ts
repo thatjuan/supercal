@@ -84,6 +84,7 @@ describe.skipIf(!testDatabaseUrl)('tenant isolation', () => {
     expect(await sqlState(withControl((tx) => tx.select({ secret: feed.uidSecret }).from(feed)))).toBe('42501');
     expect(await sqlState(withControl((tx) => tx.select().from(resource)))).toBe('42501');
     expect(await sqlState(withControl((tx) => tx.select().from(calendarAccount)))).toBe('42501');
+    expect(await sqlState(withControl((tx) => tx.select({ provider: calendarAccount.provider }).from(calendarAccount)))).toBe('42501');
   });
 
   test('supercal_control can delete a tenant, cascading through its RLS tables', async () => {

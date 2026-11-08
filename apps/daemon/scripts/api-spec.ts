@@ -6,7 +6,7 @@ import { createAuth } from '../src/auth/auth.ts';
 
 // Route registration needs an auth instance but never a connection; the pool connects lazily.
 const auth = createAuth(
-  { PORT: 0, SUPERCAL_SIGNUP: 'invite', SUPERCAL_INSECURE_DEV: true, SUPERCAL_PUBLIC_URL: undefined, WEB_ORIGIN: undefined, BETTER_AUTH_SECRET: undefined, RESEND_API_KEY: undefined },
+  { PORT: 0, SUPERCAL_SIGNUP: 'invite', SUPERCAL_INSECURE_DEV: true, SUPERCAL_PUBLIC_URL: undefined, WEB_ORIGIN: undefined, BETTER_AUTH_SECRET: undefined },
   createControlDatabase('postgres://localhost/unused'),
 );
 
