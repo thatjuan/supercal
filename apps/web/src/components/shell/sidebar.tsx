@@ -8,7 +8,7 @@ import { TenantSwitcher } from './tenant-switcher.tsx';
 import { UserMenu } from './user-menu.tsx';
 
 type Me = components['schemas']['Me'];
-type NavItem = { label: string; icon: IconName; to?: '/'; adminOnly?: true };
+type NavItem = { label: string; icon: IconName; to?: '/' | '/accounts'; adminOnly?: true };
 
 /**
  * Navigation in the order a user meets the screens (docs/product.md). Entries without `to` are
@@ -17,7 +17,7 @@ type NavItem = { label: string; icon: IconName; to?: '/'; adminOnly?: true };
  */
 const NAV: readonly NavItem[] = [
   { label: 'Overview', icon: 'home', to: '/' },
-  { label: 'Accounts', icon: 'users' },
+  { label: 'Accounts', icon: 'users', to: '/accounts' },
   { label: 'Calendars', icon: 'calendar' },
   { label: 'Preview', icon: 'eye' },
   { label: 'Subscribe', icon: 'link' },

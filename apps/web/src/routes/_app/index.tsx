@@ -1,10 +1,18 @@
-/** Overview: a placeholder until the onboarding and preview screens (#18–#20) fill it. */
+/** Overview: a placeholder until the preview screens (#19–#20) fill it. A user without accounts of their own goes to onboarding instead. */
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { meQuery } from '../../api.ts';
+import { accountsQuery } from '../../components/accounts/data.ts';
 import { PageHeader } from '../../components/page-header.tsx';
 
-export const Route = createFileRoute('/_app/')({ component: Overview });
+export const Route = createFileRoute('/_app/')({
+  beforeLoad: async ({ context: { queryClient } }) => {
+    // Without a tenant both fail; the layout explains that, so there is nothing to decide here.
+    const [me, accounts] = await Promise.all([queryClient.ensureQueryData(meQuery), queryClient.ensureQueryData(accountsQuery)]).catch(() => []);
+    if (me && accounts && !accounts.items.some((account) => account.ownerUserId === me.user.id)) throw redirect({ to: '/welcome' });
+  },
+  component: Overview,
+});
 
 function Overview() {
   const { data: me } = useQuery(meQuery);

@@ -15,6 +15,8 @@ const freePort = () =>
   });
 
 process.env.E2E_PORT ??= String(await freePort());
+/** Where `e2e/serve.ts` serves the ICS fixture; the e2e connects it as an account. */
+process.env.E2E_FIXTURE_PORT ??= String(await freePort());
 const baseURL = `http://127.0.0.1:${process.env.E2E_PORT}`;
 
 export default defineConfig({

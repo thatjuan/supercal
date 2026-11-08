@@ -13,6 +13,8 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as authSignInRouteImport } from './routes/(auth)/sign-in'
 import { Route as authSignUpRouteImport } from './routes/(auth)/sign-up'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAccountsRouteImport } from './routes/_app/accounts'
+import { Route as AppWelcomeRouteImport } from './routes/_app/welcome'
 import { Route as authInviteTokenRouteImport } from './routes/(auth)/invite.$token'
 
 const AppRoute = AppRouteImport.update({
@@ -34,6 +36,16 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAccountsRoute = AppAccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWelcomeRoute = AppWelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => AppRoute,
+} as any)
 const authInviteTokenRoute = authInviteTokenRouteImport.update({
   id: '/(auth)/invite/$token',
   path: '/invite/$token',
@@ -44,11 +56,15 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/sign-in': typeof authSignInRoute
   '/sign-up': typeof authSignUpRoute
+  '/accounts': typeof AppAccountsRoute
+  '/welcome': typeof AppWelcomeRoute
   '/invite/$token': typeof authInviteTokenRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof authSignInRoute
   '/sign-up': typeof authSignUpRoute
+  '/accounts': typeof AppAccountsRoute
+  '/welcome': typeof AppWelcomeRoute
   '/': typeof AppIndexRoute
   '/invite/$token': typeof authInviteTokenRoute
 }
@@ -57,19 +73,25 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/(auth)/sign-in': typeof authSignInRoute
   '/(auth)/sign-up': typeof authSignUpRoute
+  '/_app/accounts': typeof AppAccountsRoute
+  '/_app/welcome': typeof AppWelcomeRoute
   '/_app/': typeof AppIndexRoute
   '/(auth)/invite/$token': typeof authInviteTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/sign-in' | '/sign-up' | '/invite/$token'
+  fullPaths:
+    '/' | '/sign-in' | '/sign-up' | '/accounts' | '/welcome' | '/invite/$token'
   fileRoutesByTo: FileRoutesByTo
-  to: '/sign-in' | '/sign-up' | '/' | '/invite/$token'
+  to:
+    '/sign-in' | '/sign-up' | '/accounts' | '/welcome' | '/' | '/invite/$token'
   id:
     | '__root__'
     | '/_app'
     | '/(auth)/sign-in'
     | '/(auth)/sign-up'
+    | '/_app/accounts'
+    | '/_app/welcome'
     | '/_app/'
     | '/(auth)/invite/$token'
   fileRoutesById: FileRoutesById
@@ -111,6 +133,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/accounts': {
+      id: '/_app/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/welcome': {
+      id: '/_app/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof AppWelcomeRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/(auth)/invite/$token': {
       id: '/(auth)/invite/$token'
       path: '/invite/$token'
@@ -122,10 +158,14 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppAccountsRoute: typeof AppAccountsRoute
+  AppWelcomeRoute: typeof AppWelcomeRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAccountsRoute: AppAccountsRoute,
+  AppWelcomeRoute: AppWelcomeRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

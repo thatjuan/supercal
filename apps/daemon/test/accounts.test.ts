@@ -1,9 +1,9 @@
 /**
  * Accounts and calendars through the API over a scratch database, with the fake provider behind
  * the `ics` variant: connecting (and rejected credentials), visibility by role, PATCH with
- * If-Match, the manual-sync rate limit, and disconnecting.
+ * If-Match, replacing credentials, the manual-sync rate limit, and disconnecting.
  */
-import { calendarAccount, closeDb, connectDb, member, migrate, organization, publication, sourceCalendar, syncTarget, user, type AccountId, type PublicationId, type TenantId } from '@supercal/db';
+import { auditLog, calendarAccount, closeDb, connectDb, member, migrate, organization, publication, sourceCalendar, syncTarget, user, type AccountId, type PublicationId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { AuthFailedError, caldavAdapter, icloudAdapter } from '@supercal/providers';
@@ -126,6 +126,32 @@ describe.skipIf(!testDatabaseUrl)('accounts and calendars API', () => {
     expect(renamed.status).toBe(200);
     expect(renamed.body).toMatchObject({ displayName: 'Team ICS', autoPublish: false });
     expect((await call(`/api/v1/accounts/${mine?.id}`, { method: 'PATCH', body: { displayName: 'Stale' }, ifMatch: current.etag })).status).toBe(412);
+  });
+
+  test('PUT credentials proves the new ones, reactivates the account and audits without secrets', async () => {
+    as('alice');
+    const [mine] = (await call('/api/v1/accounts')).body.items;
+    const id = mine?.id as AccountId;
+    await unsafeDb().update(calendarAccount).set({ status: 'reauth_required', statusDetail: 'expired' }).where(eq(calendarAccount.id, id));
+    const before = (await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, id)))[0]?.credentials;
+
+    fake.fail({ at: 'list', error: new AuthFailedError('401 from the server') });
+    const rejected = await call(`/api/v1/accounts/${id}/credentials`, { method: 'PUT', body: { provider: 'ics', url: 'https://rotated.example.test/new.ics' } });
+    expect(rejected.body.type).toBe('https://supercal.dev/problems/invalid-credentials');
+    expect((await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, id)))[0]?.credentials).toBe(before);
+
+    const mismatch = await call(`/api/v1/accounts/${id}/credentials`, { method: 'PUT', body: { provider: 'icloud', appleId: 'a@icloud.com', appSpecificPassword: 'x' } });
+    expect(mismatch.body.type).toBe('https://supercal.dev/problems/provider-mismatch');
+
+    as('bob');
+    expect((await call(`/api/v1/accounts/${id}/credentials`, { method: 'PUT', body: { provider: 'ics', url: 'https://x.test/a.ics' } })).status).toBe(403);
+
+    as('alice');
+    const replaced = await call(`/api/v1/accounts/${id}/credentials`, { method: 'PUT', body: { provider: 'ics', url: 'webcal://rotated.example.test/new.ics' } });
+    expect(replaced.status).toBe(200);
+    expect(replaced.body).toMatchObject({ status: 'active', statusDetail: null, serverUrl: 'rotated.example.test' });
+    const [entry] = await unsafeDb().select().from(auditLog).where(eq(auditLog.action, 'account.credentials.update'));
+    expect(entry?.data).toEqual({ provider: 'ics' });
   });
 
   test('a manual sync makes every target due now, at most once per 30 seconds', async () => {

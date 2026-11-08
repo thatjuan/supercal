@@ -2,8 +2,9 @@
  * Calendar accounts (architecture §12). `POST /accounts` is a discriminated union on `provider`:
  * each credential-based provider adds its variant to `NewAccount` and its mapping to `fromInput`
  * (OAuth providers connect through their own start/callback flow in `oauth/`, and reconnect
- * through `POST /accounts/{id}/reconnect`). Either way the shared flow in `sync/accounts.ts` proves
- * the credentials by listing calendars before anything is stored.
+ * through `POST /accounts/{id}/reconnect`; the others through `PUT /accounts/{id}/credentials`).
+ * Either way the shared flow in `sync/accounts.ts` proves the credentials by listing calendars
+ * before anything is stored.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import { accountProvider, calendarAccount, connectionStatus, withTenant, type CalendarAccount } from '@supercal/db';
@@ -11,7 +12,7 @@ import { AuthFailedError, EgressBlockedError, ICLOUD_SERVER_URL, ProviderThrottl
 import { asc, eq } from 'drizzle-orm';
 import { hasRole } from '../auth/policy.ts';
 import { NoAdapterError } from '../sync/context.ts';
-import { connectAccount, deleteAccount, loadAccount, requestSync, updateAccount, type NewAccount as NewAccountInput } from '../sync/accounts.ts';
+import { connectAccount, deleteAccount, loadAccount, replaceCredentials, requestSync, updateAccount, type NewAccount as NewAccountInput } from '../sync/accounts.ts';
 import { AuthorizationUrl, OAuthStart, startGoogleFlow } from '../oauth/google.ts';
 import { startMicrosoftFlow } from '../oauth/microsoft.ts';
 import { Calendar, toCalendars } from './calendars.ts';
@@ -85,6 +86,34 @@ const fromInput: { [P in keyof Variants]: (input: Variants[P]) => NewAccountInpu
   }),
 };
 const accountInput = <P extends keyof Variants>(provider: P, input: Variants[P]) => fromInput[provider](input);
+
+/**
+ * New credentials for a connected account, of its own provider: a rotated ICS link, a CalDAV login
+ * (on the same server) or an iCloud app-specific password.
+ */
+const CredentialsUpdate = z
+  .discriminatedUnion('provider', [
+    z.object({ provider: z.literal('ics'), url: NewIcsAccount.shape.url }),
+    z.object({ provider: z.literal('caldav'), username: NewCaldavAccount.shape.username, password: NewCaldavAccount.shape.password }),
+    z.object({ provider: z.literal('icloud'), appleId: NewIcloudAccount.shape.appleId, appSpecificPassword: NewIcloudAccount.shape.appSpecificPassword }),
+  ])
+  .openapi('CredentialsUpdate');
+type CredentialsUpdate = z.infer<typeof CredentialsUpdate>;
+
+/** The new credentials and account columns for `input`, or a 422 when it names another provider. */
+function credentialsFor(account: CalendarAccount, input: CredentialsUpdate) {
+  if (input.provider !== account.provider) throw new Unprocessable(`This is a ${account.provider} account, not ${input.provider}`, 'provider-mismatch');
+  if (input.provider === 'ics') {
+    const { credentials, serverUrl } = fromInput.ics(input);
+    return { credentials, email: account.email, serverUrl: serverUrl ?? null };
+  }
+  if (input.provider === 'icloud') {
+    const { credentials, email } = fromInput.icloud(input);
+    return { credentials, email: email ?? null, serverUrl: account.serverUrl };
+  }
+  if (!account.serverUrl) throw new Error(`caldav account ${account.id} has no server URL`);
+  return { credentials: fromInput.caldav({ ...input, serverUrl: account.serverUrl }).credentials, email: account.email, serverUrl: account.serverUrl };
+}
 
 const AccountPatch = z.object({ displayName: DisplayName.optional(), autoPublish: z.boolean().optional() });
 
@@ -193,6 +222,18 @@ const reconnect = createRoute({
   },
 });
 
+const putCredentials = createRoute({
+  method: 'put',
+  path: '/api/v1/accounts/{id}/credentials',
+  operationId: 'replaceAccountCredentials',
+  tags,
+  request: { params, body: { required: true, content: { 'application/json': { schema: CredentialsUpdate } } } },
+  responses: {
+    200: json('Proved by listing calendars, stored, and the account active again; every calendar syncs now', Account),
+    ...problemResponses(400, 401, 403, 404, 422, 503),
+  },
+});
+
 export const accountRoutes = createApiApp()
   .openapi(listAccounts, async (c) => {
     const { principal } = c.var;
@@ -231,6 +272,13 @@ export const accountRoutes = createApiApp()
   .openapi(syncAccount, async (c) => {
     await requestSync(c.var.principal, c.req.valid('param').id);
     return c.body(null, 202);
+  })
+  .openapi(putCredentials, async (c) => {
+    const input = c.req.valid('json');
+    const row = await replaceCredentials(c.var.sync, c.var.principal, c.req.valid('param').id, (account) => credentialsFor(account, input)).catch((error: unknown) => {
+      throw connectProblem(error, input.provider);
+    });
+    return c.json(toAccount(row), 200, { ETag: etagOf(row) });
   })
   .openapi(reconnect, async (c) => {
     const { principal, oauth } = c.var;
