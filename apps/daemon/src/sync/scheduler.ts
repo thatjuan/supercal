@@ -149,7 +149,7 @@ export const DISCOVER_EVERY_MS = 30 * MINUTE;
 const PUSH_SAFETY_POLL_MS = 30 * MINUTE;
 
 /** Poll bounds per provider; `defaultMs: 'decay'` polls as often as the calendar last changed, within the bounds. */
-const CADENCE: Record<Provider, { defaultMs: number | 'decay'; minMs: number; maxMs: number }> = {
+const CADENCE: Record<Exclude<Provider, 'hosted'>, { defaultMs: number | 'decay'; minMs: number; maxMs: number }> = {
   google: { defaultMs: 2 * MINUTE, minMs: MINUTE, maxMs: 30 * MINUTE },
   microsoft: { defaultMs: 2 * MINUTE, minMs: MINUTE, maxMs: 30 * MINUTE },
   caldav: { defaultMs: 'decay', minMs: MINUTE, maxMs: 5 * MINUTE },
@@ -162,6 +162,7 @@ const CADENCE: Record<Provider, { defaultMs: number | 'decay'; minMs: number; ma
  * push, else the adapter's hint or the provider's default, clamped to the provider's bounds.
  */
 export function nextPollMs({ provider, pushActive, hintMs, sinceChangeMs }: { provider: Provider; pushActive: boolean; hintMs?: number | undefined; sinceChangeMs: number | null }): number {
+  if (provider === 'hosted') return Infinity;
   if (pushActive) return PUSH_SAFETY_POLL_MS;
   const { defaultMs, minMs, maxMs } = CADENCE[provider];
   const wanted = hintMs ?? (defaultMs === 'decay' ? (sinceChangeMs ?? maxMs) : defaultMs);

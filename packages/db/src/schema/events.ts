@@ -21,7 +21,7 @@ const sourceCalendarId = () =>
     .references(() => sourceCalendar.id, { onDelete: 'cascade' });
 
 /**
- * Raw layer: exactly what the provider returned, kept so re-normalisation never refetches.
+ * Raw layer: provider responses, or authoritative hosted iCalendar, kept for re-normalisation.
  * `original_start` is the recurrence identity as the provider wrote it (date or date-time).
  */
 export const sourceObject = pgTable(
@@ -56,6 +56,7 @@ export const resource = pgTable(
     tenantId: tenantId(),
     sourceCalendarId: sourceCalendarId(),
     uid: text('uid').notNull(),
+    objectName: text('object_name'),
     data: jsonb('data').$type<EventResource>(),
     revision: text('revision').notNull(),
     sequence: integer('sequence').notNull().default(0),

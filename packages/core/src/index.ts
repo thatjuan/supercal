@@ -9,3 +9,5 @@ export * from "./normalize/google.ts";
 export * from "./normalize/graph.ts";
 export * from "./normalize/index.ts";
 export * from "./projection.ts";
+
+export * from "./hosted.ts";

@@ -5,7 +5,7 @@
 import type { components } from '@supercal/api-client';
 
 export type Account = components['schemas']['Account'];
-export type Calendar = components['schemas']['Calendar'];
+export type Calendar = Extract<components['schemas']['Calendar'], { kind: 'connected' }>;
 export type Provider = Account['provider'];
 
 /** The badge states: the stored status, plus `syncing`, which the UI derives (see `accountHealth`). */

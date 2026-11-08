@@ -456,6 +456,23 @@
         ]
       },
       "Calendar": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/HostedCalendar"
+          },
+          {
+            "$ref": "#/components/schemas/ConnectedCalendar"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "hosted": "#/components/schemas/HostedCalendar",
+            "connected": "#/components/schemas/ConnectedCalendar"
+          }
+        }
+      },
+      "HostedCalendar": {
         "type": "object",
         "properties": {
           "id": {
@@ -463,10 +480,25 @@
             "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
             "example": "cal_01h455vb4pex5vsknk084sn02q"
           },
-          "accountId": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "updatedAt": {
             "type": "string",
-            "pattern": "^acc_[0-7][0-9a-hjkmnp-tv-z]{25}$",
-            "example": "acc_01h455vb4pex5vsknk084sn02q"
+            "format": "date-time"
+          },
+          "goneAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "name": {
             "type": "string"
@@ -490,7 +522,7 @@
               "active",
               "gone"
             ],
-            "description": "`gone`: no longer listed by the provider"
+            "description": "`gone`: removed by the provider or soft-deleted by the hosted calendar owner"
           },
           "capabilities": {
             "type": "object",
@@ -547,18 +579,169 @@
               "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
               "example": "pub_01h455vb4pex5vsknk084sn02q"
             }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "hosted"
+            ]
+          },
+          "accountId": {
+            "type": "null"
           }
         },
         "required": [
           "id",
-          "accountId",
+          "description",
+          "sortOrder",
+          "updatedAt",
+          "goneAt",
           "name",
           "color",
           "timezone",
           "state",
           "capabilities",
           "freshness",
-          "publicationIds"
+          "publicationIds",
+          "kind",
+          "accountId"
+        ]
+      },
+      "ConnectedCalendar": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "cal_01h455vb4pex5vsknk084sn02q"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "goneAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA zone, when the provider names one"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "gone"
+            ],
+            "description": "`gone`: removed by the provider or soft-deleted by the hosted calendar owner"
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "incremental": {
+                "type": "string"
+              },
+              "push": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "incremental",
+              "push"
+            ]
+          },
+          "freshness": {
+            "type": "object",
+            "properties": {
+              "lastSuccessAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "pushActive": {
+                "type": "boolean"
+              },
+              "expectedLatency": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Seconds until changes are expected to show (the current poll interval)"
+              },
+              "stale": {
+                "type": "boolean",
+                "description": "The account cannot sync (e.g. reauth required); the last good data is still published"
+              }
+            },
+            "required": [
+              "lastSuccessAt",
+              "pushActive",
+              "expectedLatency",
+              "stale"
+            ],
+            "description": "Observed, never promised"
+          },
+          "publicationIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "pub_01h455vb4pex5vsknk084sn02q"
+            }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "connected"
+            ]
+          },
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "acc_01h455vb4pex5vsknk084sn02q"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "sortOrder",
+          "updatedAt",
+          "goneAt",
+          "name",
+          "color",
+          "timezone",
+          "state",
+          "capabilities",
+          "freshness",
+          "publicationIds",
+          "kind",
+          "accountId"
         ]
       },
       "NewAccount": {
@@ -3575,6 +3758,105 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "createCalendar",
+        "tags": [
+          "Calendars"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 10000
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created hosted calendar; its publication starts disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/calendars/{id}": {
@@ -3638,6 +3920,324 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateCalendar",
+        "tags": [
+          "Calendars"
+        ],
+        "description": "Updates a hosted calendar. Changing timezone does not recompute spans of floating events.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "cal_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ETag from a previous read; 412 when it is stale"
+            },
+            "required": false,
+            "description": "ETag from a previous read; 412 when it is stale",
+            "name": "if-match",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  "sortOrder": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated calendar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCalendar",
+        "tags": [
+          "Calendars"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "cal_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Soft deleted; retained for 30 days"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calendars/{id}/restore": {
+      "post": {
+        "operationId": "restoreCalendar",
+        "tags": [
+          "Calendars"
+        ],
+        "description": "Restores a deleted hosted calendar. Publications remain disabled and virtual memberships remain removed; the owner re-enables them.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^cal_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "cal_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored calendar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/problem+json": {
                 "schema": {

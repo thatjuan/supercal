@@ -16,6 +16,11 @@ const account = (patch: Partial<Account> = {}): Account => ({
 
 const calendar = (lastSuccessAt: number | null, state: Calendar['state'] = 'active'): Calendar => ({
   id: 'cal_1',
+  kind: 'connected',
+  description: null,
+  sortOrder: 0,
+  updatedAt: '2026-11-08T00:00:00Z',
+  goneAt: null,
   accountId: 'acc_1',
   name: 'Work',
   color: null,

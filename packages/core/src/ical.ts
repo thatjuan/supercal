@@ -30,7 +30,7 @@ type Block = { name: string; lines: string[] };
 
 // Splits text into VCALENDAR-level property lines and top-level component blocks, so one
 // malformed component cannot fail the whole file. Folded continuation lines stay attached.
-function splitTopLevel(text: string): { calendarLines: string[]; blocks: Block[]; errors: ParseError[] } {
+export function splitTopLevel(text: string): { calendarLines: string[]; blocks: Block[]; errors: ParseError[] } {
   const lines = text
     .replace(/\r\n?/g, "\n")
     .split(/\n(?![ \t])/)

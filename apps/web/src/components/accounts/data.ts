@@ -14,7 +14,7 @@ type AccountList = components['schemas']['AccountList'];
 type PublicationList = components['schemas']['PublicationList'];
 
 export const accountsQuery = $api.queryOptions('get', '/api/v1/accounts');
-export const calendarsQuery = $api.queryOptions('get', '/api/v1/calendars');
+export const calendarsQuery = $api.queryOptions('get', '/api/v1/calendars', {}, { select: (data) => ({ items: data.items.filter((calendar) => calendar.kind === 'connected') }) });
 export const instanceQuery = $api.queryOptions('get', '/api/v1/instance');
 
 /** Refetches every account and calendar query, after a connect, reconnect or removal. */

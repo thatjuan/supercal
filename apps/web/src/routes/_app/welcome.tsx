@@ -119,7 +119,7 @@ function Welcome() {
 /** The account just connected, with its live health. */
 function ConnectedAccount({ accountId }: { accountId: string }) {
   const accounts = useQuery(accountsQuery);
-  const calendars = $api.useQuery('get', '/api/v1/calendars', { params: { query: { accountId } } });
+  const calendars = $api.useQuery('get', '/api/v1/calendars', { params: { query: { accountId } } }, { select: (data) => ({ items: data.items.filter((calendar) => calendar.kind === 'connected') }) });
   const now = useNow();
   const account = accounts.data?.items.find((item) => item.id === accountId);
   if (!account) return null;
@@ -148,7 +148,7 @@ function ConnectedAccount({ accountId }: { accountId: string }) {
 function DiscoveredCalendars({ accountId }: { accountId: string }) {
   const toast = useToast();
   const now = useNow();
-  const calendars = $api.useQuery('get', '/api/v1/calendars', { params: { query: { accountId } } });
+  const calendars = $api.useQuery('get', '/api/v1/calendars', { params: { query: { accountId } } }, { select: (data) => ({ items: data.items.filter((calendar) => calendar.kind === 'connected') }) });
   const publications = useDefaultPublications();
   const toggle = useTogglePublication((error) => toast({ tone: 'error', message: `Could not save: ${toProblem(error).detail ?? toProblem(error).title}` }));
   const items = (calendars.data?.items ?? []).filter((calendar) => calendar.state === 'active');
