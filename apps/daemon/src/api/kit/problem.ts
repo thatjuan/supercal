@@ -28,6 +28,7 @@ const PROBLEMS = {
   404: { slug: 'not-found', title: 'Not found' },
   409: { slug: 'conflict', title: 'Conflict' },
   412: { slug: 'precondition-failed', title: 'Precondition failed' },
+  422: { slug: 'unprocessable', title: 'Unprocessable content' },
   428: { slug: 'precondition-required', title: 'Precondition required' },
   429: { slug: 'too-many-requests', title: 'Too many requests' },
   500: { slug: 'internal', title: 'Internal error' },
@@ -97,6 +98,13 @@ export class PreconditionFailed extends ProblemError {
 export class PreconditionRequired extends ProblemError {
   constructor(detail = 'This request requires an If-Match header') {
     super(428, detail);
+  }
+}
+
+/** The request was valid but cannot be carried out, e.g. the provider rejected the credentials (`invalid-credentials`). */
+export class Unprocessable extends ProblemError {
+  constructor(detail: string, slug?: string) {
+    super(422, detail, undefined, slug);
   }
 }
 

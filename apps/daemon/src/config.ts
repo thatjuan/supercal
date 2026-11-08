@@ -49,6 +49,7 @@ const configSchema = z
     SUPERCAL_EGRESS_ALLOW: egressAllow.default([]),
     /** Bound on cached ICS bodies, in MiB. */
     SUPERCAL_ICS_CACHE_MB: z.coerce.number({ error: 'must be a number of MiB' }).min(0).default(64),
+    SUPERCAL_SYNC_CONCURRENCY: z.coerce.number({ error: 'must be a number' }).int().min(1).max(256).default(8),
     RESEND_API_KEY: optional,
     MAIL_FROM: optional,
     WEB_ORIGIN: url.optional(),

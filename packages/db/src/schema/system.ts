@@ -1,15 +1,23 @@
 import { bigint, index, integer, jsonb, pgEnum, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import type { TenantId } from '../ids.ts';
+import { organization } from './auth.ts';
 import { idColumn, tenantId } from './columns.ts';
 
-export const syncKind = pgEnum('sync_kind', ['discover', 'events', 'push_renew', 'sink']);
+export const syncKind = pgEnum('sync_kind', ['discover', 'events', 'push_renew', 'sink', 'maintenance']);
 export type SyncKind = (typeof syncKind.enumValues)[number];
 
-/** The scheduler: one leased job per `(kind, target_id)`. `target_id` is the id of the account, calendar or sink. */
+/**
+ * The scheduler: one leased job per `(kind, target_id)`. `target_id` is the id of the account
+ * (`discover`), calendar (`events`, `push_renew`) or sink, or a fixed job name (`maintenance`).
+ * Maintenance jobs span tenants, so their `tenant_id` is null and only `supercal_control` sees them.
+ */
 export const syncTarget = pgTable(
   'sync_target',
   {
     id: idColumn('tgt'),
-    tenantId: tenantId(),
+    tenantId: text('tenant_id')
+      .$type<TenantId>()
+      .references(() => organization.id, { onDelete: 'cascade' }),
     kind: syncKind('kind').notNull(),
     targetId: text('target_id').notNull(),
     cursor: jsonb('cursor'),

@@ -1,4 +1,5 @@
 import { connectDb, createControlDatabase, createSecretBox, migrate } from '@supercal/db';
+import { createGuardedFetch } from '@supercal/providers';
 import { createAuth } from './auth/auth.ts';
 import { startBus } from './bus.ts';
 import { loadConfig } from './config.ts';
@@ -24,6 +25,7 @@ const auth = createAuth(config, createControlDatabase(config.DATABASE_URL));
 const secrets = await createSecretBox({ keys: config.SUPERCAL_KEYS, insecureDev: config.SUPERCAL_INSECURE_DEV, warn: (message) => log.warn(message) });
 
 const bus = await startBus(config.DATABASE_URL, log.child({ component: 'bus' }));
+const egress = createGuardedFetch({ allow: config.SUPERCAL_EGRESS_ALLOW });
 
 const roles = config.SUPERCAL_ROLES;
 // The live stream turns off the idle timeout for its own requests (`server.timeout(req, 0)`), and
@@ -35,6 +37,7 @@ const server = Bun.serve({
     auth,
     secrets,
     bus,
+    fetch: egress,
     stream: { signal: stopAbort.signal },
     publicUrl: config.SUPERCAL_PUBLIC_URL,
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,
@@ -42,7 +45,9 @@ const server = Bun.serve({
 });
 log.info('listening', { port: server.port, roles: [...roles] });
 
-const worker = roles.has('worker') ? startWorker(stopAbort.signal, log.child({ role: 'worker' })) : Promise.resolve();
+const worker = roles.has('worker')
+  ? startWorker(stopAbort.signal, log.child({ role: 'worker' }), { secrets, bus, fetch: egress, concurrency: config.SUPERCAL_SYNC_CONCURRENCY })
+  : Promise.resolve();
 
 let stopping = false;
 

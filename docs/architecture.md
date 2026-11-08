@@ -312,6 +312,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 | `MICROSOFT_CLIENT_ID/SECRET` | no | Enables Microsoft accounts. |
 | `SUPERCAL_EGRESS_ALLOW` | no | Operator LAN allowlist: `origin=cidr,…`. |
 | `SUPERCAL_ICS_CACHE_MB` | no | Bound on the in-process cache of rendered ICS bodies (default 64). |
+| `SUPERCAL_SYNC_CONCURRENCY` | no | Sync jobs at once per worker process (default 8; at most 2 per account). |
 | `RESEND_API_KEY`, `MAIL_FROM` | no | Enables magic links, invites, verification mail. |
 | `WEB_ORIGIN` | dev | Extra trusted origin for the Vite dev server. |
 

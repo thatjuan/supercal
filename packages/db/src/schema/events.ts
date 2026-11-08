@@ -1,11 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, index, integer, jsonb, pgEnum, pgSequence, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
-import type { EventResource } from '@supercal/core';
+import { SOURCE_FORMATS, type EventResource } from '@supercal/core';
 import type { SourceCalendarId } from '../ids.ts';
 import { sourceCalendar } from './accounts.ts';
 import { tenantId, tstzrange } from './columns.ts';
 
-export const sourceFormat = pgEnum('source_format', ['ical', 'google', 'graph']);
+export const sourceFormat = pgEnum('source_format', SOURCE_FORMATS);
 export type SourceFormat = (typeof sourceFormat.enumValues)[number];
 
 export const completeness = pgEnum('completeness', ['complete', 'incomplete']);

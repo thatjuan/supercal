@@ -6,14 +6,19 @@
  */
 import { apiReference } from '@scalar/hono-api-reference';
 import type { SecretBox } from '@supercal/db';
+import { createGuardedFetch, type AdapterRegistry, type GuardedFetch } from '@supercal/providers';
 import type { MiddlewareHandler } from 'hono';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Auth } from '../auth/auth.ts';
 import { requirePrincipal, type ApiEnv } from '../auth/principal.ts';
 import { createFeedService } from '../feeds/service.ts';
 import type { Bus } from '../bus.ts';
+import { createLogger } from '../log.ts';
+import { createSyncDeps } from '../sync/index.ts';
+import { accountRoutes } from './accounts.ts';
 import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
+import { calendarRoutes } from './calendars.ts';
 import { feedRoutes } from './feeds.ts';
 import { createApiApp } from './kit/index.ts';
 import { meRoutes } from './me.ts';
@@ -34,14 +39,23 @@ export const openApiConfig = {
 };
 
 /**
- * What the API runs on: Better Auth, the secret box for values stored encrypted, and the bus that
- * feeds the live stream (`idleBus` where nothing streams, such as OpenAPI generation and tests).
+ * What the API runs on: Better Auth, the secret box for values stored encrypted, the bus that
+ * feeds the live stream (`idleBus` where nothing streams, such as OpenAPI generation and tests),
+ * and for connecting accounts the outbound transport and provider adapters (default: no LAN
+ * exceptions, and the registered adapters).
  */
-export type ApiDeps = { auth: Auth; secrets: SecretBox; bus: Bus; stream?: StreamOptions };
+export type ApiDeps = { auth: Auth; secrets: SecretBox; bus: Bus; stream?: StreamOptions; fetch?: GuardedFetch; adapters?: AdapterRegistry };
 
 /** Builds the API. Route groups are mounted after the docs, so the docs are public. */
-export function createApi({ auth, secrets, bus, stream }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
+export function createApi({ auth, secrets, bus, stream, fetch, adapters }: ApiDeps, authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth)) {
   const feeds = createFeedService(secrets);
+  const sync = createSyncDeps({
+    secrets,
+    feeds,
+    fetch: fetch ?? createGuardedFetch({ allow: [] }),
+    log: createLogger({ component: 'api' }),
+    ...(adapters && { adapters }),
+  });
   const app = createApiApp();
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
   app.openAPIRegistry.registerComponent('securitySchemes', 'session', { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' });
@@ -55,6 +69,7 @@ export function createApi({ auth, secrets, bus, stream }: ApiDeps, authenticate:
   app.use('/api/v1/*', async (c, next) => {
     c.set('auth', auth);
     c.set('feeds', feeds);
+    c.set('sync', sync);
     await next();
   });
   app.use('/api/v1/*', authenticate);
@@ -62,6 +77,8 @@ export function createApi({ auth, secrets, bus, stream }: ApiDeps, authenticate:
     .route('/', meRoutes)
     .route('/', tenantRoutes)
     .route('/', apiKeyRoutes)
+    .route('/', accountRoutes)
+    .route('/', calendarRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)
     .route('/', publicationRoutes)

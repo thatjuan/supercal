@@ -6,6 +6,7 @@ import m1 from '../migrations/0001_roles_rls.sql' with { type: 'text' };
 import m2 from '../migrations/0002_change_log.sql' with { type: 'text' };
 import m3 from '../migrations/0003_tenant_organization.sql' with { type: 'text' };
 import m4 from '../migrations/0004_feeds.sql' with { type: 'text' };
+import m5 from '../migrations/0005_sync_engine.sql' with { type: 'text' };
 
 /** Every migration file, by name, plus the drizzle-kit journal. */
-export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2, '0003_tenant_organization.sql': m3, '0004_feeds.sql': m4 } };
+export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2, '0003_tenant_organization.sql': m3, '0004_feeds.sql': m4, '0005_sync_engine.sql': m5 } };

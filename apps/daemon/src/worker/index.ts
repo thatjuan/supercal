@@ -1,8 +1,23 @@
+import type { SecretBox } from '@supercal/db';
+import type { AdapterRegistry, GuardedFetch } from '@supercal/providers';
+import type { Bus } from '../bus.ts';
 import type { Logger } from '../log.ts';
+import { createSyncDeps, syncHandlers } from '../sync/index.ts';
+import { registerMaintenance } from '../sync/maintenance.ts';
+import { startScheduler } from '../sync/scheduler.ts';
 
-/** Runs the worker role until `signal` aborts. Stub: the sync engine issue fills it. */
-export async function startWorker(signal: AbortSignal, log: Logger): Promise<void> {
-  log.info('worker started');
-  if (!signal.aborted) await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
-  log.info('worker stopped');
+export type WorkerOptions = {
+  secrets: SecretBox;
+  bus: Bus;
+  fetch: GuardedFetch;
+  /** `SUPERCAL_SYNC_CONCURRENCY`. */
+  concurrency: number;
+  adapters?: AdapterRegistry;
+};
+
+/** Runs the worker role until `signal` aborts: registers the maintenance jobs, then runs the sync scheduler. */
+export async function startWorker(signal: AbortSignal, log: Logger, { secrets, bus, fetch, concurrency, adapters }: WorkerOptions): Promise<void> {
+  await registerMaintenance();
+  const deps = createSyncDeps({ secrets, fetch, log, ...(adapters && { adapters }) });
+  await startScheduler({ handlers: syncHandlers(deps), log, signal, bus, concurrency });
 }
