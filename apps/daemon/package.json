@@ -16,12 +16,14 @@
     "@supercal/db": "workspace:*",
     "better-auth": "1.7.18",
     "drizzle-orm": "0.45.4",
+    "fast-xml-parser": "5.12.0",
     "hono": "4.13.17",
     "postgres": "4.1.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.1.0",
-    "auth": "1.7.18"
+    "auth": "1.7.18",
+    "tsdav": "2.5.0"
   }
 }

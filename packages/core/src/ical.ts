@@ -136,7 +136,8 @@ export const componentsOf = (r: EventResource): JCalComponent[] => (r.master ? [
 
 /**
  * Serialises one VCALENDAR: our PRODID and VERSION, the remaining calendar `props`, the
- * VTIMEZONEs the resources reference (deduped by TZID), then every resource's events.
+ * VTIMEZONEs the resources reference (deduped by TZID), then every resource's events. Ends with
+ * exactly one CRLF.
  */
 export function serializeCalendar({ props, resources }: { props: JCalProperty[]; resources: EventResource[] }): string {
   const calProps: JCalProperty[] = [
@@ -152,7 +153,7 @@ export function serializeCalendar({ props, resources }: { props: JCalProperty[];
         if (tz && !timezones.has(tzid)) timezones.set(tzid, tz);
       }
   const vcalendar: JCalComponent = ["vcalendar", calProps, [...timezones.values(), ...resources.flatMap(componentsOf)]];
-  return ICAL.stringify(vcalendar) + "\r\n";
+  return ICAL.stringify(vcalendar).replace(/(\r\n)*$/, "\r\n");
 }
 
 /**
