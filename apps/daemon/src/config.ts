@@ -47,6 +47,7 @@ const configSchema = z
     MICROSOFT_CLIENT_ID: optional,
     MICROSOFT_CLIENT_SECRET: optional,
     SUPERCAL_EGRESS_ALLOW: egressAllow.default([]),
+    SUPERCAL_SYNC_CONCURRENCY: z.coerce.number({ error: 'must be a number' }).int().min(1).max(256).default(8),
     RESEND_API_KEY: optional,
     MAIL_FROM: optional,
     WEB_ORIGIN: url.optional(),

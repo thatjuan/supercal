@@ -43,7 +43,27 @@ export const calendarAccount = pgTable('calendar_account', {
   status: connectionStatus('status').notNull().default('active'),
   statusDetail: text('status_detail'),
   autoPublish: boolean('auto_publish').notNull().default(true),
+  /** Last accepted `POST /accounts/{id}/sync`, for its rate limit. */
+  syncRequestedAt: timestamp('sync_requested_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** What a source calendar supports, as its adapter reports it. */
+export type CalendarCapabilities = { incremental: string; push: boolean };
+
+/**
+ * How current a source calendar's data is, as observed (never promised). `stale` is set while its
+ * account cannot sync (reauth required); `expectedLatencyMs` is the current poll interval.
+ */
+export type Freshness = {
+  lastSuccessAt: string | null;
+  lastChangeAt: string | null;
+  pushActive: boolean;
+  expectedLatencyMs: number | null;
+  stale: boolean;
+};
+
+export const NO_FRESHNESS: Freshness = { lastSuccessAt: null, lastChangeAt: null, pushActive: false, expectedLatencyMs: null, stale: false };
 
 /** A calendar discovered on an account. */
 export const sourceCalendar = pgTable(
@@ -59,9 +79,9 @@ export const sourceCalendar = pgTable(
     name: text('name').notNull(),
     color: text('color'),
     timezone: text('timezone'),
-    capabilities: jsonb('capabilities').notNull().default({}),
+    capabilities: jsonb('capabilities').$type<CalendarCapabilities>().notNull().default({ incremental: 'snapshot', push: false }),
     state: calendarState('state').notNull().default('active'),
-    freshness: jsonb('freshness').notNull().default({}),
+    freshness: jsonb('freshness').$type<Freshness>().notNull().default(NO_FRESHNESS),
   },
   (t) => [unique().on(t.accountId, t.providerCalendarId)],
 );

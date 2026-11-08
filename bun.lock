@@ -19,6 +19,7 @@
         "@scalar/hono-api-reference": "0.12.18",
         "@supercal/core": "workspace:*",
         "@supercal/db": "workspace:*",
+        "@supercal/providers": "workspace:*",
         "better-auth": "1.7.18",
         "drizzle-orm": "0.45.4",
         "hono": "4.13.17",
@@ -66,7 +67,10 @@
     "packages/providers": {
       "name": "@supercal/providers",
       "dependencies": {
+        "@supercal/core": "workspace:*",
+        "@supercal/db": "workspace:*",
         "ipaddr.js": "2.5.0",
+        "zod": "4.6.7",
       },
     },
   },
