@@ -32,9 +32,10 @@ import {
   type Span,
   type TenantTx,
 } from '@supercal/db';
-import type { SourceCalendarRef, SyncEnd, SyncPage } from '@supercal/providers';
+import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type Provider, type SourceCalendarRef, type SyncEnd, type SyncPage } from '@supercal/providers';
 import { and, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
 import type { Logger } from '../log.ts';
+import { metrics } from '../ops/metrics.ts';
 import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
 import { LeaseLostError, nextPollMs, StopTargetError, type JobResult } from './scheduler.ts';
 
@@ -257,10 +258,39 @@ async function load(job: TenantJob): Promise<{ calendar: SourceCalendar; account
   });
 }
 
+/** The `kind` label of `supercal_sync_errors_total` for a failed run. */
+const errorKind = (error: unknown) =>
+  error instanceof AuthFailedError
+    ? 'auth'
+    : error instanceof ProviderThrottledError
+      ? 'throttled'
+      : error instanceof ProviderUnavailableError
+        ? 'unavailable'
+        : error instanceof LeaseLostError
+          ? 'lease_lost'
+          : 'other';
+
+/** Runs `sync` and records its duration and any failure in the sync metrics; runs aborted by shutdown are not recorded. */
+async function measured<T>(provider: Provider, signal: AbortSignal, sync: () => Promise<T>): Promise<T> {
+  const started = performance.now();
+  const seconds = () => (performance.now() - started) / 1000;
+  try {
+    const result = await sync();
+    metrics.syncDuration.observe({ provider, outcome: 'ok' }, seconds());
+    return result;
+  } catch (error) {
+    if (!signal.aborted || signal.reason instanceof LeaseLostError) {
+      metrics.syncDuration.observe({ provider, outcome: 'error' }, seconds());
+      metrics.syncErrors.inc({ provider, kind: errorKind(error) });
+    }
+    throw error;
+  }
+}
+
 /** Runs one `events` job end to end and returns when to run it next. */
 export async function runEvents(deps: SyncDeps, job: TenantJob, signal: AbortSignal): Promise<JobResult> {
   const { calendar, account, cursor } = await load(job);
-  return withAccount(deps, job, account, signal, async (adapter, ctx) => {
+  return withAccount(deps, job, account, signal, (adapter, ctx) => measured(account.provider, signal, async () => {
     const normalizer = normalizers[adapter.format];
     if (!normalizer) throw new Error(`no normaliser is registered for format ${adapter.format}`);
     const ref: SourceCalendarRef = { id: calendar.id, providerCalendarId: calendar.providerCalendarId, capabilities: calendar.capabilities, occurrences: occurrencesOf(job, calendar.id) };
@@ -288,10 +318,13 @@ export async function runEvents(deps: SyncDeps, job: TenantJob, signal: AbortSig
           .where(eq(sourceCalendar.id, calendar.id));
         await tx.update(syncTarget).set({ cursor: item.cursor }).where(eq(syncTarget.id, job.id));
         // Last: it takes the tenant's change lock until commit.
-        await recordChanges(tx, changes);
+        const { changed } = await recordChanges(tx, changes);
+        return { nextRunInMs, changed };
+      }).then(({ nextRunInMs, changed }) => {
+        metrics.resourceChanges.inc({}, changed);
         return { nextRunInMs };
       });
     }
     throw new Error('the adapter finished without an end item');
-  });
+  }));
 }

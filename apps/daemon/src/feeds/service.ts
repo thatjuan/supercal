@@ -511,7 +511,7 @@ export function createFeedService(secrets: SecretBox) {
       ).map((c) => [c.id, { zone: c.timezone ?? 'UTC', addresses: c.email ? [`mailto:${c.email}`] : [] }]),
     );
     const resources = await resourcesIn(tx, calendarIds, range);
-    const uidSecret = await openUidSecret(secrets, target);
+    const uidSecret = await openUidSecret(secrets, target, tx);
     const window = { from: Temporal.Instant.fromEpochMilliseconds(range.from.getTime()), to: Temporal.Instant.fromEpochMilliseconds(range.to.getTime()) };
 
     const items: OccurrenceItem[] = [];

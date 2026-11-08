@@ -61,10 +61,12 @@ function* batches<T>(items: T[]): Generator<T[]> {
  * lock, which is held until commit so the tenant's seqs commit in order (without it, concurrent
  * readers skip changes). Upserts whose revision matches the stored row and deletes of absent or
  * tombstoned rows are dropped; when nothing remains, no lock or seq is taken and `maxSeq` is null.
+ * `changed` counts the changes that remained. The notification carries `c`, the epoch ms at which
+ * it was sent (moments before commit), from which listeners measure notify lag.
  */
-export async function recordChanges(tx: TenantTx, changes: ResourceChange[]): Promise<{ maxSeq: bigint | null }> {
+export async function recordChanges(tx: TenantTx, changes: ResourceChange[]): Promise<{ maxSeq: bigint | null; changed: number }> {
   const real = await withoutNoops(tx, [...new Map(changes.map((c) => [keyOf(c), c])).values()]);
-  if (real.length === 0) return { maxSeq: null };
+  if (real.length === 0) return { maxSeq: null, changed: 0 };
 
   await tx.execute(sql`select pg_advisory_xact_lock(${CHANGE_LOCK_NAMESPACE}, hashtext(${tenantSetting}))`);
   let maxSeq = 0n;
@@ -112,9 +114,9 @@ export async function recordChanges(tx: TenantTx, changes: ResourceChange[]): Pr
     );
 
   await tx.execute(
-    sql`select pg_notify(${CHANGES_CHANNEL}, json_build_object('t', ${tenantSetting}, 's', ${maxSeq.toString()}::text)::text)`,
+    sql`select pg_notify(${CHANGES_CHANNEL}, json_build_object('t', ${tenantSetting}, 's', ${maxSeq.toString()}::text, 'c', floor(extract(epoch from clock_timestamp()) * 1000))::text)`,
   );
-  return { maxSeq };
+  return { maxSeq, changed: real.length };
 }
 
 /** Drops upserts that would not change the stored revision, and deletes with nothing live to delete. */

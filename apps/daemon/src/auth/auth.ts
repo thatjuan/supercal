@@ -9,6 +9,10 @@
  * - `disabled`: nobody signs up; operators create users and tenants (`POST /api/v1/tenants`).
  * In every mode the first user of an empty install may sign up, becomes the operator, and gets a
  * personal tenant. Server-side calls (no HTTP request) are trusted and skip the mode check.
+ *
+ * With a mailer (`RESEND_API_KEY` + `MAIL_FROM`), sign-up requires a verified email, and
+ * verification, password-reset, magic-link and invitation mail go out. Without one, magic links
+ * are disabled and the dashboard hands out invitation and reset links to copy.
  */
 import { apiKey } from '@better-auth/api-key';
 import {
@@ -27,15 +31,17 @@ import {
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError } from 'better-auth/api';
 import { betterAuth } from 'better-auth/minimal';
-import { admin, openAPI, organization } from 'better-auth/plugins';
+import { admin, magicLink, openAPI, organization } from 'better-auth/plugins';
 import { and, asc, count, eq, gt, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { publishAuthRevoked } from '../bus.ts';
 import type { Config } from '../config.ts';
+import type { Mailer } from '../mail/index.ts';
+import * as templates from '../mail/templates.ts';
 
 export type AuthConfig = Pick<
   Config,
-  'PORT' | 'SUPERCAL_PUBLIC_URL' | 'WEB_ORIGIN' | 'BETTER_AUTH_SECRET' | 'SUPERCAL_SIGNUP' | 'SUPERCAL_INSECURE_DEV' | 'RESEND_API_KEY'
+  'PORT' | 'SUPERCAL_PUBLIC_URL' | 'WEB_ORIGIN' | 'BETTER_AUTH_SECRET' | 'SUPERCAL_SIGNUP' | 'SUPERCAL_INSECURE_DEV'
 >;
 
 /** The admin plugin's role for the Supercal operator. */
@@ -67,12 +73,13 @@ export async function insertTenant(tx: Pick<ControlTx, 'insert'>, tenant: { name
 }
 
 /**
- * Builds the Better Auth instance over `db` (a `supercal_control` pool), plus
+ * Builds the Better Auth instance over `db` (a `supercal_control` pool), sending mail through
+ * `mailer` when there is one, plus
  * `passwordResetLink`, which issues a one-time reset link for an operator to hand out,
  * `isEmptyInstall`, true until the first user (the operator) signs up, and `publicUrl`, the origin
  * clients reach the daemon at.
  */
-export function createAuth(config: AuthConfig, db: ControlDatabase) {
+export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mailer | null = null) {
   const baseURL = config.SUPERCAL_PUBLIC_URL ?? `http://localhost:${config.PORT}`;
   const pendingResetLinks = new Map<string, (url: string) => unknown>();
 
@@ -107,15 +114,25 @@ export function createAuth(config: AuthConfig, db: ControlDatabase) {
     }),
     emailAndPassword: {
       enabled: true,
-      // Verification mail goes out through Resend (wired in the release issue); without it, nothing could verify.
-      requireEmailVerification: config.RESEND_API_KEY !== undefined,
-      // Only `passwordResetLink` asks for links today; emailing them arrives with the Resend mailer.
+      // Without mail, nothing could verify.
+      requireEmailVerification: mailer !== null,
+      // A reset link an operator asked for (`passwordResetLink`) is handed back, never mailed.
       sendResetPassword: async ({ user, url }) => {
-        pendingResetLinks.get(user.email)?.(url);
+        const handOut = pendingResetLinks.get(user.email);
+        if (handOut) handOut(url);
+        else await mailer?.send({ to: user.email, ...templates.resetPassword({ url }) });
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: mailer !== null,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url }) => {
+        await mailer?.send({ to: user.email, ...templates.verifyEmail({ url }) });
       },
     },
     // Keys are issued only by `POST /api/v1/api-keys`, which binds them to a tenant. The server API stays available.
-    disabledPaths: ['/api-key/create'],
+    // Magic links need mail.
+    disabledPaths: ['/api-key/create', ...(mailer ? [] : ['/sign-in/magic-link'])],
     databaseHooks: {
       user: {
         create: {
@@ -164,10 +181,21 @@ export function createAuth(config: AuthConfig, db: ControlDatabase) {
     plugins: [
       organization({
         allowUserToCreateOrganization: (user) => config.SUPERCAL_SIGNUP === 'open' || ('role' in user && user.role === OPERATOR_ROLE),
+        // The dashboard's `/invite/<id>` page accepts it, or signs the invitee up first.
+        sendInvitationEmail: async ({ id, email, organization: tenant, inviter }) => {
+          await mailer?.send({ to: email, ...templates.invitation({ url: `${baseURL}/invite/${id}`, inviter: inviter.user.name, tenant: tenant.name }) });
+        },
         organizationHooks: { afterRemoveMember: ({ user }) => publishAuthRevoked(db, user.id) },
       }),
       admin({ adminRoles: [OPERATOR_ROLE] }),
       apiKey({ defaultPrefix: 'sc_', enableMetadata: true, rateLimit: { enabled: false } }),
+      // Existing users only: accounts are created by sign-up, where the sign-up mode applies.
+      magicLink({
+        disableSignUp: true,
+        sendMagicLink: async ({ email, url }) => {
+          await mailer?.send({ to: email, ...templates.magicLink({ url }) });
+        },
+      }),
       openAPI(),
     ],
   });

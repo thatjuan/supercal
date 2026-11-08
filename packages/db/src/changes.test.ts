@@ -142,7 +142,7 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     const sequenceValue = async () => (await unsafeDb().execute<{ v: string }>(sql`select last_value::text as v from change_seq`))[0]?.v;
     const before = await sequenceValue();
     const result = await withTenant(tenant, (tx) => recordChanges(tx, [upsert(calendar, 'same')]));
-    expect(result).toEqual({ maxSeq: null });
+    expect(result).toEqual({ maxSeq: null, changed: 0 });
     expect(await sequenceValue()).toBe(before);
   });
 
@@ -155,7 +155,7 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     expect({ maxSeq, hasMore }).toEqual({ maxSeq: deleted ?? -1n, hasMore: false });
     expect(rows.map(({ uid, deleted, data, seq }) => ({ uid, deleted, data, seq }))).toEqual([{ uid: 'gone', deleted: true, data: null, seq: deleted ?? -1n }]);
     expect(await withTenant(tenant, (tx) => resourcesByUids(tx, [calendar], ['gone']))).toEqual([]);
-    expect(await withTenant(tenant, (tx) => recordChanges(tx, [remove(calendar, 'gone')]))).toEqual({ maxSeq: null });
+    expect(await withTenant(tenant, (tx) => recordChanges(tx, [remove(calendar, 'gone')]))).toEqual({ maxSeq: null, changed: 0 });
   });
 
   test('changesSince pages by seq and resumes from maxSeq', async () => {
@@ -196,6 +196,7 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     const received: unknown[] = [];
     await listener.listen(CHANGES_CHANNEL, (payload) => received.push(JSON.parse(payload)));
     try {
+      const sentAfter = Date.now();
       const { maxSeq } = await withTenant(tenant, async (tx) => {
         const result = await recordChanges(tx, [upsert(calendar, 'notified')]);
         await Bun.sleep(150);
@@ -203,7 +204,11 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
         return result;
       });
       await eventually(() => received.length > 0);
-      expect(received).toEqual([{ t: tenant, s: String(maxSeq) }]);
+      // `c` is the send time in epoch ms, from which listeners measure notify lag.
+      expect(received).toEqual([{ t: tenant, s: String(maxSeq), c: expect.any(Number) }]);
+      const [{ c }] = received as [{ c: number }];
+      expect(c).toBeGreaterThanOrEqual(sentAfter - 1_000);
+      expect(c).toBeLessThanOrEqual(Date.now() + 1_000);
 
       const rollback = withTenant(tenant, async (tx) => {
         await recordChanges(tx, [upsert(calendar, 'rolled-back')]);

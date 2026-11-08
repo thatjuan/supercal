@@ -141,6 +141,7 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
     - `push_lease`: webhook routing
     - `feed`: lookup by `caldav_username` / `ics_token_hash`
     - `api_key_tenant`: key → tenant resolution
+    - `drizzle.__drizzle_migrations`: the migrations check in `/readyz`
     - Better Auth tables
 
     It never reads `resource`, `source_object` or credentials. Once the tenant is resolved, the request continues in `withTenant`.

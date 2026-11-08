@@ -10,6 +10,7 @@ import { ProviderThrottledError, type Provider } from '@supercal/providers';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { wake, type Bus } from '../bus.ts';
 import type { Logger } from '../log.ts';
+import { metrics } from '../ops/metrics.ts';
 
 /** A claimed target. `version` is the claim's `lease_version`, which every fenced write checks. */
 export type Job = {
@@ -198,6 +199,8 @@ export type SchedulerOptions = {
   concurrency?: number;
   leaseMs?: number;
   pollMs?: number;
+  /** Called after every loop pass whose claims reached the database; `/readyz` watches it. */
+  onTick?: () => void;
 };
 
 /**
@@ -205,7 +208,7 @@ export type SchedulerOptions = {
  * leases released) before resolving. Claims every `pollMs`, at once on a bus `wake`, and whenever
  * a job finishes.
  */
-export async function startScheduler({ handlers, log, signal, bus, owner = crypto.randomUUID(), concurrency = 8, leaseMs = 60_000, pollMs = 5_000 }: SchedulerOptions): Promise<void> {
+export async function startScheduler({ handlers, log, signal, bus, owner = crypto.randomUUID(), concurrency = 8, leaseMs = 60_000, pollMs = 5_000, onTick }: SchedulerOptions): Promise<void> {
   const running = new Set<Promise<void>>();
   const woken = new Set<SyncTargetId>();
   let kicked = false;
@@ -234,9 +237,15 @@ export async function startScheduler({ handlers, log, signal, bus, owner = crypt
     }, leaseMs / 3);
     try {
       const { nextRunInMs } = await handlers[job.kind](job, controller.signal);
-      if (!(await complete(job, { ok: true, nextRunInMs }))) jobLog.warn('completion rejected: lease lost');
+      if (!(await complete(job, { ok: true, nextRunInMs }))) {
+        metrics.leaseLost.inc({});
+        jobLog.warn('completion rejected: lease lost');
+      }
     } catch (error) {
-      if (error instanceof LeaseLostError || controller.signal.reason instanceof LeaseLostError) jobLog.warn('job stopped: lease lost');
+      if (error instanceof LeaseLostError || controller.signal.reason instanceof LeaseLostError) {
+        metrics.leaseLost.inc({});
+        jobLog.warn('job stopped: lease lost');
+      }
       else if (signal.aborted) await release(job);
       else {
         jobLog.warn('job failed', { error, attempts: job.attempts });
@@ -290,6 +299,7 @@ export async function startScheduler({ handlers, log, signal, bus, owner = crypt
         jobs.forEach(start);
         claimed = jobs.length;
       }
+      onTick?.();
     } catch (error) {
       log.warn('claim failed', { error });
     }

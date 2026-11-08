@@ -86,7 +86,7 @@ export async function renderIcs(tx: TenantTx, secrets: SecretBox, { feed, public
     for (const row of await resourcesIn(tx, calendarIds)) bySource.set(row.sourceCalendarId, [...(bySource.get(row.sourceCalendarId) ?? []), row]);
   }
 
-  const uidSecret = await openUidSecret(secrets, feed);
+  const uidSecret = await openUidSecret(secrets, feed, tx);
   const projections = publications.map((p) => {
     const inputs: SourceResource[] = p.sources.flatMap((s) =>
       (bySource.get(s.sourceCalendarId) ?? []).map((r) => ({

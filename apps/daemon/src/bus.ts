@@ -76,8 +76,8 @@ const CHANNELS = {
   change: {
     channel: CHANGES_CHANNEL,
     payload: z
-      .object({ t: z.string().min(1), s: z.string().regex(/^\d+$/) })
-      .transform(({ t, s }) => ({ tenantId: t as TenantId, maxSeq: BigInt(s) })),
+      .object({ t: z.string().min(1), s: z.string().regex(/^\d+$/), c: z.number().optional() })
+      .transform(({ t, s, c }) => ({ tenantId: t as TenantId, maxSeq: BigInt(s), ...(c !== undefined && { sentAt: c }) })),
   },
   wake: {
     channel: WAKE_CHANNEL,

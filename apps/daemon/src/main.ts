@@ -5,14 +5,35 @@ import { startBus } from './bus.ts';
 import { loadConfig } from './config.ts';
 import { createApp } from './http.ts';
 import { createLogger } from './log.ts';
+import { createMailer } from './mail/index.ts';
 import { GOOGLE_AUTHORIZE_URL } from './oauth/google.ts';
 import { MICROSOFT_AUTHORIZE_URL } from './oauth/microsoft.ts';
+import { instrumentBus } from './ops/index.ts';
 import { defaultWebDir } from './web.ts';
 import { startWorker } from './worker/index.ts';
 
 /** Keep in step with `packageManager` in the root package.json. */
 const PINNED_BUN = '1.3.4';
 const SHUTDOWN_GRACE_MS = 10_000;
+
+/**
+ * `supercal` serves; `supercal migrate` applies the embedded migrations to
+ * `DATABASE_MIGRATION_URL ?? DATABASE_URL` and exits, for installs that run with `SUPERCAL_MIGRATE=off`.
+ */
+const command = process.argv[2];
+if (command === 'migrate') {
+  const url = process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL;
+  if (!url) {
+    console.error('supercal migrate: set DATABASE_MIGRATION_URL or DATABASE_URL');
+    process.exit(1);
+  }
+  const { applied } = await migrate(url);
+  console.log(`supercal migrate: applied ${applied} migration(s)`);
+  process.exit(0);
+} else if (command !== undefined) {
+  console.error(`supercal: unknown command ${JSON.stringify(command)}; usage: supercal [migrate]`);
+  process.exit(2);
+}
 
 const config = loadConfig();
 const log = createLogger();
@@ -24,10 +45,13 @@ if (config.SUPERCAL_MIGRATE === 'auto') {
 }
 
 connectDb(config.DATABASE_URL);
-const auth = createAuth(config, createControlDatabase(config.DATABASE_URL));
+const mailer = createMailer(config);
+if (!mailer) log.info('email is off (RESEND_API_KEY and MAIL_FROM unset); invitation and reset links are shown in the dashboard instead');
+const auth = createAuth(config, createControlDatabase(config.DATABASE_URL), mailer);
 const secrets = await createSecretBox({ keys: config.SUPERCAL_KEYS, insecureDev: config.SUPERCAL_INSECURE_DEV, warn: (message) => log.warn(message) });
 
 const bus = await startBus(config.DATABASE_URL, log.child({ component: 'bus' }));
+instrumentBus(bus);
 const egress = createGuardedFetch({ allow: config.SUPERCAL_EGRESS_ALLOW });
 
 // Google and Microsoft are enabled by their client credentials; push additionally needs a public https URL.
@@ -52,6 +76,7 @@ const roles = config.SUPERCAL_ROLES;
 // closes when `stopAbort` aborts, since `server.stop()` waits for open streams.
 const stopAbort = new AbortController();
 const webDir = config.SUPERCAL_WEB_DIR ?? defaultWebDir();
+let schedulerTickedAt: number | null = null;
 const server = Bun.serve({
   port: config.PORT,
   fetch: createApp(roles, {
@@ -66,12 +91,13 @@ const server = Bun.serve({
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,
     signup: config.SUPERCAL_SIGNUP,
     webDir,
+    ops: { metricsToken: config.SUPERCAL_METRICS_TOKEN, ...(roles.has('worker') && { schedulerTickedAt: () => schedulerTickedAt }) },
   }).fetch,
 });
 log.info('listening', { port: server.port, roles: [...roles], webDir });
 
 const worker = roles.has('worker')
-  ? startWorker(stopAbort.signal, log.child({ role: 'worker' }), { secrets, bus, fetch: egress, adapters, pushBaseUrl, concurrency: config.SUPERCAL_SYNC_CONCURRENCY })
+  ? startWorker(stopAbort.signal, log.child({ role: 'worker' }), { secrets, bus, fetch: egress, adapters, pushBaseUrl, concurrency: config.SUPERCAL_SYNC_CONCURRENCY, onTick: () => (schedulerTickedAt = Date.now()) })
   : Promise.resolve();
 
 let stopping = false;

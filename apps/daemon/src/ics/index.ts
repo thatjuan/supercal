@@ -15,6 +15,7 @@ import { Hono } from 'hono';
 import { brotliCompressSync, constants } from 'node:zlib';
 import { icsTokenHash } from '../feeds/credentials.ts';
 import { createLogger, redact } from '../log.ts';
+import { metrics } from '../ops/metrics.ts';
 import { createByteLru } from './cache.ts';
 import { enabledPublications, renderIcs } from './render.ts';
 
@@ -98,7 +99,11 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
       const encoding = negotiate(c.req.header('Accept-Encoding'));
       if (encoding !== 'identity') headers['Content-Encoding'] = encoding;
       const cached = cache.get(`${etag}:${encoding === 'br' ? 'br' : 'gzip'}`);
-      if (cached) return c.body(encoding === 'identity' ? Bun.gunzipSync(cached) : cached, 200, headers);
+      if (cached) {
+        metrics.icsCacheHits.inc({});
+        return c.body(encoding === 'identity' ? Bun.gunzipSync(cached) : cached, 200, headers);
+      }
+      metrics.icsCacheMisses.inc({});
 
       const body = new TextEncoder().encode(await render(tx, secrets, { feed: target, publications, combined }));
       const variants = {
