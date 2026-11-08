@@ -5,15 +5,18 @@
  * whose lease was taken over commits nothing.
  *
  * 1. Each page is one short fenced transaction: upserts (dirty, `seen_generation = lease_version`),
- *    touches (only `seen_generation`) and deletes. Nothing is normalised yet, so a failed later
- *    page leaves the cursor and every resource as they were; the next run replays.
- * 2. `end` is one fenced transaction: a snapshot deletes the objects it did not see, every dirty
+ *    touches (only `seen_generation`), deletes and occurrence records (`graph_occurrence`). Nothing
+ *    is normalised yet, so a failed later page leaves the cursor and every resource as they were;
+ *    the next run replays.
+ * 2. `end` is one fenced transaction: a snapshot deletes the objects it did not see (and the
+ *    occurrence records of masters that went with them), every dirty
  *    group is normalised from all its objects, resources whose group lost every object (or now
  *    publishes nothing) become deletes, and only real revision changes reach `recordChanges`. Then the cursor is stored.
  */
 import { lastModified, normalizers, organizer, revisionOf, sequence, spanOf, type Completeness, type EventResource, type Normalizer } from '@supercal/core';
 import {
   calendarAccount,
+  graphOccurrence,
   pushLease,
   recordChanges,
   resource,
@@ -29,7 +32,7 @@ import {
   type Span,
   type TenantTx,
 } from '@supercal/db';
-import type { SyncEnd, SyncPage } from '@supercal/providers';
+import type { SourceCalendarRef, SyncEnd, SyncPage } from '@supercal/providers';
 import { and, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
 import type { Logger } from '../log.ts';
 import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
@@ -112,7 +115,24 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
     const gone = await tx.delete(sourceObject).where(where(batch)).returning({ groupUid: sourceObject.groupUid });
     await markGroupsDirty(tx, calendar.id, gone.map((g) => g.groupUid));
   }
+
+  for (const batch of chunks(page.occurrences ?? []))
+    await tx
+      .insert(graphOccurrence)
+      .values(batch.map((o) => ({ tenantId: job.tenantId, sourceCalendarId: calendar.id, ...o })))
+      .onConflictDoUpdate({ target: [graphOccurrence.sourceCalendarId, graphOccurrence.masterId, graphOccurrence.occurrenceId], set: { originalStart: sql`excluded.original_start` } });
 }
+
+/** The recorded occurrences of a master (id → original start), for `SourceCalendarRef.occurrences`. */
+const occurrencesOf = (job: TenantJob, calendarId: SourceCalendarId) => async (masterId: string) => {
+  const rows = await withTenant(job.tenantId, (tx) =>
+    tx
+      .select({ occurrenceId: graphOccurrence.occurrenceId, originalStart: graphOccurrence.originalStart })
+      .from(graphOccurrence)
+      .where(and(eq(graphOccurrence.sourceCalendarId, calendarId), eq(graphOccurrence.masterId, masterId))),
+  );
+  return new Map(rows.map((r) => [r.occurrenceId, r.originalStart]));
+};
 
 type Upsert = Extract<ResourceChange, { op: 'upsert' }>;
 
@@ -150,6 +170,14 @@ async function resourceChanges(tx: TenantTx, job: TenantJob, calendar: SourceCal
   if (end.mode === 'snapshot') {
     const unseen = await tx.delete(sourceObject).where(and(ofCalendar, lt(sourceObject.seenGeneration, job.version))).returning({ groupUid: sourceObject.groupUid });
     await markGroupsDirty(tx, calendar.id, unseen.map((u) => u.groupUid));
+    await tx
+      .delete(graphOccurrence)
+      .where(
+        and(
+          eq(graphOccurrence.sourceCalendarId, calendar.id),
+          notExists(tx.select({ one: sql`1` }).from(sourceObject).where(and(ofCalendar, eq(sourceObject.providerObjectId, graphOccurrence.masterId)))),
+        ),
+      );
   }
 
   const changes: ResourceChange[] = [];
@@ -235,7 +263,7 @@ export async function runEvents(deps: SyncDeps, job: TenantJob, signal: AbortSig
   return withAccount(deps, job, account, signal, async (adapter, ctx) => {
     const normalizer = normalizers[adapter.format];
     if (!normalizer) throw new Error(`no normaliser is registered for format ${adapter.format}`);
-    const ref = { id: calendar.id, providerCalendarId: calendar.providerCalendarId, capabilities: calendar.capabilities };
+    const ref: SourceCalendarRef = { id: calendar.id, providerCalendarId: calendar.providerCalendarId, capabilities: calendar.capabilities, occurrences: occurrencesOf(job, calendar.id) };
     const log = deps.log.child({ calendarId: calendar.id });
     for await (const item of adapter.sync(ctx, ref, cursor)) {
       signal.throwIfAborted();

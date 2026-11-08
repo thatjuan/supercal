@@ -26,5 +26,19 @@ const GoogleCredentials = z.object({
 });
 export type GoogleCredentials = z.infer<typeof GoogleCredentials>;
 
-export const ProviderCredentials = z.discriminatedUnion('provider', [IcsCredentials, CaldavCredentials, IcloudCredentials, GoogleCredentials]);
+/**
+ * A Microsoft 365 or Outlook.com account connected through OAuth. `subject` is `${tid}:${oid}` from
+ * the ID token (`provider_subject`). Refresh tokens rotate, so every refresh saves the new one.
+ */
+const MicrosoftCredentials = z.object({
+  provider: z.literal('microsoft'),
+  subject: z.string(),
+  email: z.string(),
+  accessToken: z.string(),
+  accessTokenExpiresAt: z.iso.datetime(),
+  refreshToken: z.string(),
+});
+export type MicrosoftCredentials = z.infer<typeof MicrosoftCredentials>;
+
+export const ProviderCredentials = z.discriminatedUnion('provider', [IcsCredentials, CaldavCredentials, IcloudCredentials, GoogleCredentials, MicrosoftCredentials]);
 export type ProviderCredentials = z.infer<typeof ProviderCredentials>;

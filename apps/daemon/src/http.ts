@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createApi, type ApiDeps } from './api/index.ts';
 import { createDav } from './dav/index.ts';
 import { googleHooks } from './hooks/google.ts';
+import { microsoftHooks } from './hooks/microsoft.ts';
 import { createIcs } from './ics/index.ts';
 import type { Role } from './roles.ts';
 
@@ -12,7 +13,7 @@ export type AppDeps = ApiDeps & { publicUrl?: string | undefined; icsCacheBytes:
 export function createApp(roles: ReadonlySet<Role>, deps: AppDeps) {
   const app = new Hono();
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
-  if (roles.has('api')) app.route('/', createApi(deps)).route('/', googleHooks);
+  if (roles.has('api')) app.route('/', createApi(deps)).route('/', googleHooks).route('/', microsoftHooks);
   if (roles.has('dav')) app.route('/', createDav(deps)).route('/ics', createIcs({ secrets: deps.secrets, cacheBytes: deps.icsCacheBytes }));
   return app;
 }

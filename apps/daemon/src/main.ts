@@ -1,11 +1,12 @@
 import { connectDb, createControlDatabase, createSecretBox, migrate } from '@supercal/db';
-import { createGoogleAdapter, createGuardedFetch, GOOGLE_TOKEN_URL, registry } from '@supercal/providers';
+import { createGoogleAdapter, createGuardedFetch, createMicrosoftAdapter, GOOGLE_TOKEN_URL, MICROSOFT_TOKEN_URL, registry } from '@supercal/providers';
 import { createAuth } from './auth/auth.ts';
 import { startBus } from './bus.ts';
 import { loadConfig } from './config.ts';
 import { createApp } from './http.ts';
 import { createLogger } from './log.ts';
 import { GOOGLE_AUTHORIZE_URL } from './oauth/google.ts';
+import { MICROSOFT_AUTHORIZE_URL } from './oauth/microsoft.ts';
 import { startWorker } from './worker/index.ts';
 
 /** Keep in step with `packageManager` in the root package.json. */
@@ -28,14 +29,22 @@ const secrets = await createSecretBox({ keys: config.SUPERCAL_KEYS, insecureDev:
 const bus = await startBus(config.DATABASE_URL, log.child({ component: 'bus' }));
 const egress = createGuardedFetch({ allow: config.SUPERCAL_EGRESS_ALLOW });
 
-// Google is enabled by its client credentials; push additionally needs a public https URL.
+// Google and Microsoft are enabled by their client credentials; push additionally needs a public https URL.
 const pushBaseUrl = config.SUPERCAL_PUBLIC_URL?.startsWith('https:') ? config.SUPERCAL_PUBLIC_URL.replace(/\/+$/, '') : null;
 const google =
   config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET
     ? { clientId: config.GOOGLE_CLIENT_ID, clientSecret: config.GOOGLE_CLIENT_SECRET, authorizeUrl: GOOGLE_AUTHORIZE_URL, tokenUrl: GOOGLE_TOKEN_URL }
     : undefined;
-if (google && !pushBaseUrl) log.info('Google push is disabled because SUPERCAL_PUBLIC_URL is not https; Google calendars are polled every 2 minutes');
-const adapters = { ...registry, ...(google && { google: createGoogleAdapter({ ...google, push: pushBaseUrl !== null }) }) };
+const microsoft =
+  config.MICROSOFT_CLIENT_ID && config.MICROSOFT_CLIENT_SECRET
+    ? { clientId: config.MICROSOFT_CLIENT_ID, clientSecret: config.MICROSOFT_CLIENT_SECRET, authorizeUrl: MICROSOFT_AUTHORIZE_URL, tokenUrl: MICROSOFT_TOKEN_URL }
+    : undefined;
+if ((google || microsoft) && !pushBaseUrl) log.info('push is disabled because SUPERCAL_PUBLIC_URL is not https; Google and Microsoft calendars are polled every 2 minutes');
+const adapters = {
+  ...registry,
+  ...(google && { google: createGoogleAdapter({ ...google, push: pushBaseUrl !== null }) }),
+  ...(microsoft && { microsoft: createMicrosoftAdapter({ ...microsoft, push: pushBaseUrl !== null }) }),
+};
 
 const roles = config.SUPERCAL_ROLES;
 // The live stream turns off the idle timeout for its own requests (`server.timeout(req, 0)`), and
@@ -49,7 +58,7 @@ const server = Bun.serve({
     bus,
     fetch: egress,
     adapters,
-    oauth: { webOrigin: config.WEB_ORIGIN, stateSecret: config.BETTER_AUTH_SECRET ?? crypto.randomUUID(), google },
+    oauth: { webOrigin: config.WEB_ORIGIN, stateSecret: config.BETTER_AUTH_SECRET ?? crypto.randomUUID(), google, microsoft },
     stream: { signal: stopAbort.signal },
     publicUrl: config.SUPERCAL_PUBLIC_URL,
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,

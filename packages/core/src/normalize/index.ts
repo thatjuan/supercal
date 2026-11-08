@@ -3,10 +3,10 @@
  * with every object of a dirty group. `version` is stored on each normalised `source_object` row;
  * bumping it makes the daemon re-normalise older rows at boot. `normalize` returns null when the
  * group publishes nothing (e.g. a cancelled Google master), which the runner turns into a delete.
- * The `graph` provider adds its entry here.
  */
 import type { EventResource } from "../model.ts";
 import { normalizeGoogle } from "./google.ts";
+import { normalizeGraph } from "./graph.ts";
 import { normalizeIcal, type Completeness, type SourceObject } from "./ical.ts";
 
 export const SOURCE_FORMATS = ["ical", "google", "graph"] as const;
@@ -20,4 +20,5 @@ export type Normalizer = {
 export const normalizers: { readonly [F in SourceFormat]?: Normalizer } = {
   ical: { version: 1, normalize: normalizeIcal },
   google: { version: 1, normalize: normalizeGoogle },
+  graph: { version: 1, normalize: normalizeGraph },
 };

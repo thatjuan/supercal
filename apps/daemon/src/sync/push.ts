@@ -1,6 +1,7 @@
 /**
  * `push_renew` targets keep one push subscription alive per calendar (Google `events.watch`), or
- * per account for calendar discovery (Google `calendarList.watch`). Push needs a public https URL;
+ * per account: for calendar discovery (Google `calendarList.watch`), or for the whole mailbox's
+ * events (Graph `/me/events`, an adapter with `push: 'account'`). Push needs a public https URL;
  * without one (`pushBaseUrl` null) the targets park and calendars are polled.
  *
  * A run subscribes when no lease exists, and otherwise waits until 80% of the newest lease's
@@ -12,7 +13,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { calendarAccount, pushLease, sourceCalendar, withTenant, type AccountId, type CalendarAccount, type PushLease, type PushTarget, type SourceCalendarId } from '@supercal/db';
 import type { JsonValue, PushLeaseInfo, PushRequest } from '@supercal/providers';
 import { and, eq } from 'drizzle-orm';
-import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
+import { adapterFor, withAccount, type SyncDeps, type TenantJob } from './context.ts';
 import { fenced } from './runner.ts';
 import { StopTargetError, type JobResult } from './scheduler.ts';
 
@@ -28,8 +29,8 @@ export const renewalDue = ({ createdAt, expiresAt }: Pick<PushLease, 'createdAt'
 // `provider_state` is whatever the adapter returned when it subscribed.
 const leaseInfo = (lease: PushLease): PushLeaseInfo => ({ ...lease, providerState: lease.providerState as JsonValue | null });
 
-/** What the job's `target_id` names: a calendar's watch, or the account's calendar-list watch. */
-async function load(job: TenantJob): Promise<{ account: CalendarAccount; target: PushTarget; providerTargetId: string; leases: PushLease[] }> {
+/** What the job's `target_id` names: a calendar's watch, or the account's (mailbox or calendar-list) subscription. */
+async function load(deps: SyncDeps, job: TenantJob): Promise<{ account: CalendarAccount; target: PushTarget; providerTargetId: string; leases: PushLease[] }> {
   return withTenant(job.tenantId, async (tx) => {
     const [calendar] = await tx
       .select()
@@ -38,7 +39,7 @@ async function load(job: TenantJob): Promise<{ account: CalendarAccount; target:
       .where(eq(sourceCalendar.id, job.target as SourceCalendarId));
     const [account] = calendar ? [calendar.calendar_account] : await tx.select().from(calendarAccount).where(eq(calendarAccount.id, job.target as AccountId));
     if (!account || calendar?.source_calendar.state === 'gone') throw new StopTargetError('the push target is gone');
-    const target: PushTarget = calendar ? 'calendar' : 'calendar-list';
+    const target: PushTarget = calendar ? 'calendar' : adapterFor(deps.adapters, account.provider).capabilities.push === 'account' ? 'account' : 'calendar-list';
     const leases = await tx.select().from(pushLease).where(and(eq(pushLease.target, target), eq(pushLease.targetId, job.target)));
     return { account, target, providerTargetId: calendar?.source_calendar.providerCalendarId ?? account.id, leases };
   });
@@ -47,7 +48,7 @@ async function load(job: TenantJob): Promise<{ account: CalendarAccount; target:
 /** Runs one `push_renew` job: subscribe or renew if due, and return when to look again. */
 export async function runPushRenew(deps: SyncDeps, job: TenantJob, signal: AbortSignal): Promise<JobResult> {
   if (!deps.pushBaseUrl) return { nextRunInMs: Infinity };
-  const { account, target, providerTargetId, leases } = await load(job);
+  const { account, target, providerTargetId, leases } = await load(deps, job);
   const newest = leases.toSorted((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0];
   if (newest && renewalDue(newest) > Date.now()) return { nextRunInMs: renewalDue(newest) - Date.now() };
 

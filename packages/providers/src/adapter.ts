@@ -25,7 +25,14 @@ export type RawObject = {
   payload: string | JsonValue | null;
 };
 
-export type SyncPage = { kind: 'page'; upserts: RawObject[]; deletes: ProviderObjectId[] };
+/**
+ * A recurrence instance's id and original start, for providers whose cancellations name only the
+ * instance id (Graph `cancelledOccurrences`). The runner keeps them in `graph_occurrence`.
+ */
+export type OccurrenceRecord = { masterId: ProviderObjectId; occurrenceId: string; originalStart: string };
+
+/** One page of a sync. `occurrences` are written with the page, so later runs can resolve cancellations through `SourceCalendarRef.occurrences`. */
+export type SyncPage = { kind: 'page'; upserts: RawObject[]; deletes: ProviderObjectId[]; occurrences?: OccurrenceRecord[] };
 
 /**
  * The last item of a sync. `snapshot`: every existing object was yielded, so the runner deletes the
@@ -42,8 +49,16 @@ export type SourceCalendarInfo = {
   capabilities: CalendarCapabilities;
 };
 
-/** The calendar a sync runs for. */
-export type SourceCalendarRef = { id: string; providerCalendarId: string; capabilities: CalendarCapabilities };
+/**
+ * The calendar a sync runs for. `occurrences` reads the recorded instances of a master
+ * (occurrence id → original start); the runner provides it.
+ */
+export type SourceCalendarRef = {
+  id: string;
+  providerCalendarId: string;
+  capabilities: CalendarCapabilities;
+  occurrences?: (masterId: ProviderObjectId) => Promise<Map<string, string>>;
+};
 
 export type PushLeaseInfo = {
   target: PushTarget;
