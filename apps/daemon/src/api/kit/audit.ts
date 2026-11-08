@@ -5,6 +5,11 @@ import type { Principal } from '../../auth/principal.ts';
 
 /** Every audited action. Feature issues add theirs here. */
 export type AuditAction =
+  | 'dav-login.create'
+  | 'dav-login.delete'
+  | 'event.create'
+  | 'event.update'
+  | 'event.delete'
   | 'tenant.create'
   | 'tenant.update'
   | 'api_key.create'
@@ -31,7 +36,7 @@ export type AuditAction =
   | 'sink.delete';
 
 /** The actor recorded on each entry: who acted and how they authenticated. */
-export const AuditActor = z.object({ kind: z.literal('user'), userId: z.string(), via: z.enum(['session', 'apiKey']) }).openapi('AuditActor');
+export const AuditActor = z.object({ kind: z.literal('user'), userId: z.string(), via: z.enum(['session', 'apiKey', 'davLogin']) }).openapi('AuditActor');
 
 export type AuditTarget = { type: string; id?: string };
 

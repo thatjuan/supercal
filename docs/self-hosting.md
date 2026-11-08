@@ -255,6 +255,32 @@ Client secrets expire, after at most 24 months. When one expires, every Microsof
 
 Change notifications, like Google push, need an HTTPS `SUPERCAL_PUBLIC_URL`; Microsoft posts them to `/hooks/microsoft` and `/hooks/microsoft/lifecycle`. Without HTTPS, Supercal polls every two minutes.
 
+## Connecting a calendar app to hosted calendars
+
+Create a separate DAV login for each device with your tenant API key (or an authenticated session):
+
+```sh
+curl --fail https://cal.example.com/api/v1/dav-logins \
+  -H "Authorization: Bearer $SUPERCAL_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Work iPhone"}'
+```
+
+The 201 response contains `id`, `name`, `username`, `password`, `serverUrl` and `createdAt`.
+Save the password now; it is shown only in this response. In Apple Calendar, Thunderbird or DAVx5,
+add a CalDAV account using the returned server URL, username and password. Discovery finds your
+active hosted calendars. You can create calendars and create, edit and delete events from the app;
+Supercal has no event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
+`/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
+MKCALENDAR, PROPPATCH, PUT and DELETE.
+
+List your devices with `GET /api/v1/dav-logins`. Revoke one with
+`DELETE /api/v1/dav-logins/<id>`; it stops authenticating immediately without affecting other
+devices. A tenant admin can revoke a member's device login too. Each user may have at most
+20 logins in a tenant. Removing or banning a member also stops that member's device logins.
+Feed usernames and passwords continue to provide read-only publications; use a DAV login to
+edit hosted calendars. Device credentials cannot open the management API or ICS feeds.
+
 ## CalDAV servers on your LAN
 
 To protect your network, Supercal refuses to connect to private, loopback, link-local and other non-public addresses when it syncs a CalDAV or ICS account. To let users add a server on your LAN, list it in `SUPERCAL_EGRESS_ALLOW` as its exact origin and the address range it may resolve to:

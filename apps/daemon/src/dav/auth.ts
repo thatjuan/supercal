@@ -1,14 +1,14 @@
 /**
- * HTTP Basic for feed logins (architecture §7). Argon2 verification costs tens of milliseconds
+ * HTTP Basic for device and feed logins (architecture §7). Argon2 verification costs tens of milliseconds
  * and clients send Basic on every request, so successful verifications are cached for five
  * minutes, keyed by `sha256(username:password)`. Failures are throttled per username and per IP:
  * ten within five minutes block that key with 429 for five minutes. Both are per process.
  *
  * A cached login remembers the password hash it was verified against; the request handler
- * compares it with the feed row it loads anyway, so a rotated password fails at once even before
- * the `feed-credentials-rotated` notification arrives and calls `forgetFeed`.
+ * compares it with the credential row it loads anyway, so rotation or revocation takes effect
+ * before a notification arrives. Device membership is rechecked separately on every request.
  */
-import type { FeedId, TenantId } from '@supercal/db';
+import type { DavLoginId, FeedId, TenantId } from '@supercal/db';
 
 const CACHE_MS = 5 * 60_000;
 const WINDOW_MS = 5 * 60_000;
@@ -18,10 +18,12 @@ const MAX_FAILURES = 10;
 const SWEEP_AT = 10_000;
 
 /** What the username lookup returns: the columns `supercal_control` may read. */
-export type FeedLogin = { feedId: FeedId; tenantId: TenantId; passwordHash: string };
+export type DavLogin =
+  | { kind: 'feed'; id: FeedId; tenantId: TenantId; passwordHash: string }
+  | { kind: 'user'; id: DavLoginId; userId: string; tenantId: TenantId; passwordHash: string };
 
 export type AuthResult =
-  | { ok: true; login: FeedLogin }
+  | { ok: true; login: DavLogin }
   | { ok: false; status: 401 | 429; retryAfter?: number };
 
 /** Username and password from a `Basic` Authorization header. */
@@ -35,9 +37,9 @@ export function parseBasic(header: string | undefined): { username: string; pass
 
 const cacheKey = (username: string, password: string) => new Bun.CryptoHasher('sha256').update(`${username}:${password}`).digest('hex');
 
-/** Creates the per-process verifier. `lookup` finds a feed's login by username (in `withControl`). */
-export function createFeedAuth(lookup: (username: string) => Promise<FeedLogin | null>, now = () => Date.now()) {
-  const verified = new Map<string, { login: FeedLogin; until: number }>();
+/** Creates the per-process verifier. `lookup` finds a device or feed login by username (in `withControl`). */
+export function createFeedAuth(lookup: (username: string) => Promise<DavLogin | null>, now = () => Date.now()) {
+  const verified = new Map<string, { login: DavLogin; until: number }>();
   const failures = new Map<string, { at: number[]; blockedUntil: number }>();
 
   const blockedFor = (key: string) => Math.max(0, (failures.get(key)?.blockedUntil ?? 0) - now());
@@ -76,9 +78,9 @@ export function createFeedAuth(lookup: (username: string) => Promise<FeedLogin |
       return { ok: true, login };
     },
 
-    /** Drops cached verifications of `feedId`; called on `feed-credentials-rotated`. */
-    forgetFeed(feedId: FeedId) {
-      for (const [k, v] of verified) if (v.login.feedId === feedId) verified.delete(k);
+    /** Drops cached verifications on feed rotation or device revocation. */
+    forget(id: FeedId | DavLoginId) {
+      for (const [k, v] of verified) if (v.login.id === id) verified.delete(k);
     },
   };
 }

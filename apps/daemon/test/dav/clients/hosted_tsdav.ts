@@ -1,0 +1,40 @@
+/** tsdav's write helpers and smart sync against the same stored bodies and ETags. */
+import { calendarMultiGet, createDAVClient } from 'tsdav';
+import { eventIcs } from '../fixture.ts';
+
+const required = (key: string) => {
+  const value = process.env[key];
+  if (!value) throw new Error(`${key} is required`);
+  return value;
+};
+const check = (value: boolean, message: string) => { if (!value) throw new Error(message); };
+const client = await createDAVClient({ serverUrl: required('DAV_URL'), credentials: { username: required('DAV_USER'), password: required('DAV_PASS') }, authMethod: 'Basic', defaultAccountType: 'caldav' });
+const calendars = await client.fetchCalendars();
+const calendar = calendars.find((c) => c.url.endsWith(`/${required('HOSTED_CALENDAR')}/`));
+if (!calendar) throw new Error('Hosted calendar not discovered');
+const body = (summary: string) => eventIcs('tsdav-event', ['DTSTART:20261110T090000Z', 'DURATION:PT1H', `SUMMARY:${summary}`]);
+const created = await client.createCalendarObject({ calendar, filename: 'client-chosen.ics', iCalString: body('Original') });
+check(created.status === 201, `create returned ${created.status}`);
+const [object] = await client.fetchCalendarObjects({ calendar });
+if (!object) throw new Error('No created object');
+check(object.url.endsWith('/client-chosen.ics'), 'Stored object name lost');
+check(object.etag === created.headers.get('etag'), 'PUT and GET ETags differ');
+const fresh = (await client.fetchCalendars()).find((c) => c.url === calendar.url);
+if (!fresh) throw new Error('Calendar disappeared');
+let collection = { ...fresh, objects: [object], objectMultiGet: calendarMultiGet };
+const updated = await client.updateCalendarObject({ calendarObject: { ...object, data: body('Edited by tsdav') } });
+check(updated.status === 204, `update returned ${updated.status}`);
+const delta = await client.smartCollectionSyncDetailed({ collection, method: 'webdav' });
+check(delta.objects.updated.length === 1, 'Expected one incremental update');
+check(String(delta.objects.updated[0]?.data).includes('Edited by tsdav'), 'Updated payload missing');
+const synced = await client.smartCollectionSync({ collection, method: 'webdav' });
+check(synced.objects?.length === 1, 'smartCollectionSync lost the object');
+const [current] = await client.fetchCalendarObjects({ calendar });
+if (!current) throw new Error('Updated object missing');
+collection = { ...collection, syncToken: String(delta.syncToken), objects: [current] };
+const deleted = await client.deleteCalendarObject({ calendarObject: current });
+check(deleted.status === 204, `delete returned ${deleted.status}`);
+const removal = await client.smartCollectionSyncDetailed({ collection, method: 'webdav' });
+check(removal.objects.deleted.length === 1, 'Expected one incremental deletion');
+check(removal.objects.deleted[0]?.url.endsWith('/client-chosen.ics') ?? false, 'Tombstone lost stored name');
+console.log('OK tsdav create/update/delete and smartCollectionSync');

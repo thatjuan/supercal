@@ -1,30 +1,28 @@
 /**
- * The read-only CalDAV server (architecture §9), mounted at the root by the `dav` role. One feed
- * login is one account; each enabled publication is a calendar collection:
- *
- *   /.well-known/caldav                        301 → /dav/
- *   /, /dav/                                   PROPFIND answers current-user-principal
- *   /dav/<username>/                           principal
- *   /dav/<username>/cal/                       calendar home
- *   /dav/<username>/cal/<pubSlug>/             collection
- *   /dav/<username>/cal/<pubSlug>/<href>.ics   object
- *
- * The login lookup runs as `supercal_control`; the rest of a request runs in one `withTenant`
- * transaction. Listings never render: ETags and hrefs come from `pubIndex`.
+ * CalDAV for published feeds and hosted calendars. Credentials resolve through the control role;
+ * each request then uses one tenant transaction. Shared handlers read CollectionView; only device
+ * logins can enter the hosted write path. Listings fetch metadata without rendering payloads.
  */
-import { hrefFor, objectEtag } from '@supercal/core';
-import { changesSince, resourcesByUids, resourcesIn, tombstoneFloor, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
+import { assertIanaZone, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
+import { Temporal } from '@js-temporal/polyfill';
+import { calendarAccount, sourceCalendar, sourceObject, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
 import { Hono, type Context } from 'hono';
 import { getConnInfo } from 'hono/bun';
+import { and, eq } from 'drizzle-orm';
+import { audit, ProblemError } from '../api/kit/index.ts';
+import { membership, type Principal } from '../auth/principal.ts';
+import { createFeedService } from '../feeds/service.ts';
+import { createCalendar, deleteCalendar, getOrCreateHostedAccount } from '../hosted/calendars.ts';
+import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import type { Bus } from '../bus.ts';
 import { createFeedAuth } from './auth.ts';
 import { collectionProps, homeProps, objectProps, principalProps, propResponse, rootProps, statusResponse, wanted, type Account } from './props.ts';
-import { loadAccount, loginByUsername, pubIndex, render, renderUids, type FeedAccount, type Pub } from './store.ts';
+import { loadAccount, loadUserAccount, loginByUsername, publicationCollection, type CollectionView } from './store.ts';
 import { NS, child, children, esc, is, parseXml, xmlWriter, type XmlEl } from './xml.ts';
 
 export type DavDeps = {
   secrets: SecretBox;
-  /** Delivers `feed-credentials-rotated`, which drops cached logins of the feed. */
+  /** Invalidates cached feed and device credentials across replicas. */
   bus: Pick<Bus, 'on'>;
   /** `SUPERCAL_PUBLIC_URL`; its host goes into sync tokens. Without it, the request's Host is used. */
   publicUrl?: string | undefined;
@@ -41,12 +39,13 @@ type Node =
   | { kind: 'root'; path: string }
   | { kind: 'principal'; path: string }
   | { kind: 'home'; path: string }
-  | { kind: 'collection'; path: string; pub: Pub }
-  | { kind: 'object'; path: string; pub: Pub; name: string };
+  | { kind: 'missing-collection'; path: string; segment: string }
+  | { kind: 'collection'; path: string; view: CollectionView }
+  | { kind: 'object'; path: string; view: CollectionView; name: string };
 
-type Request = { tx: TenantTx; account: FeedAccount; dav: Account; node: Node; collectionPath: (pub: Pub) => string; token: (pub: Pub, seq: bigint) => string };
+type Request = { tx: TenantTx; principal: Principal | null; collections: CollectionView[]; dav: Account; node: Node; collectionPath: (view: CollectionView) => string };
 
-const davError = (status: 400 | 403, condition: string) =>
+const davError = (status: 400 | 403 | 507, condition: string) =>
   new Response(`<?xml version="1.0" encoding="utf-8"?>\n<d:error xmlns:d="DAV:" xmlns:cal="${NS.CALDAV}"><${condition}/></d:error>`, {
     status,
     headers: XML_HEADERS,
@@ -55,7 +54,7 @@ const davError = (status: 400 | 403, condition: string) =>
 const notFound = () => new Response('not found', { status: 404 });
 
 /** The node a request path names, `forbidden` for another login's tree, or null. */
-function resolve(account: FeedAccount, path: string): Node | 'forbidden' | null {
+function resolve(usernameOfLogin: string, collections: CollectionView[], path: string): Node | 'forbidden' | null {
   let segments: string[];
   try {
     segments = path.split('/').filter(Boolean).map(decodeURIComponent);
@@ -66,16 +65,18 @@ function resolve(account: FeedAccount, path: string): Node | 'forbidden' | null 
   if (dav === undefined) return { kind: 'root', path: '/' };
   if (dav !== 'dav' || rest.length) return null;
   if (username === undefined) return { kind: 'root', path: '/dav/' };
-  if (username !== account.feed.caldavUsername) return 'forbidden';
+  if (username !== usernameOfLogin) return 'forbidden';
   const principal = `/dav/${username}/`;
   if (cal === undefined) return { kind: 'principal', path: principal };
   if (cal !== 'cal') return null;
   if (slug === undefined) return { kind: 'home', path: `${principal}cal/` };
-  const pub = account.publications.find((p) => p.slug === slug);
-  if (!pub) return null;
-  const collection = `${principal}cal/${slug}/`;
-  if (name === undefined) return { kind: 'collection', path: collection, pub };
-  return name.endsWith('.ics') ? { kind: 'object', path: collection + name, pub, name } : null;
+  if (!slug || slug.includes('/') || slug === '.' || slug === '..') return null;
+  const view = collections.find((p) => p.segment === slug);
+  const collection = `${principal}cal/${encodeURIComponent(slug)}/`;
+  if (!view) return name === undefined ? { kind: 'missing-collection', path: collection, segment: slug } : null;
+  if (name === undefined) return { kind: 'collection', path: collection, view };
+  return { kind: 'object', path: collection + encodeURIComponent(name), view, name };
+
 }
 
 /** `[from, to)` of the VEVENT comp-filter's time-range; `null` when the query filters on another component. */
@@ -94,16 +95,74 @@ function queryRange(report: XmlEl): { from: Date; to: Date } | undefined | null 
   return { from: instant(range.attrs['start'], '0001-01-01T00:00:00Z'), to: instant(range.attrs['end'], '9999-12-31T00:00:00Z') };
 }
 
-const TOKEN = /^https?:\/\/[^/]+\/ns\/sync\/([^/]+)\/(\d+)\/(\d+)$/;
+
+
+/** Protocol conditions for every service rejection, checked exhaustively when the service grows. */
+const WRITE_ERRORS = {
+  'invalid-calendar-data': { status: 403, condition: 'cal:valid-calendar-data' },
+  'unsupported-component': { status: 403, condition: 'cal:supported-calendar-component' },
+  'invalid-object': { status: 403, condition: 'cal:valid-calendar-object-resource' },
+  'too-large': { status: 403, condition: 'cal:max-resource-size' },
+  'uid-conflict': { status: 403, condition: 'cal:no-uid-conflict' },
+  quota: { status: 507, condition: 'd:quota-not-exceeded' },
+  'precondition-failed': { status: 412, condition: null },
+  'not-found': { status: 404, condition: null },
+} as const satisfies Record<HostedWriteCode, { status: number; condition: string | null }>;
+
+/** Calendar metadata uses VTIMEZONE, generated once per zone and year without loading events. */
+const timezoneCache = new Map<string, string>();
+function calendarTimezone(zone: string): string {
+  const year = new Date().getUTCFullYear();
+  const key = `${zone}/${year}`;
+  const cached = timezoneCache.get(key);
+  if (cached) return cached;
+  const component = (c: JCalComponent): string => [`BEGIN:${c[0].toUpperCase()}`, ...c[1].map(propertyLine), ...c[2].map(component), `END:${c[0].toUpperCase()}`].join('\r\n');
+  const tz = vtimezoneFor(zone, { from: Temporal.Instant.from(`${year - 1}-01-01T00:00:00Z`), to: Temporal.Instant.from(`${year + 3}-01-01T00:00:00Z`) });
+  const text = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Supercal//EN\r\n${component(tz)}\r\nEND:VCALENDAR\r\n`;
+  timezoneCache.set(key, text);
+  return text;
+}
+
+type Metadata = { name?: string; color?: string | null; sortOrder?: number; description?: string | null; timezone?: string };
+/** Validate the entire property instruction before any changes; PROPPATCH sets are atomic. */
+function metadataProperties(body: XmlEl | undefined, creating: boolean) {
+  const entries = (body?.children ?? []).flatMap((operation) => {
+    const props = child(operation, NS.DAV, 'prop');
+    return (props?.children ?? []).map((prop) => ({ prop, remove: is(operation, NS.DAV, 'remove'), set: is(operation, NS.DAV, 'set') }));
+  });
+  const values: Metadata = {};
+  const failed = new Set<XmlEl>();
+  for (const { prop, remove, set } of entries) {
+    const { ns, name, text } = prop;
+    if (!set && !remove) { failed.add(prop); continue; }
+    if (ns === NS.DAV && name === 'displayname' && !remove && text.length > 0 && text.length <= 100) values.name = text;
+    else if (ns === NS.APPLE && name === 'calendar-color' && (remove || /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(text))) values.color = remove ? null : text.slice(0, 7).toLowerCase();
+    else if (ns === NS.APPLE && name === 'calendar-order' && (remove || /^-?\d+$/.test(text)) && Number.isSafeInteger(Number(text)) && Number(text) >= -2147483648 && Number(text) <= 2147483647) values.sortOrder = remove ? 0 : Number(text);
+    else if (ns === NS.CALDAV && name === 'calendar-description' && text.length <= 10000) values.description = remove ? null : text;
+    else if (ns === NS.CALDAV && name === 'calendar-timezone' && !remove) {
+      const zone = /^TZID(?:;[^:]*)?:(.+)$/im.exec(text.replace(/\r?\n[ \t]/g, ''))?.[1]?.trim();
+      try {
+        if (!zone || !/^BEGIN:VTIMEZONE$/im.test(text)) throw new Error('Expected VTIMEZONE');
+        assertIanaZone(zone);
+        values.timezone = zone;
+      } catch { failed.add(prop); }
+    } else if (creating && ns === NS.CALDAV && name === 'supported-calendar-component-set' && !remove && prop.children.length === 1 && prop.children[0]?.attrs.name === 'VEVENT') {
+      // A client may explicitly request the only component this server supports.
+    } else failed.add(prop);
+  }
+  return { entries, values, failed };
+}
 
 /** Builds the CalDAV routes. */
 export function createDav({ secrets, bus, publicUrl }: DavDeps) {
   const feedAuth = createFeedAuth(loginByUsername);
-  bus.on('feed-credentials-rotated', ({ feedId }) => feedAuth.forgetFeed(feedId));
+  bus.on('feed-credentials-rotated', ({ feedId }) => feedAuth.forget(feedId));
+  bus.on('dav-login-revoked', ({ loginId }) => feedAuth.forget(loginId));
+  const feeds = createFeedService(secrets);
   const tokenHost = publicUrl ? new URL(publicUrl).host : undefined;
 
   /** Authenticates, opens the tenant transaction, resolves the path and runs `handle`. */
-  async function inFeed(c: Context, handle: (r: Request) => Promise<Response>): Promise<Response> {
+  async function inLogin(c: Context, handle: (r: Request) => Promise<Response>): Promise<Response> {
     let ip = 'unknown';
     try {
       ip = getConnInfo(c).remote.address ?? ip;
@@ -116,26 +175,54 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
       return result.status === 429 ? c.body('too many failed logins', 429, { 'Retry-After': String(result.retryAfter ?? 300) }) : unauthorized();
     const { login } = result;
     const host = tokenHost ?? c.req.header('Host') ?? 'localhost';
+    // Buffer a device's write body now (Hono caches it), so a slow upload holds no connection or calendar lock.
+    if (login.kind === 'user' && WRITE_METHODS.includes(c.req.method)) await c.req.text();
 
     return withTenant(login.tenantId, async (tx) => {
-      const account = await loadAccount(tx, secrets, login.feedId);
-      if (!account || account.feed.caldavPasswordHash !== login.passwordHash) {
-        feedAuth.forgetFeed(login.feedId);
-        return unauthorized();
+      let principal: Principal | null = null;
+      let collections: CollectionView[];
+      let username: string;
+      let displayName: string;
+      let email: string | null;
+      if (login.kind === 'feed') {
+        const account = await loadAccount(tx, secrets, login.id);
+        if (!account || account.feed.caldavPasswordHash !== login.passwordHash) {
+          feedAuth.forget(login.id);
+          return unauthorized();
+        }
+        collections = account.publications.map((pub) => publicationCollection(pub, host));
+        username = account.feed.caldavUsername;
+        displayName = account.feed.name;
+        email = account.ownerEmail;
+      } else {
+        const current = await membership(login.userId, login.tenantId);
+        const account = current && await loadUserAccount(tx, login.id, host);
+        if (!account || account.login.passwordHash !== login.passwordHash || account.login.userId !== login.userId) {
+          feedAuth.forget(login.id);
+          return unauthorized();
+        }
+        principal = { kind: 'user', via: 'davLogin', userId: login.userId, tenantId: login.tenantId, ...current };
+        collections = account.collections;
+        username = account.login.username;
+        displayName = account.login.name;
+        email = account.ownerEmail;
       }
-      const node = resolve(account, c.req.path);
+      if ((!principal && WRITE_METHODS.includes(c.req.method)) || ['MOVE', 'COPY', 'LOCK', 'UNLOCK', 'MKCOL', 'POST'].includes(c.req.method)) return davError(403, 'd:need-privileges');
+      const node = resolve(username, collections, c.req.path);
       if (node === 'forbidden') return davError(403, 'd:need-privileges');
       if (!node) return notFound();
-      const principal = `/dav/${account.feed.caldavUsername}/`;
-      const dav: Account = { principal, home: `${principal}cal/`, displayName: account.feed.name, email: account.ownerEmail };
-      return handle({
-        tx,
-        account,
-        dav,
-        node,
-        collectionPath: (pub) => `${dav.home}${pub.slug}/`,
-        token: (pub, seq) => `https://${host}/ns/sync/${pub.id}/${pub.epoch}/${seq}`,
-      });
+      const path = `/dav/${username}/`;
+      const dav: Account = { principal: path, home: `${path}cal/`, displayName, email, writable: principal !== null };
+      return handle({ tx, principal, collections, dav, node, collectionPath: (view) => `${dav.home}${encodeURIComponent(view.segment)}/` });
+    }).catch((error: unknown) => {
+      if (error instanceof HostedWriteError) {
+        const mapped = WRITE_ERRORS[error.code];
+        if (!mapped.condition) return new Response(null, { status: mapped.status });
+        const conflict = error.code === 'uid-conflict' && error.conflictObjectName ? `<d:href>${esc(c.req.path.slice(0, c.req.path.lastIndexOf('/') + 1) + encodeURIComponent(error.conflictObjectName))}</d:href>` : '';
+        return new Response(xmlWriter().document('d:error', `<${mapped.condition}>${conflict}</${mapped.condition}>`), { status: mapped.status, headers: XML_HEADERS });
+      }
+      if (error instanceof ProblemError && error.slug === 'calendar-quota') return davError(507, 'd:quota-not-exceeded');
+      throw error;
     });
   }
 
@@ -150,27 +237,30 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     const want = wanted(body);
     const w = xmlWriter();
     const { tx, node, dav } = r;
-    const collection = (pub: Pub, seq: bigint) =>
-      propResponse(w, r.collectionPath(pub), collectionProps(dav, { name: pub.name, color: pub.color, sortOrder: pub.sortOrder, token: r.token(pub, seq) }), want);
+    const collection = (view: CollectionView, seq: bigint) => {
+      const timezone = view.calendar && view.display.timezone ? calendarTimezone(view.display.timezone) : undefined;
+      return propResponse(w, r.collectionPath(view), collectionProps(dav, { ...view.display, timezone: timezone ?? null, token: view.token(seq), ...(view.calendar && { maxResourceSize: MAX_OBJECT_BYTES }) }, view.privileges), want);
+    };
 
     switch (node.kind) {
+      case 'missing-collection': return notFound();
       case 'root':
         return multistatus(w, propResponse(w, node.path, rootProps(dav), want));
       case 'principal':
         return multistatus(w, propResponse(w, node.path, principalProps(dav), want));
       case 'home': {
         const parts = [propResponse(w, node.path, homeProps(dav), want)];
-        if (depth === '1') for (const pub of r.account.publications) parts.push(collection(pub, (await pubIndex(tx, pub)).maxSeq));
+        if (depth === '1') for (const view of r.collections) parts.push(collection(view, (await view.index(tx)).maxSeq));
         return multistatus(w, parts.join(''));
       }
       case 'collection': {
-        const index = await pubIndex(tx, node.pub);
-        const parts = [collection(node.pub, index.maxSeq)];
+        const index = await node.view.index(tx);
+        const parts = [collection(node.view, index.maxSeq)];
         if (depth === '1') for (const e of index.byHref.values()) parts.push(propResponse(w, node.path + e.href, objectProps(e.etag), want));
         return multistatus(w, parts.join(''));
       }
       case 'object': {
-        const entry = (await pubIndex(tx, node.pub)).byHref.get(node.name);
+        const entry = (await node.view.index(tx)).byHref.get(node.name);
         return entry ? multistatus(w, propResponse(w, node.path, objectProps(entry.etag), want)) : notFound();
       }
     }
@@ -181,11 +271,11 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     if (node.kind !== 'collection') return davError(403, 'd:supported-report');
     const body = parseXml(await c.req.text());
     if (!body) return c.body('expected an XML report body', 400);
-    const { pub, path } = node;
+    const { view, path } = node;
     const want = wanted(body);
     const w = xmlWriter();
     // Rendered objects carry the index's ETag, so a listing and a report agree.
-    const index = is(body, NS.DAV, 'sync-collection') ? undefined : await pubIndex(tx, pub);
+    const index = is(body, NS.DAV, 'sync-collection') ? undefined : await view.index(tx);
     const object = (uid: string, ics: string) => {
       const entry = index?.byUid.get(uid);
       return entry ? propResponse(w, path + entry.href, objectProps(entry.etag, ics), want) : '';
@@ -194,21 +284,18 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     if (is(body, NS.CALDAV, 'calendar-query')) {
       const range = queryRange(body);
       if (range === null) return multistatus(w, '');
-      const rendered = await render(pub, await resourcesIn(tx, pub.sourceIds, range));
+      const rendered = await view.query(tx, range);
       return multistatus(w, [...rendered].map(([uid, o]) => object(uid, o.ics)).join(''));
     }
 
     if (is(body, NS.CALDAV, 'calendar-multiget')) {
       const requested = children(body, NS.DAV, 'href').map((h) => {
         const pathname = URL.parse(h.text, 'http://x')?.pathname ?? '';
-        let decoded = pathname;
-        try {
-          decoded = decodeURIComponent(pathname);
-        } catch {}
-        const name = decoded.startsWith(path) ? decoded.slice(path.length) : '';
+        let name = '';
+        try { name = pathname.startsWith(path) ? decodeURIComponent(pathname.slice(path.length)) : ''; } catch {}
         return { href: h.text, entry: index?.byHref.get(name) };
       });
-      const rendered = await renderUids(tx, pub, requested.flatMap((q) => (q.entry ? [q.entry.uid] : [])));
+      const rendered = await view.objects(tx, requested.flatMap((q) => (q.entry ? [q.entry.uid] : [])));
       return multistatus(
         w,
         requested
@@ -224,38 +311,26 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
       const tokenText = child(body, NS.DAV, 'sync-token')?.text.trim() ?? '';
       let since = 0n;
       if (tokenText) {
-        const m = TOKEN.exec(tokenText);
-        if (!m || m[1] !== pub.id || Number(m[2]) !== pub.epoch || BigInt(m[3] ?? 0) < (await tombstoneFloor(tx))) return davError(403, 'd:valid-sync-token');
-        since = BigInt(m[3] ?? 0);
+        const parsed = await view.parseToken(tx, tokenText);
+        if (parsed === null) return davError(403, 'd:valid-sync-token');
+        since = parsed;
       }
       const nresults = Number(child(child(body, NS.DAV, 'limit'), NS.DAV, 'nresults')?.text);
       const limit = Number.isInteger(nresults) && nresults > 0 ? nresults : SYNC_PAGE_MAX;
-      const page = await changesSince(tx, pub.sourceIds, since, limit);
-
-      // Per UID: alive if any changed copy is alive, or (virtual) another source still holds it.
-      const changed = new Map<string, { alive: boolean; seq: bigint }>();
-      for (const row of page.rows) {
-        const seen = changed.get(row.uid);
-        changed.set(row.uid, { alive: (seen?.alive ?? false) || !row.deleted, seq: seen && seen.seq > row.seq ? seen.seq : row.seq });
-      }
-      const tombstoned = [...changed].filter(([, v]) => !v.alive).map(([uid]) => uid);
-      const stillHeld = new Set(tombstoned.length ? (await resourcesByUids(tx, pub.sourceIds, tombstoned)).map((row) => row.uid) : []);
-      const present = new Set([...changed.keys()].filter((uid) => changed.get(uid)?.alive || stillHeld.has(uid)));
+      const page = await view.changes(tx, since, limit);
       const wantsData = want !== 'all' && want.some((p) => p.ns === NS.CALDAV && p.name === 'calendar-data');
-      const rendered = wantsData ? await renderUids(tx, pub, [...present]) : undefined;
-
+      const rendered = wantsData ? await view.objects(tx, page.rows.filter((row) => row.alive).map((row) => row.uid)) : undefined;
       const parts: string[] = [];
-      for (const [uid, { seq }] of changed) {
-        const href = path + (await hrefFor(pub.spec, uid));
-        if (present.has(uid)) {
-          // A UID the projection hides has no body; answer it as gone when its data was asked for.
-          const ics = rendered?.get(uid)?.ics;
+      for (const row of page.rows) {
+        const href = path + row.href;
+        if (row.alive) {
+          const ics = rendered?.get(row.uid)?.ics;
           if (rendered && ics === undefined) parts.push(statusResponse(href, '404 Not Found'));
-          else parts.push(propResponse(w, href, objectProps(await objectEtag(pub.spec, pub.epoch, uid, seq), ics), want));
+          else parts.push(propResponse(w, href, objectProps(row.etag, ics), want));
         } else if (since > 0n) parts.push(statusResponse(href, '404 Not Found'));
       }
       if (page.hasMore) parts.push(statusResponse(path, '507 Insufficient Storage'));
-      return multistatus(w, `${parts.join('')}<d:sync-token>${esc(r.token(pub, page.maxSeq))}</d:sync-token>`);
+      return multistatus(w, `${parts.join('')}<d:sync-token>${esc(view.token(page.maxSeq))}</d:sync-token>`);
     }
 
     return davError(403, 'd:supported-report');
@@ -264,23 +339,98 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
   async function get(c: Context, r: Request): Promise<Response> {
     const { tx, node } = r;
     if (node.kind !== 'object') return notFound();
-    const entry = (await pubIndex(tx, node.pub)).byHref.get(node.name);
+    const entry = (await node.view.index(tx)).byHref.get(node.name);
     if (!entry) return notFound();
     if (c.req.header('If-None-Match') === entry.etag) return c.body(null, 304, { ETag: entry.etag });
-    const object = (await renderUids(tx, node.pub, [entry.uid])).get(entry.uid);
+    const object = (await node.view.objects(tx, [entry.uid])).get(entry.uid);
     if (!object) return notFound();
     const headers = { 'Content-Type': 'text/calendar; charset=utf-8', ETag: entry.etag };
     return c.req.method === 'HEAD' ? c.body(null, 200, headers) : c.body(object.ics, 200, headers);
   }
 
+  async function write(c: Context, r: Request): Promise<Response> {
+    const { node, tx, principal } = r;
+    if (!principal) return davError(403, 'd:need-privileges');
+    if (c.req.method === 'MKCALENDAR') {
+      if (node.kind === 'collection') return davError(403, 'd:resource-must-be-null');
+      if (node.kind !== 'missing-collection' || !c.req.path.endsWith('/')) return davError(403, 'd:need-privileges');
+      if (node.segment.startsWith('cal_')) return davError(403, 'd:need-privileges');
+      const raw = await c.req.text();
+      const body = raw.trim() ? parseXml(raw) : undefined;
+      if (raw.trim() && !is(body, NS.CALDAV, 'mkcalendar')) return c.body('expected a CalDAV:mkcalendar body', 400);
+      const parsed = metadataProperties(body, true);
+      if (parsed.failed.size) return davError(403, 'd:cannot-modify-protected-property');
+      const account = await getOrCreateHostedAccount(tx, principal.userId);
+      const [existing] = await tx.select({ id: sourceCalendar.id }).from(sourceCalendar)
+        .where(and(eq(sourceCalendar.accountId, account.id), eq(sourceCalendar.providerCalendarId, node.segment)));
+      if (existing) return davError(403, 'd:resource-must-be-null');
+      const { name = node.segment, color, description, timezone, sortOrder } = parsed.values;
+      const calendar = await createCalendar(tx, feeds, principal.userId, { name, ...(color && { color }), ...(description != null && { description }), ...(timezone && { timezone }) });
+      await tx.update(sourceCalendar).set({ providerCalendarId: node.segment, ...(sortOrder !== undefined && { sortOrder }) }).where(eq(sourceCalendar.id, calendar.id));
+      await audit(tx, principal, 'calendar.create', { type: 'calendar', id: calendar.id });
+      return c.body(null, 201);
+    }
+    if (node.kind !== 'object' && node.kind !== 'collection') return davError(403, 'd:need-privileges');
+    const calendar = node.view.calendar;
+    if (!calendar || node.view.privileges === 'read') return davError(403, 'd:need-privileges');
+    // Recheck after acquiring the same lock used by REST, including soft-deletion races.
+    await lockHostedCalendar(tx, calendar.id);
+    const [active] = await tx.select({ id: sourceCalendar.id }).from(sourceCalendar)
+      .innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId))
+      .where(and(eq(sourceCalendar.id, calendar.id), eq(sourceCalendar.state, 'active'), eq(calendarAccount.ownerUserId, principal.userId)));
+    if (!active) return notFound();
+    const ifMatch = c.req.header('If-Match');
+    if (node.kind === 'object') {
+      if (!node.name.endsWith('.ics') || node.name.includes('/') || Buffer.byteLength(node.name) > 255) return davError(403, 'd:need-privileges');
+      if (c.req.method === 'PUT') {
+        if (c.req.header('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'text/calendar') return davError(403, 'cal:supported-calendar-data');
+        const result = await writeObject(tx, calendar, { objectName: node.name, payload: await c.req.text(), ...(ifMatch !== undefined && { ifMatch }), ...(c.req.header('If-None-Match') === '*' && { ifNoneMatch: '*' }) });
+        await audit(tx, principal, result.created ? 'event.create' : 'event.update', { type: 'calendar', id: calendar.id }, { uid: result.uid });
+        return c.body(null, result.created ? 201 : 204, { ETag: result.etag });
+      }
+      if (c.req.method === 'DELETE') {
+        const [object] = await tx.select({ uid: sourceObject.groupUid }).from(sourceObject)
+          .where(and(eq(sourceObject.sourceCalendarId, calendar.id), eq(sourceObject.providerObjectId, node.name)));
+        if (object) await audit(tx, principal, 'event.delete', { type: 'calendar', id: calendar.id }, { uid: object.uid });
+        await deleteObject(tx, calendar, { objectName: node.name, ...(ifMatch !== undefined && { ifMatch }) });
+        return c.body(null, 204);
+      }
+    } else if (node.view.privileges === 'manage') {
+      if (c.req.method === 'DELETE') {
+        await deleteCalendar(tx, feeds, calendar.id);
+        await audit(tx, principal, 'calendar.delete', { type: 'calendar', id: calendar.id });
+        return c.body(null, 204);
+      }
+      if (c.req.method === 'PROPPATCH') {
+        const body = parseXml(await c.req.text());
+        if (!is(body, NS.DAV, 'propertyupdate')) return c.body('expected a DAV:propertyupdate body', 400);
+        const { entries, values, failed } = metadataProperties(body, false);
+        if (!entries.length) return c.body('expected properties', 400);
+        if (!failed.size) {
+          await tx.update(sourceCalendar).set({ ...values, updatedAt: new Date() }).where(eq(sourceCalendar.id, calendar.id));
+          await audit(tx, principal, 'calendar.update', { type: 'calendar', id: calendar.id });
+        }
+        const w = xmlWriter();
+        const stats = entries.map(({ prop }) => {
+          const q = w.qname(prop.ns, prop.name);
+          const status = failed.has(prop) ? '403 Forbidden' : failed.size ? '424 Failed Dependency' : '200 OK';
+          return `<d:propstat><d:prop><${q}/></d:prop><d:status>HTTP/1.1 ${status}</d:status></d:propstat>`;
+        }).join('');
+        return multistatus(w, `<d:response><d:href>${esc(node.path)}</d:href>${stats}</d:response>`);
+      }
+    }
+    return davError(403, 'd:need-privileges');
+  }
+
   const app = new Hono();
   app.all('/.well-known/caldav', (c) => c.redirect('/dav/', 301));
-  app.options('/dav/*', (c) => c.body(null, 200, { DAV: DAV_HEADER, Allow: READ_METHODS.join(', ') }));
-  app.options('/dav', (c) => c.body(null, 200, { DAV: DAV_HEADER, Allow: READ_METHODS.join(', ') }));
-  app.on('PROPFIND', ['/', '/dav', '/dav/*'], (c) => inFeed(c, (r) => propfind(c, r)));
-  app.on('REPORT', '/dav/*', (c) => inFeed(c, (r) => report(c, r)));
-  app.on(['GET', 'HEAD'], '/dav/*', (c) => inFeed(c, (r) => get(c, r)));
-  // Read-only: clients treat 403 need-privileges as "no permission" and stop retrying.
-  app.on(WRITE_METHODS, ['/dav', '/dav/*'], () => davError(403, 'd:need-privileges'));
+  app.on('OPTIONS', ['/dav', '/dav/*'], (c) => {
+    if (!c.req.header('Authorization')) return c.body(null, 200, { DAV: DAV_HEADER, Allow: READ_METHODS.join(', ') });
+    return inLogin(c, async (r) => c.body(null, 200, { DAV: DAV_HEADER, Allow: [...READ_METHODS, ...(r.principal ? ['PUT', 'DELETE', 'MKCALENDAR', 'PROPPATCH'] : [])].join(', ') }));
+  });
+  app.on('PROPFIND', ['/', '/dav', '/dav/*'], (c) => inLogin(c, (r) => propfind(c, r)));
+  app.on('REPORT', '/dav/*', (c) => inLogin(c, (r) => report(c, r)));
+  app.on(['GET', 'HEAD'], '/dav/*', (c) => inLogin(c, (r) => get(c, r)));
+  app.on(WRITE_METHODS, ['/dav', '/dav/*'], (c) => inLogin(c, (r) => write(c, r)));
   return app;
 }

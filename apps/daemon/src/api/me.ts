@@ -3,7 +3,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { member, organization, user, withControl } from '@supercal/db';
 import { asc, eq } from 'drizzle-orm';
 import { isTenantRole, TENANT_ROLES } from '../auth/principal.ts';
-import { createApiApp, problemResponses } from './kit/index.ts';
+import { createApiApp, Unauthorized, problemResponses } from './kit/index.ts';
 import { Tenant } from './tenants.ts';
 
 const Membership = Tenant.extend({ role: z.enum(TENANT_ROLES) }).openapi('Membership');
@@ -32,6 +32,7 @@ const getMe = createRoute({
 
 export const meRoutes = createApiApp().openapi(getMe, async (c) => {
   const principal = c.var.principal;
+  if (principal.via === 'davLogin') throw new Unauthorized('DAV logins only grant CalDAV access');
   const { profile, memberships } = await withControl(async (tx) => ({
     profile: (await tx.select({ id: user.id, name: user.name, email: user.email }).from(user).where(eq(user.id, principal.userId)))[0],
     memberships: await tx

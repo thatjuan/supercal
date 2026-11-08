@@ -18,17 +18,22 @@ const props = (entries: [Ns, string, string | null | undefined][]): Props =>
 
 const href = (path: string) => `<d:href>${esc(path)}</d:href>`;
 
-/** Only read: this is what makes clients show the calendars read-only. */
+/** Baseline privileges for feeds and read-only collections. */
 const READ_ONLY = '<d:privilege><d:read/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege>';
 const REPORTS = ['cal:calendar-query', 'cal:calendar-multiget', 'd:sync-collection']
   .map((r) => `<d:supported-report><d:report><${r}/></d:report></d:supported-report>`)
   .join('');
 
-export type Account = { principal: string; home: string; displayName: string; email: string | null };
+export type Privilege = 'read' | 'home' | 'write' | 'manage';
+export type Account = { principal: string; home: string; displayName: string; email: string | null; writable?: boolean };
 
-const common = (a: Account): [Ns, string, string][] => [
+const privileges = (p: Privilege) => READ_ONLY + (p === 'read' ? '' : '<d:privilege><d:bind/></d:privilege><d:privilege><d:unbind/></d:privilege>')
+  + (p === 'write' || p === 'manage' ? '<d:privilege><d:write-content/></d:privilege>' : '')
+  + (p === 'manage' ? '<d:privilege><d:write/></d:privilege><d:privilege><d:write-properties/></d:privilege>' : '');
+
+const common = (a: Account, privilege: Privilege = 'read'): [Ns, string, string][] => [
   [NS.DAV, 'current-user-principal', href(a.principal)],
-  [NS.DAV, 'current-user-privilege-set', READ_ONLY],
+  [NS.DAV, 'current-user-privilege-set', privileges(privilege)],
 ];
 
 /** `/` and `/dav/`: enough for discovery to find the principal. */
@@ -45,14 +50,14 @@ export const principalProps = (a: Account) =>
   ]);
 
 export const homeProps = (a: Account) =>
-  props([...common(a), [NS.DAV, 'resourcetype', '<d:collection/>'], [NS.DAV, 'displayname', esc(a.displayName)]]);
+  props([...common(a, a.writable ? 'home' : 'read'), [NS.DAV, 'resourcetype', '<d:collection/>'], [NS.DAV, 'displayname', esc(a.displayName)]]);
 
-export type Collection = { name: string; color: string | null; sortOrder: number; token: string };
+export type Collection = { name: string; color: string | null; sortOrder: number; token: string; description?: string | null; timezone?: string | null; maxResourceSize?: number };
 
-/** A publication's collection. `color` is `#rrggbb`; Apple wants `#RRGGBBAA`. */
-export const collectionProps = (a: Account, c: Collection) =>
+/** A calendar collection. `color` is `#rrggbb`; Apple wants `#RRGGBBAA`. */
+export const collectionProps = (a: Account, c: Collection, privilege: Privilege = 'read') =>
   props([
-    ...common(a),
+    ...common(a, privilege),
     [NS.DAV, 'resourcetype', '<d:collection/><cal:calendar/>'],
     [NS.DAV, 'displayname', esc(c.name)],
     [NS.APPLE, 'calendar-color', c.color && `${c.color.toUpperCase()}FF`],
@@ -61,6 +66,9 @@ export const collectionProps = (a: Account, c: Collection) =>
     [NS.DAV, 'sync-token', esc(c.token)],
     [NS.CALDAV, 'supported-calendar-component-set', '<cal:comp name="VEVENT"/>'],
     [NS.DAV, 'supported-report-set', REPORTS],
+    [NS.CALDAV, 'calendar-description', c.description == null ? null : esc(c.description)],
+    [NS.CALDAV, 'calendar-timezone', c.timezone == null ? null : esc(c.timezone)],
+    [NS.CALDAV, 'max-resource-size', c.maxResourceSize === undefined ? null : String(c.maxResourceSize)],
   ]);
 
 /** An object; `ics` only when the caller rendered it (reports), never in listings. */

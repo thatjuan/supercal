@@ -71,6 +71,13 @@
       "when": 1794161497688,
       "tag": "0009_hosted_calendars",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794162203005,
+      "tag": "0010_dav_logins",
+      "breakpoints": true
     }
   ]
 }

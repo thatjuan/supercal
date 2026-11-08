@@ -22,6 +22,7 @@ import { accountRoutes } from './accounts.ts';
 import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
 import { calendarRoutes } from './calendars.ts';
+import { davLoginRoutes } from './dav-logins.ts';
 import { feedRoutes } from './feeds.ts';
 import { instanceRoutes, type Signup } from './instance.ts';
 import { createApiApp } from './kit/index.ts';
@@ -117,6 +118,7 @@ export function createApi(
     .route('/', calendarRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)
+    .route('/', davLoginRoutes)
     .route('/', publicationRoutes)
     .route('/', subscribeRoutes)
     .route('/', sinkRoutes)
