@@ -13,11 +13,13 @@ export type WorkerOptions = {
   /** `SUPERCAL_SYNC_CONCURRENCY`. */
   concurrency: number;
   adapters?: AdapterRegistry;
+  /** See `SyncDeps.pushBaseUrl`. */
+  pushBaseUrl?: string | null;
 };
 
 /** Runs the worker role until `signal` aborts: registers the maintenance jobs, then runs the sync scheduler. */
-export async function startWorker(signal: AbortSignal, log: Logger, { secrets, bus, fetch, concurrency, adapters }: WorkerOptions): Promise<void> {
+export async function startWorker(signal: AbortSignal, log: Logger, { secrets, bus, fetch, concurrency, adapters, pushBaseUrl }: WorkerOptions): Promise<void> {
   await registerMaintenance();
-  const deps = createSyncDeps({ secrets, fetch, log, ...(adapters && { adapters }) });
+  const deps = createSyncDeps({ secrets, fetch, log, pushBaseUrl, ...(adapters && { adapters }) });
   await startScheduler({ handlers: syncHandlers(deps), log, signal, bus, concurrency });
 }

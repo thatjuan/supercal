@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./test/fake": "./test/fake.ts",
-    "./test/dav-fixture": "./test/dav-fixture.ts"
+    "./test/dav-fixture": "./test/dav-fixture.ts",
+    "./test/google-mock": "./test/google-mock.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."

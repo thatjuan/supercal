@@ -2,7 +2,8 @@
  * Provider-independent account flows behind `/api/v1/accounts` (architecture §12). Each takes the
  * acting principal and enforces `canManageOwned` on the account's owner (404 when the id is not
  * visible in the tenant). Provider-specific input (an API variant or an OAuth callback) is turned
- * into a `NewAccount` by the caller; `connectAccount` is the shared flow from there.
+ * into a `NewAccount` by the caller; `connectAccount` is the shared flow from there, and
+ * `reconnectAccount` replaces the credentials of an account that is already connected.
  */
 import {
   calendarAccount,
@@ -13,12 +14,14 @@ import {
   withTenant,
   type AccountId,
   type CalendarAccount,
+  type PushLease,
   type SourceCalendar,
   type TenantTx,
 } from '@supercal/db';
 import { ProviderCredentials, type JsonValue } from '@supercal/providers';
-import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { audit } from '../api/kit/audit.ts';
+import { notifyEvent } from '../bus.ts';
 import { Forbidden, NotFound, TooManyRequests } from '../api/kit/problem.ts';
 import { canManageOwned } from '../auth/policy.ts';
 import type { Principal } from '../auth/principal.ts';
@@ -84,6 +87,8 @@ export async function connectAccount(deps: SyncDeps, principal: Principal, input
     if (!account) throw new Error('account insert returned no row');
     const calendars = await applyListing(tx, deps.feeds, account, infos, { sweep: false });
     await wakeTargets(tx, [await ensureTarget(tx, account, 'discover', account.id)]);
+    // The calendar-list watch, which wakes discovery when calendars are added or removed.
+    if (adapter.capabilities.calendarDiscovery === 'push') await wakeTargets(tx, [await ensureTarget(tx, account, 'push_renew', account.id)]);
     await audit(tx, principal, 'account.create', { type: 'account', id }, { provider, displayName: input.displayName, calendars: calendars.length });
     return { account, calendars };
   });
@@ -109,6 +114,19 @@ export async function updateAccount(
   });
 }
 
+/** Stops the account's push subscriptions with its current credentials, best effort: a lease that cannot be stopped expires. */
+async function teardownLeases(deps: SyncDeps, account: CalendarAccount, leases: PushLease[]): Promise<void> {
+  const push = deps.adapters[account.provider]?.push;
+  if (!push || leases.length === 0) return;
+  try {
+    const ctx = await accountContext(deps, account, AbortSignal.timeout(CONNECT_TIMEOUT_MS));
+    // `provider_state` is whatever the adapter returned when it subscribed.
+    for (const lease of leases) await push.teardown(ctx, { ...lease, providerState: lease.providerState as JsonValue | null });
+  } catch (error) {
+    deps.log.warn('push teardown failed; leases will expire', { accountId: account.id, error });
+  }
+}
+
 /**
  * Disconnects an account: tears down its push subscriptions (best effort), disables the
  * publications its calendars fed (bumping their epochs), and deletes its targets, calendars and
@@ -119,16 +137,7 @@ export async function deleteAccount(deps: SyncDeps, principal: Principal, id: Ac
     account: await loadAccount(tx, principal, id),
     leases: await tx.select().from(pushLease).where(eq(pushLease.accountId, id)),
   }));
-  const push = deps.adapters[account.provider]?.push;
-  if (push && leases.length > 0) {
-    try {
-      const ctx = await accountContext(deps, account, AbortSignal.timeout(CONNECT_TIMEOUT_MS));
-      // `provider_state` is whatever the adapter returned when it subscribed.
-      for (const lease of leases) await push.teardown(ctx, { ...lease, providerState: lease.providerState as JsonValue | null });
-    } catch (error) {
-      deps.log.warn('push teardown failed; leases will expire', { accountId: id, error });
-    }
-  }
+  await teardownLeases(deps, account, leases);
 
   await withTenant(principal.tenantId, async (tx) => {
     await loadAccount(tx, principal, id);
@@ -138,6 +147,50 @@ export async function deleteAccount(deps: SyncDeps, principal: Principal, id: Ac
     await tx.delete(calendarAccount).where(eq(calendarAccount.id, id));
     await audit(tx, principal, 'account.delete', { type: 'account', id }, { provider: account.provider, displayName: account.displayName });
   });
+}
+
+/** The principal's own account of `provider` with this provider identity, if connected in the tenant. */
+export async function findOwnAccount(principal: Principal, provider: CalendarAccount['provider'], providerSubject: string): Promise<CalendarAccount | null> {
+  const [row] = await withTenant(principal.tenantId, (tx) =>
+    tx
+      .select()
+      .from(calendarAccount)
+      .where(and(eq(calendarAccount.provider, provider), eq(calendarAccount.providerSubject, providerSubject), eq(calendarAccount.ownerUserId, principal.userId))),
+  );
+  return row ?? null;
+}
+
+/**
+ * Reconnects an account with new credentials (OAuth reconnect): stores them, makes the account
+ * `active`, stops its old push subscriptions and wakes every target, so parked targets run again
+ * and push is set up afresh.
+ */
+export async function reconnectAccount(deps: SyncDeps, principal: Principal, id: AccountId, credentials: ProviderCredentials, { email }: { email: string | null }): Promise<CalendarAccount> {
+  const { account, leases } = await withTenant(principal.tenantId, async (tx) => {
+    const current = await loadAccount(tx, principal, id);
+    const [row] = await tx
+      .update(calendarAccount)
+      .set({
+        credentials: await deps.secrets.encryptJson(ProviderCredentials, credentials, credentialsContext(current)),
+        status: 'active',
+        statusDetail: null,
+        email,
+        updatedAt: new Date(),
+      })
+      .where(eq(calendarAccount.id, id))
+      .returning();
+    if (!row) throw new NotFound('No such account');
+    await notifyEvent(tx, row.tenantId, { type: 'account.status', accountId: id, status: 'active' });
+    await audit(tx, principal, 'account.reconnect', { type: 'account', id }, { provider: row.provider });
+    return { account: row, leases: await tx.select().from(pushLease).where(eq(pushLease.accountId, id)) };
+  });
+  await teardownLeases(deps, account, leases);
+  await withTenant(principal.tenantId, async (tx) => {
+    await tx.delete(pushLease).where(inArray(pushLease.providerChannelId, leases.map((l) => l.providerChannelId)));
+    const targets = await tx.select({ id: syncTarget.id }).from(syncTarget).where(accountTargets(account));
+    await wakeTargets(tx, targets.map((t) => t.id));
+  });
+  return account;
 }
 
 /** Makes every target of the account due now and wakes the workers. 429 within 30 s of the previous request. */

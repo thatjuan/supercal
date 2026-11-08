@@ -23,7 +23,7 @@ describe.skipIf(!testDatabaseUrl)('migrate', () => {
           (select count(*)::int from pg_class where relkind = 'r' and relforcerowsecurity) as forced_rls,
           (select value from system_setting where key = 'tombstone_floor') as tombstone_floor,
           to_regclass('change_seq') is not null as change_seq`;
-      expect(state).toEqual({ tables: 23, forced_rls: 14, tombstone_floor: 0, change_seq: true });
+      expect(state).toEqual({ tables: 24, forced_rls: 15, tombstone_floor: 0, change_seq: true });
       expect(await migrate(url)).toEqual({ applied: 0 });
     } finally {
       await sql.end();

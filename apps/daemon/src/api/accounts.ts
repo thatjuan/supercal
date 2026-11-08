@@ -1,8 +1,9 @@
 /**
  * Calendar accounts (architecture §12). `POST /accounts` is a discriminated union on `provider`:
  * each credential-based provider adds its variant to `NewAccount` and its mapping to `fromInput`
- * (OAuth providers connect through their own start/callback flow). Either way the shared flow in
- * `sync/accounts.ts` proves the credentials by listing calendars before anything is stored.
+ * (OAuth providers connect through their own start/callback flow in `oauth/`, and reconnect
+ * through `POST /accounts/{id}/reconnect`). Either way the shared flow in `sync/accounts.ts` proves
+ * the credentials by listing calendars before anything is stored.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import { accountProvider, calendarAccount, connectionStatus, withTenant, type CalendarAccount } from '@supercal/db';
@@ -11,6 +12,7 @@ import { asc, eq } from 'drizzle-orm';
 import { hasRole } from '../auth/policy.ts';
 import { NoAdapterError } from '../sync/context.ts';
 import { connectAccount, deleteAccount, loadAccount, requestSync, updateAccount, type NewAccount as NewAccountInput } from '../sync/accounts.ts';
+import { AuthorizationUrl, OAuthStart, startGoogleFlow } from '../oauth/google.ts';
 import { Calendar, toCalendars } from './calendars.ts';
 import { createApiApp, etagOf, ifMatchHeaders, ProblemError, problemResponses, requireIfMatch, typeId, Unprocessable } from './kit/index.ts';
 
@@ -178,6 +180,18 @@ const syncAccount = createRoute({
   responses: { 202: { description: 'Every calendar of the account syncs now' }, ...problemResponses(400, 401, 403, 404, 429) },
 });
 
+const reconnect = createRoute({
+  method: 'post',
+  path: '/api/v1/accounts/{id}/reconnect',
+  operationId: 'reconnectAccount',
+  tags,
+  request: { params, body: { required: true, content: { 'application/json': { schema: OAuthStart } } } },
+  responses: {
+    200: json('Send the browser to this consent URL; the callback updates this account when the same identity signs in', AuthorizationUrl),
+    ...problemResponses(400, 401, 403, 404, 422),
+  },
+});
+
 export const accountRoutes = createApiApp()
   .openapi(listAccounts, async (c) => {
     const { principal } = c.var;
@@ -216,4 +230,11 @@ export const accountRoutes = createApiApp()
   .openapi(syncAccount, async (c) => {
     await requestSync(c.var.principal, c.req.valid('param').id);
     return c.body(null, 202);
+  })
+  .openapi(reconnect, async (c) => {
+    const { principal, oauth } = c.var;
+    const account = await withTenant(principal.tenantId, (tx) => loadAccount(tx, principal, c.req.valid('param').id));
+    if (account.provider !== 'google') throw new Unprocessable(`${account.provider} accounts do not reconnect through OAuth`, 'unsupported-provider');
+    const authorizationUrl = await startGoogleFlow(oauth, principal, c.req.valid('json').returnTo, account.email);
+    return c.json({ authorizationUrl }, 200);
   });

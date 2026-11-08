@@ -10,6 +10,7 @@ import type { Logger } from '../log.ts';
 import type { SyncDeps, TenantJob } from './context.ts';
 import { runDiscover } from './discovery.ts';
 import { runMaintenance } from './maintenance.ts';
+import { runPushRenew } from './push.ts';
 import { runEvents } from './runner.ts';
 import { createSlots, StopTargetError, type Job, type JobHandler } from './scheduler.ts';
 
@@ -26,6 +27,7 @@ export function createSyncDeps({
   adapters = registry,
   perAccount = PER_ACCOUNT,
   feeds = createFeedService(secrets),
+  pushBaseUrl,
 }: {
   secrets: SecretBox;
   feeds?: FeedService;
@@ -33,8 +35,9 @@ export function createSyncDeps({
   log: Logger;
   adapters?: AdapterRegistry;
   perAccount?: number;
+  pushBaseUrl?: string | null | undefined;
 }): SyncDeps {
-  return { adapters, secrets, fetch, log, feeds, accountSlot: createSlots(perAccount) };
+  return { adapters, secrets, fetch, log, feeds, pushBaseUrl: pushBaseUrl ?? null, accountSlot: createSlots(perAccount) };
 }
 
 const ofTenant = (job: Job): TenantJob => {
@@ -42,7 +45,7 @@ const ofTenant = (job: Job): TenantJob => {
   return { ...job, tenantId: job.tenantId };
 };
 
-/** The job for every target kind. `push_renew` and `sink` arrive with the push and sink providers. */
+/** The job for every target kind. `sink` arrives with the sink providers. */
 export function syncHandlers(deps: SyncDeps): Record<SyncKind, JobHandler> {
   const notYet: JobHandler = async (job) => {
     deps.log.warn('no handler for this target kind yet', { targetId: job.id, kind: job.kind });
@@ -52,7 +55,7 @@ export function syncHandlers(deps: SyncDeps): Record<SyncKind, JobHandler> {
     discover: (job, signal) => runDiscover(deps, ofTenant(job), signal),
     events: (job, signal) => runEvents(deps, ofTenant(job), signal),
     maintenance: (job) => runMaintenance(job, deps.log.child({ job: job.target })),
-    push_renew: notYet,
+    push_renew: (job, signal) => runPushRenew(deps, ofTenant(job), signal),
     sink: notYet,
   };
 }

@@ -1,5 +1,5 @@
 /** The full Postgres schema (architecture §4) and the row types other packages use. */
-import type { apiKeyTenant, calendarAccount, pushLease, sourceCalendar } from './accounts.ts';
+import type { apiKeyTenant, calendarAccount, oauthFlow, pushLease, sourceCalendar } from './accounts.ts';
 import type { graphOccurrence, resource, sourceObject } from './events.ts';
 import type { feed, publication, publicationSource, sink, sinkEvent } from './feeds.ts';
 import type { auditLog, syncTarget, systemSetting } from './system.ts';
@@ -15,6 +15,7 @@ export type ApiKeyTenant = typeof apiKeyTenant.$inferSelect;
 export type CalendarAccount = typeof calendarAccount.$inferSelect;
 export type SourceCalendar = typeof sourceCalendar.$inferSelect;
 export type PushLease = typeof pushLease.$inferSelect;
+export type OAuthFlow = typeof oauthFlow.$inferSelect;
 export type SourceObject = typeof sourceObject.$inferSelect;
 export type Resource = typeof resource.$inferSelect;
 export type GraphOccurrence = typeof graphOccurrence.$inferSelect;

@@ -43,6 +43,13 @@
       "when": 1794096023254,
       "tag": "0005_sync_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794097840916,
+      "tag": "0006_google_provider",
+      "breakpoints": true
     }
   ]
 }

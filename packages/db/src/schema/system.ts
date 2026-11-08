@@ -8,7 +8,7 @@ export type SyncKind = (typeof syncKind.enumValues)[number];
 
 /**
  * The scheduler: one leased job per `(kind, target_id)`. `target_id` is the id of the account
- * (`discover`), calendar (`events`, `push_renew`) or sink, or a fixed job name (`maintenance`).
+ * (`discover`, and the `push_renew` of its calendar-list watch), calendar (`events`, `push_renew`) or sink, or a fixed job name (`maintenance`).
  * Maintenance jobs span tenants, so their `tenant_id` is null and only `supercal_control` sees them.
  */
 export const syncTarget = pgTable(

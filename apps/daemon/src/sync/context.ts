@@ -35,6 +35,8 @@ export type SyncDeps = {
   feeds: FeedService;
   fetch: GuardedFetch;
   log: Logger;
+  /** The public https URL push notifications are sent to (`/hooks/<provider>` on it); null disables push. */
+  pushBaseUrl: string | null;
   /** Runs `fn` within the account's concurrency limit (`createSlots`). */
   accountSlot: <T>(accountId: string, fn: () => Promise<T>) => Promise<T>;
 };

@@ -1,12 +1,14 @@
 /**
  * Calendar discovery (`discover` targets, one per account, every 30 min): the provider's calendar
  * listing becomes `source_calendar` rows. A new calendar is published (passthrough, in the owner's
- * default feed) and gets an `events` target due now. A calendar missing from a successful listing
- * is marked gone, its publications disabled and its targets removed; a failed listing changes
- * nothing. Calendars a sink writes to are never sources (loop prevention).
+ * default feed) and gets an `events` target due now, plus a `push_renew` target when it supports
+ * push. A calendar missing from a successful listing is marked gone, its publications disabled and
+ * its targets and push leases removed; a failed listing changes nothing. Calendars a sink writes to
+ * are never sources (loop prevention).
  */
 import {
   calendarAccount,
+  pushLease,
   sink,
   sourceCalendar,
   syncTarget,
@@ -24,7 +26,7 @@ import { fenced } from './runner.ts';
 import { DISCOVER_EVERY_MS, StopTargetError, wakeTargets, type JobResult } from './scheduler.ts';
 
 /** Creates (or makes due now) the `kind` target of `targetId`; returns its id. */
-export async function ensureTarget(tx: TenantTx, account: Pick<CalendarAccount, 'tenantId'>, kind: 'discover' | 'events', targetId: string): Promise<SyncTargetId> {
+export async function ensureTarget(tx: TenantTx, account: Pick<CalendarAccount, 'tenantId'>, kind: 'discover' | 'events' | 'push_renew', targetId: string): Promise<SyncTargetId> {
   const [row] = await tx
     .insert(syncTarget)
     .values({ tenantId: account.tenantId, kind, targetId, nextRunAt: sql`clock_timestamp()` })
@@ -69,6 +71,7 @@ export async function applyListing(
     if (previous && previous.state === 'active') continue;
     await feeds.ensurePassthroughPublication(tx, row, account);
     woken.push(await ensureTarget(tx, account, 'events', row.id));
+    if (capabilities.push) woken.push(await ensureTarget(tx, account, 'push_renew', row.id));
   }
   await wakeTargets(tx, woken);
 
@@ -79,6 +82,8 @@ export async function applyListing(
       await tx.update(sourceCalendar).set({ state: 'gone' }).where(eq(sourceCalendar.id, calendar.id));
       await feeds.onCalendarGone(tx, calendar.id);
       await tx.delete(syncTarget).where(and(eq(syncTarget.targetId, calendar.id), inArray(syncTarget.kind, ['events', 'push_renew'])));
+      // Its channels expire on their own; their notifications find no lease.
+      await tx.delete(pushLease).where(and(eq(pushLease.target, 'calendar'), eq(pushLease.targetId, calendar.id)));
     }
   }
   return active;
