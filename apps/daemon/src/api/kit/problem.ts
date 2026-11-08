@@ -26,6 +26,8 @@ const PROBLEMS = {
   401: { slug: 'unauthorized', title: 'Unauthorized' },
   403: { slug: 'forbidden', title: 'Forbidden' },
   404: { slug: 'not-found', title: 'Not found' },
+  410: { slug: 'gone', title: 'Gone' },
+  413: { slug: 'too-large', title: 'Content too large' },
   409: { slug: 'conflict', title: 'Conflict' },
   412: { slug: 'precondition-failed', title: 'Precondition failed' },
   422: { slug: 'unprocessable', title: 'Unprocessable content' },

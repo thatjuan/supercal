@@ -22,6 +22,7 @@ import { accountRoutes } from './accounts.ts';
 import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
 import { calendarRoutes } from './calendars.ts';
+import { eventRoutes } from './events.ts';
 import { feedRoutes } from './feeds.ts';
 import { instanceRoutes, type Signup } from './instance.ts';
 import { createApiApp } from './kit/index.ts';
@@ -115,6 +116,7 @@ export function createApi(
     .route('/', googleOAuthRoutes)
     .route('/', microsoftOAuthRoutes)
     .route('/', calendarRoutes)
+    .route('/', eventRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)
     .route('/', publicationRoutes)

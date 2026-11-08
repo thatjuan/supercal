@@ -282,6 +282,8 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
   - `POST /accounts/oauth/{google|microsoft}/start` → `{ authorizationUrl }`; `GET /oauth/{provider}/callback` → redirect to `returnTo` (allowlisted).
   - `POST /accounts/{id}/reconnect`.
   - `GET|POST /calendars`, `GET|PATCH|DELETE /calendars/{id}`, `POST /calendars/{id}/restore` (mutations: hosted only, §17).
+  - `GET|POST /calendars/{id}/events`, `GET|PUT|PATCH|DELETE /calendars/{id}/events/{uid}`, `POST /calendars/{id}/events/{uid}/split` (JSCalendar 2.0; mutations: hosted only, §17).
+  - `GET /calendars/{id}/occurrences?from&to`, `GET /calendars/{id}/changes?since&limit`, `GET /calendars/{id}/export.ics`, `POST /calendars/{id}/import?onConflict=skip|replace` (import: hosted only).
   - `GET|POST /feeds`, `GET|PATCH|DELETE /feeds/{id}`, `POST /feeds/{id}/credentials/{caldav|ics}/rotate` (returns the secret once), `GET /feeds/{id}/subscribe`, `GET /feeds/{id}/mobileconfig`.
   - `GET|POST /feeds/{id}/publications`, `GET|PATCH|DELETE /publications/{id}`, `PUT /feeds/{id}/publications/order`.
   - `GET /feeds/{id}/occurrences?from&to&publicationId` (expanded, projected JSON for preview).
@@ -376,8 +378,8 @@ Draft states were read from the IETF datatracker on 2026-11-08.
 | CalDAV sharing: `draft-pot-caldav-sharing-01` | Expired in 2016 | Not implemented. Shares are managed through the REST API, and a shared calendar appears as an ordinary collection in the recipient's calendar home, which every client already understands. |
 | Scheduling: RFC 6638, iTIP RFC 5546, iMIP RFC 6047 | Published | Not implemented. Attendees are stored as data and Supercal sends no invitations. The server does not advertise `calendar-auto-schedule`. |
 
-The table records the milestone's protocol decisions. This storage issue (#24) supplies the
-service layer and calendar management routes; event REST routes (#25), writable CalDAV (#26),
+The table records the milestone's protocol decisions. Storage (#24) supplies the service layer
+and calendar management routes; event REST routes (#25) add the JSCalendar conversion below. Writable CalDAV (#26),
 published links (#27), sharing and free-busy (#28), and real-client verification (#29) follow.
 
 ### Storage and validation
@@ -478,3 +480,75 @@ rebuilt at the next run. A failed group keeps its last good data, marked incompl
 The daily `purge-hosted-calendars` job visits each tenant and permanently deletes hosted calendars
 whose `gone_at` is older than 30 days. Foreign keys cascade to raw objects, resources and
 publication-source links. Restoring a calendar before retention expires preserves its data.
+
+### REST events and JSCalendar conversion
+
+The direct event API uses JSCalendar 2.0, pinned to
+[`draft-ietf-calext-jscalendarbis-22`](https://datatracker.ietf.org/doc/html/draft-ietf-calext-jscalendarbis-22)
+and the conversion rules in
+[`draft-ietf-calext-jscalendar-icalendar-29`](https://datatracker.ietf.org/doc/html/draft-ietf-calext-jscalendar-icalendar-29).
+`packages/core/src/jscalendar` converts to and from the existing jCal `EventResource`; it adds
+no storage model or migration. Reads cover hosted and connected calendars. Writes require an
+active hosted calendar and use `writeObject` or `deleteObject`, with the same revision ETag as
+CalDAV. The UID is the only event identifier, including when it contains percent-encoded path
+characters; new object names are the first 22 base64url characters of SHA-256 over the UID plus
+`.ics`.
+
+`fromJSCalendar` changes mapped property groups on a copy of the previous resource. Unmapped
+properties, child components and unknown parameters survive PATCH, including on an override
+with the same recurrence id. PUT builds a replacement from scratch. Unknown JSON properties
+and unmapped nested fields use `JSPROP` with a quoted `JSPTR` and a JSON-encoded TEXT value;
+these properties add missing JSON fields and cannot overwrite fields already mapped from
+standard iCalendar properties. A top-level null vendor value is treated as absent, because the
+mapping draft forbids a null `JSPROP` value. Version 1.0 fields `recurrenceRules`,
+`excludedRecurrenceRules` and `timeZones` are rejected, as are `method` and versions other than
+`2.0`; validation errors identify the field or patch pointer. Unknown and vendor properties
+with valid names remain accepted.
+
+The mapped properties cover event text, timing, status, transparency, classification, color,
+keywords, priority, revision metadata, locations, conference links, attachments, participants,
+recurrence, relations and alarms. Location details can use VLOCATION, participant details can
+use PARTICIPANT, and link relations select ATTACH, IMAGE, URL or LINK according to mapping
+§3.4. Description content type and other unsupported presentation details remain in JSPROP.
+Participants are stored as data; these writes send no invitations.
+
+Time arithmetic uses Temporal. An all-day event uses DATE only when it has no zone and every
+temporal value has a zero time part; a floating event uses a local DATE-TIME. Zoned writes
+require an IANA zone, convert recurrence `until` to UTC in RRULE, and generate missing
+VTIMEZONEs before serialization. A source's custom TZID remains in jCal but has no JSCalendar
+`timeZone`. DTEND and DURATION both read as `duration`; `endTimeZone` writes a DTEND.
+The span index stores a zero-duration event as a closed point, so it is readable and overlaps
+windows containing that instant.
+
+Override JSON values are patches against the occurrence's inherited master fields, with its
+start shifted to the recurrence id. A changed occurrence writes a complete RECURRENCE-ID
+VEVENT, an exclusion writes EXDATE, and an empty patch writes RDATE. RDATE PERIOD values also
+preserve their duration on read. A resource with one detached instance reads as an Event with
+`recurrenceId` and, when known, `recurrenceIdTimeZone`; several detached instances read as a
+Group, as required by mapping §2.1.2. GET, list and changes expose the same union. PATCH of a
+resource without a master returns `event-has-no-master`.
+
+REST writes set `updated`, DTSTAMP and Supercal's product identifier; creates also set `created`.
+Client values for these fields do not control stored metadata. SEQUENCE starts at zero and
+increments when start, duration, time zone or recurrence rule changes; changing a title alone
+retains it. Import applies the same metadata policy to each component.
+
+Splitting a series writes both objects in one transaction, links the original with a `next`
+relation and the new series with a `first` relation, and divides overrides at the split point.
+The patch applies to the new event last. The split must be an occurrence after the first;
+non-recurring events and invalid split points return 422. Expansion counts rule instances
+before EXDATE subtraction when dividing COUNT, as RFC 5545 requires. UNTIL is shortened to the
+last retained occurrence before the split. Wall times stay in the event's zone across DST.
+
+Lists page by UID with an opaque versioned cursor; optional time bounds filter the coarse span.
+The direct changes token carries version, calendar sync epoch and a decimal bigint sequence.
+`changesSince` supplies each page and position from one statement. Initial reads omit tombstones;
+malformed tokens, epoch mismatches and positions below `tombstone_floor` return 410
+`sync-token-expired`. Direct occurrences use the feed preview's expansion and UTC formatting,
+with a 366-day window and a 5,000-item cap reported through `truncated`.
+
+Export streams one VCALENDAR from live `resource.data`, emitting each TZID once. Import accepts
+up to 8 MiB of `text/calendar`, groups VEVENTs by UID and writes the batch in one transaction;
+per-UID savepoints isolate invalid objects. `onConflict=skip` leaves existing events and change
+sequences untouched; `replace` replaces their objects. Import reports created, updated, skipped
+and failed UIDs, and rejects a calendar with no VEVENT. Audits record UIDs and never event contents.

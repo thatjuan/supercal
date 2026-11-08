@@ -145,3 +145,18 @@ function canonical(v: unknown): string {
 /** sha256 (hex) over a canonical serialisation of the resource; equal for equal content. */
 export const revisionOf = (resource: EventResource): string =>
   createHash("sha256").update(canonical(resource)).digest("hex");
+
+/** All parameters, copied so a converter can retain unknown parameters while editing a value. */
+export const propParams = (p: JCalProperty): JCalParams => ({ ...p[1] });
+
+/** Replace a repeated property group without disturbing other properties or their parameters. */
+export function replaceProperties(c: JCalComponent, name: string, next: JCalProperty[]): JCalComponent {
+  const at = c[1].findIndex((p) => p[0] === name);
+  const rest = c[1].filter((p) => p[0] !== name);
+  const index = at < 0 ? rest.length : at;
+  return [c[0], [...rest.slice(0, index), ...next, ...rest.slice(index)], c[2]];
+}
+
+/** Replace one kind of child component, retaining unknown component kinds. */
+export const replaceSubcomponents = (c: JCalComponent, name: string, next: JCalComponent[]): JCalComponent =>
+  [c[0], c[1], [...c[2].filter((child) => child[0] !== name), ...next]];

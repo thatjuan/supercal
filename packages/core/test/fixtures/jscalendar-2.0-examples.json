@@ -1,0 +1,189 @@
+[
+  {
+    "@type": "Event",
+    "version": "2.0",
+    "uid": "a8df6573-0474-496d-8496-033ad45d7fea",
+    "updated": "2020-01-02T18:23:04Z",
+    "title": "Some event",
+    "start": "2020-01-15T13:00:00",
+    "timeZone": "America/New_York",
+    "duration": "PT1H"
+  },
+  {
+    "title": "April Fool's Day",
+    "showWithoutTime": true,
+    "start": "1900-04-01T00:00:00",
+    "duration": "P1D",
+    "recurrenceRule": {
+      "frequency": "yearly"
+    }
+  },
+  {
+    "title": "Flight XY51 to Tokyo",
+    "start": "2020-04-01T09:00:00",
+    "timeZone": "Europe/Berlin",
+    "endTimeZone": "Asia/Tokyo",
+    "duration": "PT10H30M",
+    "mainLocationId": "1",
+    "locations": {
+      "1": {
+        "name": "Frankfurt Airport (FRA)"
+      },
+      "2": {
+        "name": "Narita International Airport (NRT)"
+      }
+    }
+  },
+  {
+    "title": "Yoga",
+    "start": "2020-01-01T07:00:00",
+    "duration": "PT30M",
+    "recurrenceRule": {
+      "frequency": "daily"
+    }
+  },
+  {
+    "title": "Live from Music Bowl: The Band",
+    "description": "Go see the biggest music event ever!",
+    "locale": "en",
+    "start": "2020-07-04T17:00:00",
+    "timeZone": "America/New_York",
+    "duration": "PT3H",
+    "mainLocationId": "c0503d30-8c50-4372-87b5-7657e8e0fedd",
+    "locations": {
+      "c0503d30-8c50-4372-87b5-7657e8e0fedd": {
+        "name": "The Music Bowl, Central Park, New York",
+        "coordinates": "geo:40.7829,-73.9654"
+      },
+      "ee42e41e-1046-4489-9760-c0b85f0dc176": {
+        "name": "BAZ Parking, 9 West 57th Street, New York",
+        "coordinates": "geo:40.7637,-73.9748",
+        "locationTypes": {
+          "parking": true
+        }
+      }
+    },
+    "virtualLocations": {
+      "vloc1": {
+        "name": "Free live Stream from Music Bowl",
+        "uri": "https://stream.example.com/the_band_2020"
+      }
+    }
+  },
+  {
+    "title": "Calculus I",
+    "start": "2020-01-08T09:00:00",
+    "timeZone": "Europe/London",
+    "duration": "PT1H30M",
+    "locations": {
+      "mlab": {
+        "name": "Math Lab I, Department of Mathematics"
+      }
+    },
+    "recurrenceRule": {
+      "frequency": "weekly",
+      "until": "2020-06-24T09:00:00"
+    },
+    "recurrenceOverrides": {
+      "2020-01-07T14:00:00": {
+        "title": "Introduction to Calculus I (optional)"
+      },
+      "2020-04-01T09:00:00": {
+        "excluded": true
+      },
+      "2020-06-24T09:00:00": {
+        "title": "Calculus I Exam",
+        "start": "2020-06-24T10:00:00",
+        "duration": "PT2H",
+        "locations": {
+          "auditorium": {
+            "name": "Big Auditorium, Other Road"
+          }
+        }
+      }
+    }
+  },
+  {
+    "uid": "715ed4c5-3cf5-427f-927c-db40cdd63894",
+    "relatedTo": {
+      "32859916-af7a-4599-82ed-32a4315b4fe7": {
+        "relation": {
+          "next": true
+        }
+      }
+    },
+    "title": "Departmental meeting",
+    "start": "2025-01-07T14:00:00",
+    "timeZone": "Australia/Melbourne",
+    "duration": "PT1H",
+    "locations": {
+      "room": {
+        "name": "Room 101"
+      }
+    },
+    "recurrenceRule": {
+      "frequency": "weekly",
+      "until": "2025-02-25T14:00:00"
+    }
+  },
+  {
+    "uid": "32859916-af7a-4599-82ed-32a4315b4fe7",
+    "relatedTo": {
+      "715ed4c5-3cf5-427f-927c-db40cdd63894": {
+        "relation": {
+          "first": true
+        }
+      }
+    },
+    "title": "Departmental meeting",
+    "start": "2025-03-05T15:00:00",
+    "timeZone": "Australia/Melbourne",
+    "duration": "PT1H",
+    "locations": {
+      "room": {
+        "name": "Room 202"
+      }
+    },
+    "recurrenceRule": {
+      "frequency": "weekly"
+    }
+  },
+  {
+    "title": "FooBar team meeting",
+    "start": "2020-01-08T09:00:00",
+    "timeZone": "Africa/Johannesburg",
+    "duration": "PT1H",
+    "virtualLocations": {
+      "0": {
+        "name": "ChatMe meeting room",
+        "uri": "https://chatme.example.com?id=1234567&pw=a8a24627b63d"
+      }
+    },
+    "recurrenceRule": {
+      "frequency": "weekly"
+    },
+    "organizerCalendarAddress": "mailto:f245f875-7f63-4a5e-a2c8@schedule.example.com",
+    "participants": {
+      "dG9tQGZvb2Jhci5xlLmNvbQ": {
+        "name": "Tom Tool",
+        "email": "tom@foobar.example.com",
+        "calendarAddress": "mailto:tom@calendar.example.com",
+        "participationStatus": "accepted"
+      },
+      "em9lQGZvb2GFtcGxlLmNvbQ": {
+        "name": "Zoe Zelda",
+        "calendarAddress": "mailto:zoe@foobar.example.com",
+        "participationStatus": "accepted",
+        "roles": {
+          "owner": true,
+          "chair": true
+        }
+      }
+    },
+    "recurrenceOverrides": {
+      "2020-03-04T09:00:00": {
+        "participants/dG9tQGZvb2Jhci5xlLmNvbQ/participationStatus": "declined"
+      }
+    }
+  }
+]

@@ -9,8 +9,7 @@
  * is not visible in the tenant at all). Every mutation bumps `epoch` or `config_version` as
  * `publicationChangeKind` decides, and writes the audit log, in the caller's transaction.
  */
-import { Temporal } from '@js-temporal/polyfill';
-import { expandOccurrences, project, summary, textValue, UnknownTimeZoneError, type SourceResource } from '@supercal/core';
+import { project, UnknownTimeZoneError, type SourceResource } from '@supercal/core';
 import {
   bumpConfigVersion,
   bumpEpoch,
@@ -41,6 +40,7 @@ import {
 } from '@supercal/db';
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { audit } from '../api/kit/audit.ts';
+import { expandResourceOccurrences } from '../api/occurrences.ts';
 import { BadRequest, Conflict, Forbidden, NotFound } from '../api/kit/problem.ts';
 import { canManageOwned } from '../auth/policy.ts';
 import type { Principal } from '../auth/principal.ts';
@@ -512,7 +512,6 @@ export function createFeedService(secrets: SecretBox) {
     );
     const resources = await resourcesIn(tx, calendarIds, range);
     const uidSecret = await openUidSecret(secrets, target, tx);
-    const window = { from: Temporal.Instant.fromEpochMilliseconds(range.from.getTime()), to: Temporal.Instant.fromEpochMilliseconds(range.to.getTime()) };
 
     const items: OccurrenceItem[] = [];
     let truncated = false;
@@ -537,23 +536,23 @@ export function createFeedService(secrets: SecretBox) {
       for (const object of await project(spec, inputs)) {
         let expansion;
         try {
-          expansion = expandOccurrences(object.resource, window, zoneOf.get(object.sourceUid), MAX_OCCURRENCES);
+          expansion = expandResourceOccurrences(object.resource, range, zoneOf.get(object.sourceUid), MAX_OCCURRENCES);
         } catch (error) {
           if (error instanceof UnknownTimeZoneError) continue;
           throw error;
         }
         truncated ||= expansion.truncated;
-        for (const o of expansion.occurrences) {
-          const location = p.privacy === 'full' ? textValue(o.component, 'location') : null;
+        for (const o of expansion.items) {
+          const location = p.privacy === 'full' ? o.location : undefined;
           items.push({
             publicationId: p.id,
             outputUid: object.outputUid,
             recurrenceId: o.recurrenceId,
-            start: o.start.toString(),
-            end: o.end.toString(),
+            start: o.start,
+            end: o.end,
             allDay: o.allDay,
-            summary: summary(o.component) ?? '',
-            ...(location !== null && { location }),
+            summary: o.title,
+            ...(location !== undefined && { location }),
             color: p.color,
           });
         }

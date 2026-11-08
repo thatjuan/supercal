@@ -41,3 +41,16 @@ export function rejectedCalls() {
   // @ts-expect-error targetType is a string
   void client.GET('/api/v1/audit-log', { params: { query: { targetType: 5 } } });
 }
+
+/** Events use the singular JSCalendar 2.0 recurrenceRule, with generated field types. */
+export async function eventRecurrence(id: string, uid: string) {
+  const { data, error } = await client.GET('/api/v1/calendars/{id}/events/{uid}', { params: { path: { id, uid } } });
+  if (error) return error;
+  if (data['@type'] === 'Event') {
+    const frequency: string | undefined = data.recurrenceRule?.frequency;
+    // @ts-expect-error frequency is a string enum, never a number
+    const invalid: number = data.recurrenceRule?.frequency;
+    return { frequency, invalid };
+  }
+  return data.entries;
+}
