@@ -42,15 +42,17 @@ export const RENDER_VERSION = 1;
 export type Privacy = "full" | "title-only" | "busy-only";
 
 export type PublicationSpec = {
-  /** `pub_…` TypeID. */
+  /** Publication (`pub_…`) or published-link (`lnk_…`) TypeID. */
   id: string;
   kind: "passthrough" | "virtual";
   privacy: Privacy;
+  /** Who reads the output: the owner, another tenant member, or anyone holding a URL. */
+  audience: "owner" | "member" | "public";
   filters: { hideDeclined: boolean; hideCancelled: boolean; hideAllDay: boolean };
   keepAlarms: boolean;
   /** `mailto:` addresses of the account owners, for the declined filter. The organizer rule uses `SourceResource.ownerAddresses`. */
   ownerAddresses: string[];
-  /** HMAC key (`feed.uid_secret`) for title-only and busy-only UIDs. */
+  /** HMAC key (`feed.uid_secret` or `calendar_link.uid_secret`) for title-only and busy-only UIDs. */
   uidSecret: CryptoKey;
 };
 
@@ -127,8 +129,8 @@ function merge(uid: string, copies: SourceResource[]): EventResource {
 // 2–3. Filters and privacy
 
 const PRIVATE_CLASSES = new Set(["PRIVATE", "CONFIDENTIAL"]);
-const effectivePrivacy = (privacy: Privacy, c: JCalComponent): Privacy =>
-  privacy === "title-only" && PRIVATE_CLASSES.has(classification(c)) ? "busy-only" : privacy;
+const effectivePrivacy = (privacy: Privacy, audience: PublicationSpec["audience"], c: JCalComponent): Privacy =>
+  (privacy === "title-only" || audience !== "owner") && PRIVATE_CLASSES.has(classification(c)) ? "busy-only" : privacy;
 
 function declinedByOwner(spec: PublicationSpec, c: JCalComponent): boolean {
   const owners = new Set(spec.ownerAddresses.map(bareAddress));
@@ -150,7 +152,7 @@ function isHidden(spec: PublicationSpec, c: JCalComponent): boolean {
     (hideCancelled && status(c) === "CANCELLED") ||
     (hideDeclined && declinedByOwner(spec, c)) ||
     (hideAllDay && isAllDay(c)) ||
-    (effectivePrivacy(spec.privacy, c) === "busy-only" && transp(c) === "TRANSPARENT")
+    (effectivePrivacy(spec.privacy, spec.audience, c) === "busy-only" && transp(c) === "TRANSPARENT")
   );
 }
 
@@ -164,6 +166,7 @@ function exdateFor(override: JCalComponent): JCalProperty[] {
 
 const BUSY_PROPS = new Set(["uid", "dtstart", "dtend", "duration", "rrule", "rdate", "exdate", "recurrence-id", "status", "transp"]);
 const TITLE_PROPS = new Set([...BUSY_PROPS, "summary", "color"]);
+const PUBLIC_PROPS = new Set([...TITLE_PROPS, "description", "location", "url", "categories", "geo", "conference", "created", "last-modified", "sequence", "dtstamp"]);
 // Parameters that survive on allowlisted properties; anything else (X- params, ALTREP) could leak.
 const KEPT_PARAMS = ["tzid", "range"] as const;
 const BUSY_SUMMARY: JCalProperty = ["summary", {}, "text", "Busy"];
@@ -181,16 +184,18 @@ function allowedParams(p: JCalProperty): JCalProperty {
 
 /**
  * A new component holding only what `privacy` allows; built up from allowlisted properties,
- * never by deleting from a copy. Full keeps everything (VALARM only with `keepAlarms`).
+ * never by deleting from a copy. Owner/member full keeps everything (VALARM only with
+ * `keepAlarms`); public full uses its own allowlist and never retains subcomponents.
  */
 function applyPrivacy(spec: PublicationSpec, c: JCalComponent): JCalComponent {
-  const mode = effectivePrivacy(spec.privacy, c);
-  if (mode === "full") {
+  const mode = effectivePrivacy(spec.privacy, spec.audience, c);
+  if (mode === "full" && spec.audience !== "public") {
     const subs = subcomponents(c).filter((s) => spec.keepAlarms || componentName(s) !== "valarm");
     return structuredClone([componentName(c), properties(c), subs]);
   }
-  const allow = mode === "title-only" ? TITLE_PROPS : BUSY_PROPS;
+  const allow = mode === "full" ? PUBLIC_PROPS : mode === "title-only" ? TITLE_PROPS : BUSY_PROPS;
   const kept: JCalComponent = [componentName(c), properties(c).filter((p) => allow.has(propName(p))).map(allowedParams), []];
+  if (mode === "full") return kept;
   const stamped = setProp(kept, ["dtstamp", {}, "date-time", BUSY_DTSTAMP]);
   return mode === "title-only" && summary(c) !== null ? stamped : setProp(stamped, BUSY_SUMMARY);
 }

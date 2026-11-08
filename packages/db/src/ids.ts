@@ -2,7 +2,7 @@
  * TypeIDs: `<prefix>_<26 base32 chars>`, the suffix being a UUIDv7 in Crockford base32
  * (https://github.com/jetify-com/typeid). Branded per prefix so ids of different entities cannot mix.
  */
-export const ID_PREFIXES = ['acc', 'cal', 'feed', 'pub', 'snk', 'tgt', 'key', 'aud'] as const;
+export const ID_PREFIXES = ['acc', 'cal', 'feed', 'pub', 'snk', 'tgt', 'key', 'aud', 'lnk'] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];
 
@@ -11,6 +11,7 @@ export type Id<P extends IdPrefix> = string & { readonly __id: P };
 export type AccountId = Id<'acc'>;
 export type SourceCalendarId = Id<'cal'>;
 export type FeedId = Id<'feed'>;
+export type CalendarLinkId = Id<'lnk'>;
 export type PublicationId = Id<'pub'>;
 export type SinkId = Id<'snk'>;
 export type SyncTargetId = Id<'tgt'>;

@@ -39,7 +39,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - A publication can be renamed and recoloured without touching the source.
 - **Virtual calendars** merge two or more source calendars (from any accounts) into one publication. A source calendar can sit in several virtual calendars and still be published on its own, or be hidden on its own while it still feeds a virtual calendar.
 - When the same event appears in more than one member of a virtual calendar (e.g. an invite to both work and personal), it is shown once.
-- **Privacy mode** per publication: `full`, `title-only`, `busy-only`. Source events marked private stay private in every mode.
+- **Privacy mode** per publication: `full`, `title-only`, `busy-only`. Owners see private events in full mode; title-only reduces them to busy-only. Published links always reduce private events to busy-only.
 - **Event filters** per publication, kept deliberately small: hide declined, hide cancelled, hide all-day.
 - Extra feeds can be created for sharing (e.g. a busy-only feed for an assistant), each with its own credentials and set of publications.
 - Feed credentials: a CalDAV username/app password and a secret ICS token. Both can be rotated; rotating revokes the old one immediately.
@@ -49,6 +49,8 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - One CalDAV login carries every publication in a feed (Apple Calendar, Thunderbird, DAVx5, Fantastical, BusyCal, Evolution).
 - Apple devices get a one-tap configuration profile download.
 - Every publication also has an ICS URL, and the feed has a combined ICS that flattens all publications into one calendar.
+- Publish one hosted or imported calendar with a view-only link. Anyone holding the URL can subscribe without an account. Each calendar can have up to 20 links, each with an explicit `full`, `title-only` or `busy-only` privacy level, an optional label and expiry, and independent revocation. A client can receive full details while a personal website shows only busy time.
+- Published links hide attendees, organizers, attachments, comments, alarms and custom event properties even in full mode. Events marked private or confidential show as “Busy”. Privacy is fixed at creation; create a new link to change it. The secret URL is shown once, with webcal, Google Calendar and Outlook subscription links. Deleting a calendar pauses its links; restoring it resumes them.
 - One-click subscribe links for Google Calendar and Outlook, plus a QR code for phones.
 - **Sinks**: for Google and Outlook users who need fast updates, Supercal mirrors chosen publications into calendars it creates in the user's own Google or Microsoft account. Sinks never send invitations and are never ingested back as sources. (Pending spike R10.)
 
