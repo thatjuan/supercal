@@ -4,7 +4,8 @@
  * default feed) and gets an `events` target due now, plus a `push_renew` target when it supports
  * push. A calendar missing from a successful listing is marked gone, its publications disabled and
  * its targets and push leases removed; a failed listing changes nothing. Calendars a sink writes to
- * are never sources (loop prevention).
+ * are never sources (loop prevention): their `sink` rows are checked here, and the Google adapter
+ * leaves out calendars carrying the managed marker, which covers mirrors whose row is gone.
  */
 import {
   calendarAccount,

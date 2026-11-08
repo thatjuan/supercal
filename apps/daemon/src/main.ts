@@ -97,7 +97,7 @@ const server = Bun.serve({
 log.info('listening', { port: server.port, roles: [...roles], webDir });
 
 const worker = roles.has('worker')
-  ? startWorker(stopAbort.signal, log.child({ role: 'worker' }), { secrets, bus, fetch: egress, adapters, pushBaseUrl, concurrency: config.SUPERCAL_SYNC_CONCURRENCY, onTick: () => (schedulerTickedAt = Date.now()) })
+  ? startWorker(stopAbort.signal, log.child({ role: 'worker' }), { secrets, bus, fetch: egress, adapters, pushBaseUrl, google, concurrency: config.SUPERCAL_SYNC_CONCURRENCY, onTick: () => (schedulerTickedAt = Date.now()) })
   : Promise.resolve();
 
 let stopping = false;

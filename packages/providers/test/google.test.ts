@@ -10,6 +10,7 @@ import {
   GOOGLE_INVALID_GRANT_DETAIL,
   ProviderThrottledError,
   ProviderUnavailableError,
+  SINK_CALENDAR_MARKER,
   type AdapterContext,
   type ProviderCredentials,
   type SyncEnd,
@@ -124,6 +125,18 @@ describe('Google adapter', () => {
       { providerCalendarId: 'a', name: 'A', color: '#123456', timezone: null, capabilities: { incremental: 'delta', push: false } },
       { providerCalendarId: 'b', name: 'Mine', color: null, timezone: 'Europe/Paris', capabilities: { incremental: 'delta', push: false } },
     ]);
+  });
+
+  test('listing leaves out calendars whose description starts with the managed marker, and only those', async () => {
+    const { adapter, ctx } = setup(() =>
+      Response.json({
+        items: [
+          { id: 'mirror', summary: 'Mirror', description: `${SINK_CALENDAR_MARKER}: changes here are overwritten` },
+          { id: 'mine', summary: 'Mine', description: `Notes on what ${SINK_CALENDAR_MARKER} does` },
+        ],
+      }),
+    );
+    expect((await adapter.listCalendars(ctx)).map((c) => c.providerCalendarId)).toEqual(['mine']);
   });
 
   test('an expiring access token is refreshed and saved before the call', async () => {

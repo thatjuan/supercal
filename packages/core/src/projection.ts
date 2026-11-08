@@ -226,7 +226,7 @@ const hmacSha256 = async (key: CryptoKey, s: string) => b64url(await crypto.subt
  * The UID clients see. Passthrough + full keeps the source UID; virtual + full hashes it with the
  * publication id; title-only and busy-only use an HMAC so the source UID cannot be recovered.
  */
-async function outputUidFor(spec: UidSpec, sourceUid: string): Promise<string> {
+export async function outputUidFor(spec: UidSpec, sourceUid: string): Promise<string> {
   if (spec.privacy === "full" && spec.kind === "passthrough") return sourceUid;
   const input = `${spec.id}\u0000${sourceUid}`;
   const digest = spec.privacy === "full" ? await sha256(input) : await hmacSha256(spec.uidSecret, input);

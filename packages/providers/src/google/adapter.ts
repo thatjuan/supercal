@@ -1,7 +1,8 @@
 /**
  * The Google Calendar adapter (architecture §8, ingest FINDINGS §4).
  *
- * - Discovery: `calendarList.list`, every page. Sink calendars are returned too; discovery skips them.
+ * - Discovery: `calendarList.list`, every page, without calendars carrying the managed marker: a sink's
+ *   mirror stays out even after its `sink` row is gone (publication or account deleted, reconnect).
  * - Events: `events.list` with `singleEvents=false&showDeleted=true&maxResults=2500` and no other
  *   filter, ever (filters are incompatible with sync tokens). Without a cursor every page is read as
  *   a snapshot; with one, the sync token gives a delta. Only the last page has `nextSyncToken`, so
@@ -17,7 +18,9 @@ import { ProviderUnavailableError } from '../adapter.ts';
 import { createGoogleApi, GoogleHttpError, type GoogleClientOptions } from './api.ts';
 
 const CalendarList = z.object({
-  items: z.array(z.object({ id: z.string(), summary: z.string().optional(), summaryOverride: z.string().optional(), backgroundColor: z.string().optional(), timeZone: z.string().optional() })).default([]),
+  items: z
+    .array(z.object({ id: z.string(), summary: z.string().optional(), summaryOverride: z.string().optional(), description: z.string().optional(), backgroundColor: z.string().optional(), timeZone: z.string().optional() }))
+    .default([]),
   nextPageToken: z.string().optional(),
 });
 
@@ -40,6 +43,13 @@ export type GoogleAdapterOptions = GoogleClientOptions & {
   /** Whether watch channels are used (needs a public https URL); otherwise calendars are polled. */
   push: boolean;
 };
+
+/**
+ * What the description of a calendar Supercal created starts with. Discovery never ingests such a
+ * calendar. It is a recovery hint beside the `sink` row, which stays the authority while it exists
+ * (a user can edit a description).
+ */
+export const SINK_CALENDAR_MARKER = 'Managed by Supercal';
 
 const calendarPath = (id: string) => `/calendars/${encodeURIComponent(id)}`;
 
@@ -72,7 +82,8 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
       let pageToken: string | undefined;
       do {
         const page = await api.call(ctx, CalendarList, '/users/me/calendarList', { query: { maxResults: '250', ...(pageToken && { pageToken }) } });
-        for (const item of page.items)
+        for (const item of page.items) {
+          if (item.description?.startsWith(SINK_CALENDAR_MARKER)) continue;
           calendars.push({
             providerCalendarId: item.id,
             name: item.summaryOverride ?? item.summary ?? item.id,
@@ -80,6 +91,7 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
             timezone: item.timeZone ?? null,
             capabilities: { incremental: 'delta', push: options.push },
           });
+        }
         pageToken = page.nextPageToken;
       } while (pageToken);
       return calendars;

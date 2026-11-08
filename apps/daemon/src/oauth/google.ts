@@ -7,9 +7,14 @@
  *
  * The callback needs the same signed-in user who started the flow: otherwise someone could start a
  * flow and get a victim to complete it, connecting the victim's calendar to their account.
+ *
+ * Incremental consent (sinks): `startGoogleFlow(…, { accountId, scopes })` asks for extra scopes on
+ * top of those already granted (`include_granted_scopes`). The callback then only updates that
+ * account; if the user signs in as another Google identity it fails with `account_mismatch`, and
+ * if they untick an extra scope with `consent_declined`, leaving the account as it was.
  */
 import { createRoute, z } from '@hono/zod-openapi';
-import { withTenant } from '@supercal/db';
+import { withTenant, type AccountId } from '@supercal/db';
 import { idTokenClaims, OAuthError, tokenRequest, type GoogleCredentials } from '@supercal/providers';
 import { BadRequest, createApiApp, problemResponses, Unprocessable } from '../api/kit/index.ts';
 import type { Principal } from '../auth/principal.ts';
@@ -34,8 +39,14 @@ function googleClient(oauth: OAuthDeps): OAuthClient {
   return oauth.google;
 }
 
-/** The consent URL for the principal; `loginHint` preselects the Google account on reconnect. 400 when `returnTo` is not ours. */
-export async function startGoogleFlow(oauth: OAuthDeps, principal: Principal, returnTo: string, loginHint?: string | null): Promise<string> {
+/** Extra scopes for one existing account (incremental consent). */
+export type ConsentRequest = { accountId: AccountId; scopes: string[] };
+
+/**
+ * The consent URL for the principal; `loginHint` preselects the Google account on reconnect, and
+ * `consent` asks for extra scopes for an existing account. 400 when `returnTo` is not ours.
+ */
+export async function startGoogleFlow(oauth: OAuthDeps, principal: Principal, returnTo: string, loginHint?: string | null, consent?: ConsentRequest): Promise<string> {
   const client = googleClient(oauth);
   const target = allowedReturnTo(returnTo, oauth.returnOrigins);
   if (!target) throw new BadRequest([{ path: 'returnTo', message: `must be a path on ${oauth.returnOrigins.join(' or ')}` }]);
@@ -46,13 +57,13 @@ export async function startGoogleFlow(oauth: OAuthDeps, principal: Principal, re
     client_id: client.clientId,
     redirect_uri: redirectUri(oauth),
     response_type: 'code',
-    scope: GOOGLE_SCOPES.join(' '),
+    scope: [...GOOGLE_SCOPES, ...(consent?.scopes ?? [])].join(' '),
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    state: oauth.state.sign({ provider: 'google', userId, tenantId, flowId, returnTo: target }),
+    state: oauth.state.sign({ provider: 'google', userId, tenantId, flowId, returnTo: target, ...(consent && { consent }) }),
     ...(loginHint && { login_hint: loginHint }),
   }).toString();
   return url.href;
@@ -108,6 +119,10 @@ export async function completeGoogleFlow(oauth: OAuthDeps, sync: SyncDeps, princ
     if (!query.code) throw new CallbackFailure('missing_code');
     const credentials = await exchange(oauth, googleClient(oauth), query.code, verifier);
     const existing = await findOwnAccount(principal, 'google', credentials.sub);
+    if (state.consent) {
+      if (existing?.id !== state.consent.accountId) throw new CallbackFailure('account_mismatch');
+      if (!state.consent.scopes.every((scope) => credentials.scopes.includes(scope))) throw new CallbackFailure('consent_declined');
+    }
     const account = existing
       ? await reconnectAccount(sync, principal, existing.id, credentials, { email: credentials.email })
       : (await connectAccount(sync, principal, { credentials, displayName: credentials.email, email: credentials.email, providerSubject: credentials.sub })).account;
@@ -143,7 +158,7 @@ const callbackRoute = createRoute({
   tags,
   request: { query: z.object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional() }) },
   responses: {
-    302: { description: 'Back to `returnTo`, with `accountId` on success or `error` (e.g. `access_denied`, `missing_scopes`, `flow_expired`)' },
+    302: { description: 'Back to `returnTo`, with `accountId` on success or `error` (e.g. `access_denied`, `missing_scopes`, `flow_expired`, and for incremental consent `consent_declined`, `account_mismatch`)' },
     ...problemResponses(400, 401, 403),
   },
 });

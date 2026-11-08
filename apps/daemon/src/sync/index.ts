@@ -4,9 +4,11 @@
  * The API uses the same deps for the shared account flows in `accounts.ts`.
  */
 import type { SecretBox, SyncKind } from '@supercal/db';
-import { registry, type AdapterRegistry, type GuardedFetch } from '@supercal/providers';
+import { registry, type AdapterRegistry, type GoogleClientOptions, type GuardedFetch } from '@supercal/providers';
 import { createFeedService, type FeedService } from '../feeds/service.ts';
 import type { Logger } from '../log.ts';
+import { createWriteBudget, type WriteBudget } from '../sinks/budget.ts';
+import { createGoogleSinkClient, runGoogleSink } from '../sinks/google.ts';
 import type { SyncDeps, TenantJob } from './context.ts';
 import { runDiscover } from './discovery.ts';
 import { runMaintenance } from './maintenance.ts';
@@ -16,7 +18,6 @@ import { createSlots, StopTargetError, type Job, type JobHandler } from './sched
 
 /** Concurrent jobs per account (Graph allows 4 concurrent requests per mailbox). */
 const PER_ACCOUNT = 2;
-const HOUR = 60 * 60 * 1000;
 
 export type { SyncDeps } from './context.ts';
 
@@ -28,6 +29,8 @@ export function createSyncDeps({
   perAccount = PER_ACCOUNT,
   feeds = createFeedService(secrets),
   pushBaseUrl,
+  google,
+  sinkBudget = createWriteBudget(),
 }: {
   secrets: SecretBox;
   feeds?: FeedService;
@@ -36,8 +39,21 @@ export function createSyncDeps({
   adapters?: AdapterRegistry;
   perAccount?: number;
   pushBaseUrl?: string | null | undefined;
+  /** The Google OAuth client (and, in tests, a mocked API base), which enables Google sinks. */
+  google?: GoogleClientOptions | undefined;
+  sinkBudget?: WriteBudget;
 }): SyncDeps {
-  return { adapters, secrets, fetch, log, feeds, pushBaseUrl: pushBaseUrl ?? null, accountSlot: createSlots(perAccount) };
+  return {
+    adapters,
+    secrets,
+    fetch,
+    log,
+    feeds,
+    pushBaseUrl: pushBaseUrl ?? null,
+    accountSlot: createSlots(perAccount),
+    googleSinks: google ? createGoogleSinkClient(google) : null,
+    sinkBudget,
+  };
 }
 
 const ofTenant = (job: Job): TenantJob => {
@@ -45,17 +61,13 @@ const ofTenant = (job: Job): TenantJob => {
   return { ...job, tenantId: job.tenantId };
 };
 
-/** The job for every target kind. `sink` arrives with the sink providers. */
+/** The job for every target kind. Google is the only sink provider (architecture §11). */
 export function syncHandlers(deps: SyncDeps): Record<SyncKind, JobHandler> {
-  const notYet: JobHandler = async (job) => {
-    deps.log.warn('no handler for this target kind yet', { targetId: job.id, kind: job.kind });
-    return { nextRunInMs: HOUR };
-  };
   return {
     discover: (job, signal) => runDiscover(deps, ofTenant(job), signal),
     events: (job, signal) => runEvents(deps, ofTenant(job), signal),
     maintenance: (job) => runMaintenance(job, deps.log.child({ job: job.target })),
     push_renew: (job, signal) => runPushRenew(deps, ofTenant(job), signal),
-    sink: notYet,
+    sink: (job, signal) => runGoogleSink(deps, ofTenant(job), signal),
   };
 }

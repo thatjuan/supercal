@@ -6,7 +6,7 @@
  */
 import { apiReference } from '@scalar/hono-api-reference';
 import type { SecretBox } from '@supercal/db';
-import { createGuardedFetch, type AdapterRegistry, type GuardedFetch } from '@supercal/providers';
+import { createGuardedFetch, type AdapterRegistry, type GoogleClientOptions, type GuardedFetch } from '@supercal/providers';
 import type { MiddlewareHandler } from 'hono';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Auth } from '../auth/auth.ts';
@@ -27,6 +27,7 @@ import { instanceRoutes, type Signup } from './instance.ts';
 import { createApiApp } from './kit/index.ts';
 import { meRoutes } from './me.ts';
 import { publicationRoutes } from './publications.ts';
+import { sinkRoutes } from './sinks.ts';
 import { subscribeRoutes } from './subscribe.ts';
 import { streamRoutes, type StreamOptions } from './stream.ts';
 import { tenantRoutes } from './tenants.ts';
@@ -46,8 +47,9 @@ export const openApiConfig = {
  * What the API runs on: Better Auth, the secret box for values stored encrypted, the bus that
  * feeds the live stream (`idleBus` where nothing streams, such as OpenAPI generation and tests),
  * for connecting accounts the outbound transport, provider adapters (default: no LAN
- * exceptions, and the registered adapters) and OAuth settings (default: no OAuth providers), and
- * the sign-up mode `GET /api/v1/instance` reports (default: `invite`).
+ * exceptions, and the registered adapters) and OAuth settings (default: no OAuth providers), the
+ * Google API client sinks call (default: the Google OAuth client against the real API), and the
+ * sign-up mode `GET /api/v1/instance` reports (default: `invite`).
  */
 export type ApiDeps = {
   auth: Auth;
@@ -57,6 +59,7 @@ export type ApiDeps = {
   fetch?: GuardedFetch;
   adapters?: AdapterRegistry;
   oauth?: OAuthConfig;
+  googleApi?: GoogleClientOptions | undefined;
   signup?: Signup;
 };
 
@@ -65,7 +68,7 @@ export type OAuthConfig = { webOrigin?: string | undefined; stateSecret: string;
 
 /** Builds the API. The docs and `/api/v1/instance` are mounted before authentication, so they are public. */
 export function createApi(
-  { auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig, signup = 'invite' }: ApiDeps,
+  { auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig, googleApi, signup = 'invite' }: ApiDeps,
   authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth),
 ) {
   const feeds = createFeedService(secrets);
@@ -75,6 +78,7 @@ export function createApi(
     fetch: fetch ?? createGuardedFetch({ allow: [] }),
     log: createLogger({ component: 'api' }),
     ...(adapters && { adapters }),
+    google: googleApi ?? (oauthConfig?.google && { clientId: oauthConfig.google.clientId, clientSecret: oauthConfig.google.clientSecret, tokenUrl: oauthConfig.google.tokenUrl }),
   });
   const oauth: OAuthDeps = {
     publicUrl: auth.publicUrl,
@@ -115,5 +119,6 @@ export function createApi(
     .route('/', feedRoutes)
     .route('/', publicationRoutes)
     .route('/', subscribeRoutes)
+    .route('/', sinkRoutes)
     .route('/', streamRoutes(bus, stream));
 }
