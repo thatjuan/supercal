@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { closeDb, connectDb, migrate, newId, withControl, type TenantId } from '@supercal/db';
+import { closeDb, connectDb, migrate, newId, withControl, withTenant, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import postgres from 'postgres';
-import { FEED_CREDENTIALS_CHANNEL, startBus, wake, WAKE_CHANNEL, type Bus, type BusEvents } from './bus.ts';
+import { FEED_CREDENTIALS_CHANNEL, notifyDavLoginRevoked, startBus, wake, WAKE_CHANNEL, type Bus, type BusEvents } from './bus.ts';
 import { createLogger } from './log.ts';
 
 /** Resolves once `check` passes, polling every 10 ms; rejects after `ms`. */
@@ -19,6 +19,7 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
     change: [],
     wake: [],
     'feed-credentials-rotated': [],
+    'dav-login-revoked': [],
     event: [],
     'auth-revoked': [],
     reconnected: [],
@@ -33,6 +34,7 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
     bus.on('change', (e) => events.change.push(e));
     bus.on('wake', (e) => events.wake.push(e));
     bus.on('feed-credentials-rotated', (e) => events['feed-credentials-rotated'].push(e));
+    bus.on('dav-login-revoked', (e) => events['dav-login-revoked'].push(e));
     bus.on('reconnected', (e) => events.reconnected.push(e));
   });
 
@@ -81,6 +83,17 @@ describe.skipIf(!testDatabaseUrl)('notification bus', () => {
     expect(sizes.length).toBeGreaterThan(1);
     expect(Math.max(...sizes)).toBeLessThan(7000);
     await raw.unlisten();
+  });
+
+  test('device revocation publishes its typed event on commit', async () => {
+    const loginId = newId('dvl');
+    await withTenant('org_1' as TenantId, async (tx) => {
+      await notifyDavLoginRevoked(tx, loginId);
+      await Bun.sleep(50);
+      expect(events['dav-login-revoked']).toEqual([]);
+    });
+    await eventually(() => events['dav-login-revoked'].length === 1);
+    expect(events['dav-login-revoked']).toEqual([{ loginId }]);
   });
 
   test('reports a lost connection and emits reconnected once it listens again', async () => {

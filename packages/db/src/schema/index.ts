@@ -9,6 +9,7 @@ export * from './accounts.ts';
 export * from './events.ts';
 export * from './feeds.ts';
 export * from './system.ts';
+export * from './dav-logins.ts';
 export type { Span } from './columns.ts';
 
 export type ApiKeyTenant = typeof apiKeyTenant.$inferSelect;

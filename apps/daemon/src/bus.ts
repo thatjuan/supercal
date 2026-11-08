@@ -18,6 +18,7 @@ import {
   parseId,
   type ControlTx,
   type FeedId,
+  type DavLoginId,
   type IdPrefix,
   type SyncTargetId,
   type TenantId,
@@ -73,6 +74,10 @@ const eventPayload = z
  * its JSON payload. Adding an entry adds a typed event.
  */
 const CHANNELS = {
+  'dav-login-revoked': {
+    channel: 'supercal_dav_login_revoked',
+    payload: z.object({ id: typeId('dvl') }).transform(({ id }) => ({ loginId: id })),
+  },
   change: {
     channel: CHANGES_CHANNEL,
     payload: z
@@ -133,6 +138,7 @@ export async function startBus(url: string, log: Logger, { pingMs = 5_000 } = {}
     change: new Set(),
     wake: new Set(),
     'feed-credentials-rotated': new Set(),
+    'dav-login-revoked': new Set(),
     event: new Set(),
     'auth-revoked': new Set(),
     reconnected: new Set(),
@@ -259,4 +265,9 @@ export async function notifyEvent(tx: TenantTx, tenantId: TenantId, event: Notif
  */
 export async function publishAuthRevoked(db: Pick<ControlTx, 'execute'>, userId: string): Promise<void> {
   await db.execute(drizzleSql`select pg_notify(${AUTH_REVOKED_CHANNEL}, ${JSON.stringify({ u: userId })})`);
+}
+
+/** Invalidates device verification caches across replicas on commit. */
+export async function notifyDavLoginRevoked(tx: TenantTx, loginId: DavLoginId): Promise<void> {
+  await tx.execute(drizzleSql`select pg_notify('supercal_dav_login_revoked', ${JSON.stringify({ id: loginId })})`);
 }

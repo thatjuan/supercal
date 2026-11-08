@@ -20,7 +20,7 @@ export type Principal = {
   userId: string;
   tenantId: TenantId;
   role: TenantRole;
-  via: 'session' | 'apiKey';
+  via: 'session' | 'apiKey' | 'davLogin';
   isOperator: boolean;
 };
 
@@ -29,7 +29,7 @@ export type ApiEnv = { Variables: { principal: Principal; auth: Auth; feeds: Fee
 export const isTenantRole = (role: string): role is TenantRole => TENANT_ROLES.some((known) => known === role);
 
 /** The user's current role in `tenantId` and whether they are the operator; null if not a member (or banned). */
-async function membership(userId: string, tenantId: TenantId) {
+export async function membership(userId: string, tenantId: TenantId) {
   const [row] = await withControl((tx) =>
     tx
       .select({ role: member.role, userRole: user.role, banned: user.banned })

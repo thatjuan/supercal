@@ -53,7 +53,7 @@ Vocabulary from `docs/brief.md`: tenant, account, source calendar, feed, publica
 ### Identifiers
 
 - Tenant = Better Auth `organization`. `tenant_id` is **text** (Better Auth IDs are opaque strings) *(platform)*.
-- Our own entities use prefixed TypeIDs as text: `acc_…`, `cal_…`, `feed_…`, `pub_…`, `snk_…`, `lnk_…`. Exposed as-is in the API. Branded TS types in `packages/db` prevent mixing.
+- Our own entities use prefixed TypeIDs as text: `acc_…`, `cal_…`, `feed_…`, `pub_…`, `snk_…`, `lnk_…`, `dvl_…` (device DAV login). Exposed as-is in the API. Branded TS types in `packages/db` prevent mixing.
 - Three identities of an event are distinct and never conflated *(ingest)*: provider object id (`source_object` key within a source calendar), iCalendar UID (used for merging and output), and recurrence identity (RECURRENCE-ID / original start).
 
 ## 4. Data model (Postgres)
@@ -74,6 +74,7 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
 | `push_lease` | `account_id`, `target` (`account` for Graph mailbox-wide subscriptions, `calendar` or `calendar-list` for Google), `target_id`, `provider_channel_id`, `provider_resource_id`, `expires_at`, `secret_hash`, `provider_state`. Overlap allowed during Google renewal. |
 | `feed` | `id`, `owner_user_id`, `name`, `is_default`, `caldav_username` (unique, `[a-z0-9-]`), `caldav_password_hash` (argon2id), `ics_token_hash` (sha256), `uid_secret` (encrypted; HMAC key for privacy UIDs). At most one default feed per user and tenant (partial unique index). |
 | `calendar_link` | `id`, `calendar_id` (cascade), optional `name`, unique `token_hash` (sha256), immutable `privacy`, `uid_secret` (encrypted per-link HMAC key), nullable `expires_at`, `created_by`, `created_at`. Several independent view-only URLs may publish one hosted or imported calendar. |
+| `dav_login` | Per-device credential: `id` (`dvl_…`), `tenant_id`, `user_id` (cascades), `name`, globally unique `username`, argon2id `password_hash`, `last_used_at` (updated at most hourly), `created_at`. |
 | `publication` | `id`, `feed_id`, `kind` (`passthrough`, `virtual`), `slug`, `name`, `color`, `privacy` (`full`, `title-only`, `busy-only`), `filters` jsonb (`hideDeclined`, `hideCancelled`, `hideAllDay`), `keep_alarms`, `enabled`, `sort_order`, `epoch`, `config_version`, `status` (`ok`, `disabled-invalid`) + `status_detail` (set when Supercal disables it, e.g. a virtual publication left with one source). Slug unique per feed. |
 | `publication_source` | `(publication_id, source_calendar_id)` PK, `priority`. |
 | `sink`, `sink_event` | `sink(id, publication_id, account_id, provider, provider_subject, provider_calendar_id, status)`; `sink_event(sink_id, uid, provider_event_id, applied_revision)`. |
@@ -146,11 +147,12 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
     - `push_lease`: webhook routing
     - `feed`: lookup by `caldav_username` / `ics_token_hash`
     - `calendar_link`: lookup by `token_hash`, with SELECT limited to `id`, `tenant_id`, `token_hash` and `expires_at`
+    - `dav_login`: only `id`, `tenant_id`, `user_id`, `username`, `password_hash` for device authentication
     - `api_key_tenant`: key → tenant resolution
     - `drizzle.__drizzle_migrations`: the migrations check in `/readyz`
     - Better Auth tables
 
-    It never reads `resource`, `source_object` or credentials. Once the tenant is resolved, the request continues in `withTenant`.
+    It never reads `resource`, `source_object` or provider credentials. Once the tenant is resolved, the request continues in `withTenant`.
   - **Recommended production setup**: `DATABASE_URL` is a login that is a member of both roles and owns nothing; `DATABASE_MIGRATION_URL` is the schema owner. **Single-URL mode** (one owner login for both) is supported for small self-hosts and documented as weaker: `SET LOCAL ROLE` still enforces RLS, but a code path that escapes the wrapper keeps owner/DDL rights *(platform review)*.
 - **Secrets at rest.** Envelope AES-256-GCM via WebCrypto. A per-value data key is wrapped by a versioned master key from `SUPERCAL_KEYS=v2:…,v1:…`. The authenticated context binds tenant, record and field. Old-key records are lazily re-encrypted with compare-and-swap *(platform)*.
 - **Feed credentials.**
@@ -158,6 +160,10 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
   - The ICS token is 32 random bytes; its sha256 is stored. Rotation revokes immediately.
   - Feed credentials never grant API access, and API credentials never open feeds.
   - A published link has its own 32-byte ICS token, stored only as a sha256 hash, and its own encrypted UID key bound to the `calendar_link` row. Only creation returns the token and subscription URLs; listing and updating return metadata. Revocation deletes the link. Unknown, expired, revoked and gone-calendar links all return an empty 404 before conditional or cached responses.
+- **DAV logins.** Each device has a named login owned by one user in one tenant, separate from feed credentials. `POST /api/v1/dav-logins` returns a username, password and server URL once; `GET` lists only the caller's logins without secrets; `DELETE /api/v1/dav-logins/{id}` permits the owner or a tenant admin and revokes immediately. At most 20 logins per user and tenant; creation and deletion are audited.
+  - Usernames are `<handle>-dav-<8 random [a-z0-9]>`; feed usernames end in six random characters, keeping the sets disjoint. Passwords use the same argon2id hashing, five-minute verification cache and throttling as feed passwords.
+  - Every request reloads the credential hash and checks current tenant membership and bans. Revocation broadcasts `dav-login-revoked` to drop caches across replicas; the row check also catches missed notifications. The acting principal has `via: 'davLogin'` in audit entries.
+  - A DAV login grants access to the user's own active hosted calendars. It grants neither management API nor feed access; API keys cannot authenticate to DAV. Tenant admins still see only their own calendars through their device login.
 - **Outbound fetches.** Every user-influenced request (ICS, CalDAV, discovery, redirects, multiget hrefs) goes through `guardedFetch` *(ingest)*:
   - Resolve DNS. Reject mixed or non-global answers (loopback, private, link-local and metadata, CGNAT, ULA, multicast, IPv4-mapped forms).
   - Dial the vetted IP, and check the certificate against the original hostname with `checkServerIdentity`.
@@ -237,13 +243,20 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 
 ## 9. Feed delivery (`dav` role)
 
-- **CalDAV**, read-only *(feed)*:
+- **CalDAV feed logins**, read-only *(feed)*:
   - Endpoints: `/.well-known/caldav` → `/dav/`; principal `/dav/<username>/`; home `/dav/<username>/cal/`; one collection per enabled publication `/dav/<username>/cal/<pubSlug>/`.
   - Properties: `current-user-principal`, `principal-URL`, `calendar-home-set`, `calendar-user-address-set`, `displayname`, Apple `calendar-color` (`#RRGGBBAA`) and `calendar-order`, CS `getctag`, `sync-token`, `supported-calendar-component-set` (VEVENT), `supported-report-set`, and `current-user-privilege-set` limited to `read` (clients show the calendars read-only).
   - Reports: `calendar-query` (time-range on `span`), `calendar-multiget`, `sync-collection`.
   - PROPFIND on `/` and `/dav/` answers `current-user-principal`, because python caldav starts discovery at the root *(feed review)*. `Depth: infinity` gets 403 with `<d:propfind-finite-depth/>` (RFC 4918 §9.1).
   - Writes get 403 `need-privileges`.
   - Responses: `DAV: 1, 3, calendar-access`; trailing slashes on collections; namespace-correct XML parsing.
+- **Hosted CalDAV with a device login** uses the same principal and home paths. Its collections are `/dav/<username>/cal/<segment>/`, where `segment` is `source_calendar.provider_calendar_id`. REST-created calendars use their `cal_…` id; MKCALENDAR preserves the client's chosen segment, rejecting `cal_` prefixes reserved for shared calendars. The home lists only the user's active hosted calendars.
+  - The shared `CollectionView` interface supplies listing indexes, objects, range queries and sync behavior to one set of PROPFIND, REPORT and GET handlers. Feed collections project and merge UIDs as before. Hosted indexes read names, UIDs and ETags without payloads; GET and reports return the submitted iCalendar verbatim, with the same revision ETag as direct REST access.
+  - User homes advertise `bind` and `unbind` in addition to read privileges. Writable collections add `write-content`; managed collections also add `write` and `write-properties`. Hosted properties include calendar description, a generated VTIMEZONE and the 1 MiB maximum resource size. No scheduling properties or scheduling capability are advertised.
+  - PUT requires `text/calendar`, accepts client object names up to 255 UTF-8 bytes ending in `.ics` with no decoded slash, and honors `If-Match` and `If-None-Match: *`. It returns 201 for creation or 204 for replacement, with ETag. Object DELETE honors `If-Match` and returns 204.
+  - MKCALENDAR creates at the requested URI; an existing segment gets 403 `resource-must-be-null`. PROPPATCH supports display name, Apple color/order, description and timezone, applying the set atomically: an unsupported or invalid property gets 403 and the remaining properties get 424 in the 207 response. Colors lose their alpha and are stored as lowercase `#rrggbb`. Collection DELETE soft-deletes through the hosted service. Every mutation audits its DAV principal.
+  - Object writes use `writeObject` and `deleteObject`, as REST does. CalDAV validation conditions accompany 403 errors; a duplicate UID includes the existing href. Quota returns 507 `quota-not-exceeded`, stale preconditions return 412, and missing objects return 404. MOVE, COPY, LOCK, UNLOCK, MKCOL and POST return 403 `need-privileges`. Feed logins remain read-only. Authenticated user OPTIONS advertises the supported write methods; unauthenticated OPTIONS retains the read-only response.
+  - Direct sync tokens are `https://<host>/ns/sync/<calId>/<sync_epoch>/<seq>`. Incremental sync preserves client names on changes and tombstones. Recreating a deleted UID at a different name increments the epoch and invalidates old tokens, preventing a stranded old href.
 - **ICS**: `/ics/<token>/<pubSlug>.ics` and `/ics/<token>/all.ics` (combined: deduped by source UID, first publication by `sort_order` wins, §5). `NAME` + `X-WR-CALNAME`, `REFRESH-INTERVAL;VALUE=DURATION:PT1H` + `X-PUBLISHED-TTL:PT1H`, no `X-WR-TIMEZONE`. ETag/Last-Modified/304, br/gzip, `Vary: Accept-Encoding`.
 - **Published calendar links**: `GET|HEAD /ics/l/<token>.ics` publishes one hosted or imported calendar directly from `resource`, using `audience: public`, the link's privacy and no filters or alarms. It uses the calendar's name and the same name/refresh properties as a feed publication. A gone calendar returns an empty 404; restoring it makes retained links serve again.
   - `GET|POST /api/v1/calendars/{id}/links` and `PATCH|DELETE /api/v1/calendars/{id}/links/{linkId}` use `canManageOwned`. Creation requires an explicit privacy mode, accepts a label and future expiry, and limits each calendar to 20 links under a calendar row lock (409 `link-quota`). A patch may change the label or future expiry, or clear either with null; privacy is immutable in the API and database permissions. Create another link to change privacy.
@@ -286,6 +299,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 - **Resources**:
   - `GET /me`.
   - `GET|POST /tenants` (operator), `GET|PATCH /tenant` (current).
+  - `GET|POST /dav-logins`, `DELETE /dav-logins/{id}` (per-device CalDAV credentials, password returned once).
   - `GET|POST /api-keys`, `DELETE /api-keys/{id}`.
   - `GET|POST /accounts`, `GET|PATCH|DELETE /accounts/{id}`, `POST /accounts/{id}/sync`. POST covers caldav, icloud and ics: credentials are verified and calendars discovered before 201.
   - `POST /accounts/oauth/{google|microsoft}/start` → `{ authorizationUrl }`; `GET /oauth/{provider}/callback` → redirect to `returnTo` (allowlisted).

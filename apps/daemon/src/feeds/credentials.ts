@@ -42,6 +42,12 @@ export function caldavUsername(handle: string): string {
   return `${handle}-${suffix}`;
 }
 
+/** Device usernames have an eight-character suffix, disjoint from feed usernames. */
+export function davUsername(handle: string): string {
+  const suffix = [...randomBytes(8)].map((byte) => SUFFIX_ALPHABET[byte % SUFFIX_ALPHABET.length]).join('');
+  return `${handle}-dav-${suffix}`;
+}
+
 /** A CalDAV app password: 24 random bytes as lowercase base32. */
 export async function newCaldavPassword(): Promise<{ password: string; hash: string }> {
   const password = base32(randomBytes(24));

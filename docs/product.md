@@ -29,7 +29,10 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - Delete a hosted calendar reversibly for 30 days. Restore retains its events; publications stay
   disabled and removed virtual memberships must be added again. After 30 days, deletion is permanent.
 - Store iCalendar events through one service layer, preserving raw payloads and unknown properties.
-  Event REST writes and writable CalDAV follow in #25 and #26; the dashboard adds no event editor.
+  Create, edit and delete events from calendar apps through read-write CalDAV; create and rename
+  calendars there too. Each device gets its own named DAV login with a password shown once and
+  immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
+  Event REST writes follow in #25; the dashboard adds no event editor.
 - Keep at most 100 retained hosted calendars per user, with up to 50,000 objects per calendar and
   1 MiB per object. Attendees are stored as data; Supercal sends no invitations.
 
