@@ -33,9 +33,9 @@ function AppLayout() {
   if (!me.data) return null;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full max-md:flex-col">
       <Sidebar me={me.data} live={live} />
-      <main className="min-w-0 flex-1 overflow-y-auto px-6 pt-12 pb-10 lg:pl-10">
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-12 pb-10 max-md:px-4 max-md:pt-5 lg:pl-10">
         <Outlet />
       </main>
     </div>

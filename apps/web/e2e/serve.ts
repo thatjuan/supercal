@@ -1,7 +1,7 @@
 /**
  * Playwright's web server (run with Bun): a real daemon over a fresh `<TEST_DATABASE_URL>_e2e`
- * database, serving the built dashboard (`dist/`) on `E2E_PORT` in open sign-up mode, so the browser
- * talks to it same-origin exactly as in production.
+ * database, serving the built dashboard (`dist/`), CalDAV and ICS on `E2E_PORT` in open sign-up mode, so
+ * the browser talks to it same-origin exactly as in production.
  */
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 
@@ -18,7 +18,7 @@ const daemon = Bun.spawn(['bun', new URL('../../daemon/src/main.ts', import.meta
     SUPERCAL_PUBLIC_URL: origin,
     SUPERCAL_INSECURE_DEV: '1',
     SUPERCAL_SIGNUP: 'open',
-    SUPERCAL_ROLES: 'api',
+    SUPERCAL_ROLES: 'api,dav',
     SUPERCAL_WEB_DIR: new URL('../dist', import.meta.url).pathname,
   },
   stdout: 'inherit',
