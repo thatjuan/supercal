@@ -1055,6 +1055,134 @@
           }
         }
       },
+      "SubscribeInfo": {
+        "type": "object",
+        "properties": {
+          "caldav": {
+            "type": "object",
+            "properties": {
+              "serverUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "username": {
+                "type": "string"
+              },
+              "principalUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "wellKnown": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "serverUrl",
+              "username",
+              "principalUrl",
+              "wellKnown"
+            ]
+          },
+          "ics": {
+            "type": "object",
+            "properties": {
+              "hasToken": {
+                "type": "boolean",
+                "description": "False until a token is issued; if the user lost it, rotate to get a new one"
+              },
+              "publications": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+                      "example": "pub_01h455vb4pex5vsknk084sn02q"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "path"
+                  ]
+                }
+              },
+              "combinedPath": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "hasToken",
+              "publications",
+              "combinedPath"
+            ]
+          },
+          "links": {
+            "$ref": "#/components/schemas/SubscribeLinks"
+          },
+          "appleProfileUrl": {
+            "type": "string"
+          },
+          "freshness": {
+            "type": "object",
+            "properties": {
+              "caldav": {
+                "type": "string"
+              },
+              "google": {
+                "type": "string"
+              },
+              "outlook": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "caldav",
+              "google",
+              "outlook"
+            ]
+          }
+        },
+        "required": [
+          "caldav",
+          "ics",
+          "links",
+          "appleProfileUrl",
+          "freshness"
+        ],
+        "description": "ICS paths and links contain the literal placeholder `{token}`: replace it with the ICS token returned by feed creation or `rotateFeedIcsToken` (base64url, so it needs no further escaping). The token itself is never returned here."
+      },
+      "SubscribeLinks": {
+        "type": "object",
+        "properties": {
+          "google": {
+            "type": "string",
+            "format": "uri"
+          },
+          "outlookPersonal": {
+            "type": "string",
+            "format": "uri"
+          },
+          "outlookWork": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "google",
+          "outlookPersonal",
+          "outlookWork"
+        ],
+        "description": "One-click links that subscribe to the combined feed (`all.ics`)"
+      },
       "StreamEvent": {
         "oneOf": [
           {
@@ -3035,6 +3163,271 @@
         "responses": {
           "204": {
             "description": "Deleted"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/subscribe": {
+      "get": {
+        "operationId": "getFeedSubscribeInfo",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How to subscribe to the feed, with `{token}` placeholders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscribeInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/subscribe/links": {
+      "post": {
+        "operationId": "expandFeedSubscribeLinks",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The subscribe links with the token filled in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscribeLinks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/feeds/{id}/mobileconfig": {
+      "get": {
+        "operationId": "getFeedMobileconfig",
+        "tags": [
+          "Feeds"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^feed_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "feed_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An unsigned `com.apple.caldav.account` profile without the password; the device asks for it during install",
+            "content": {
+              "application/x-apple-aspen-config": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad request",

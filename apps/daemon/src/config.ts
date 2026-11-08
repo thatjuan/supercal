@@ -47,6 +47,8 @@ const configSchema = z
     MICROSOFT_CLIENT_ID: optional,
     MICROSOFT_CLIENT_SECRET: optional,
     SUPERCAL_EGRESS_ALLOW: egressAllow.default([]),
+    /** Bound on cached ICS bodies, in MiB. */
+    SUPERCAL_ICS_CACHE_MB: z.coerce.number({ error: 'must be a number of MiB' }).min(0).default(64),
     RESEND_API_KEY: optional,
     MAIL_FROM: optional,
     WEB_ORIGIN: url.optional(),

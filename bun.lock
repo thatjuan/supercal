@@ -29,6 +29,7 @@
       "devDependencies": {
         "@apidevtools/swagger-parser": "13.1.0",
         "auth": "1.7.18",
+        "ical.js": "2.2.1",
         "tsdav": "2.5.0",
       },
     },

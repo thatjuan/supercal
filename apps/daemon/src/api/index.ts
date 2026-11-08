@@ -18,6 +18,7 @@ import { feedRoutes } from './feeds.ts';
 import { createApiApp } from './kit/index.ts';
 import { meRoutes } from './me.ts';
 import { publicationRoutes } from './publications.ts';
+import { subscribeRoutes } from './subscribe.ts';
 import { streamRoutes, type StreamOptions } from './stream.ts';
 import { tenantRoutes } from './tenants.ts';
 
@@ -64,5 +65,6 @@ export function createApi({ auth, secrets, bus, stream }: ApiDeps, authenticate:
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)
     .route('/', publicationRoutes)
+    .route('/', subscribeRoutes)
     .route('/', streamRoutes(bus, stream));
 }
