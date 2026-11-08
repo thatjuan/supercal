@@ -15,6 +15,7 @@
     "typecheck": "bun run --filter './apps/*' --filter './packages/*' typecheck",
     "test": "bun test ./apps ./packages",
     "test:egress": "bun test ./packages/providers/test/transport",
+    "test:dav-clients": "bun test --timeout 300000 ./apps/daemon/test/dav/clients/clients.e2e.ts",
     "check": "bun run typecheck && bun run test && bun run check:api-client",
     "migrate": "bun packages/db/scripts/migrate.ts",
     "api:spec": "bun apps/daemon/scripts/api-spec.ts",
