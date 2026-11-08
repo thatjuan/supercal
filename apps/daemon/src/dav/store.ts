@@ -33,6 +33,9 @@ import {
 } from '@supercal/db';
 import { and, asc, eq, inArray, max, sql } from 'drizzle-orm';
 import { openUidSecret } from '../feeds/credentials.ts';
+import { deviceHomeCalendars, atLeast } from '../hosted/access.ts';
+import { memberSpec } from '../hosted/read.ts';
+import type { Principal } from '../auth/principal.ts';
 import type { DavLogin } from './auth.ts';
 
 /** Look up device logins before feeds, using only control-role credential columns. */
@@ -50,7 +53,7 @@ export async function loginByUsername(username: string): Promise<DavLogin | null
 type Source = { id: SourceCalendarId; priority: number; ownerAddresses: string[] };
 
 /** An enabled publication with what projecting it needs. */
-export type Pub = Publication & { spec: PublicationSpec; sources: Source[]; sourceIds: SourceCalendarId[] };
+export type Pub = Pick<Publication, 'name' | 'color' | 'sortOrder' | 'slug' | 'epoch'> & { id: string; spec: PublicationSpec; sources: Source[]; sourceIds: SourceCalendarId[] };
 
 export type FeedAccount = { feed: Feed; ownerEmail: string | null; publications: Pub[] };
 
@@ -165,6 +168,7 @@ export type CollectionView = {
   display: { name: string; color: string | null; sortOrder: number; description?: string | null; timezone?: string | null };
   privileges: 'read' | 'write' | 'manage';
   calendar?: SourceCalendar;
+  shared?: boolean;
   index(tx: TenantTx): Promise<PubIndex>;
   objects(tx: TenantTx, uids: string[]): Promise<Map<string, { ics: string }>>;
   query(tx: TenantTx, range?: { from: Date; to: Date }): Promise<Map<string, { ics: string }>>;
@@ -245,15 +249,35 @@ export function hostedCollection(calendar: SourceCalendar, privileges: Collectio
 }
 
 export type UserAccount = { login: typeof davLogin.$inferSelect; ownerEmail: string | null; collections: CollectionView[] };
-/** Reload the credential and active hosted calendars inside the authenticated tenant transaction. */
-export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string): Promise<UserAccount | null> {
+/** Reload the credential and active owned/shared collections inside the authenticated tenant transaction. */
+export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string, principal: Principal): Promise<UserAccount | null> {
   const [row] = await tx.select({ login: davLogin, email: user.email }).from(davLogin)
     .innerJoin(user, eq(user.id, davLogin.userId)).where(eq(davLogin.id, id));
   if (!row) return null;
-  const calendars = await tx.select({ calendar: sourceCalendar }).from(sourceCalendar)
-    .innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId))
-    .where(and(eq(calendarAccount.ownerUserId, row.login.userId), eq(calendarAccount.provider, 'hosted'), eq(sourceCalendar.state, 'active')))
-    .orderBy(asc(sourceCalendar.sortOrder), asc(sourceCalendar.id));
+  const calendars = (await deviceHomeCalendars(tx, principal)).filter(({ calendar }) => calendar.state === 'active');
+  const accounts = calendars.length ? await tx.select({ id: calendarAccount.id, ownerId: user.id, ownerName: user.name, email: calendarAccount.email, provider: calendarAccount.provider })
+    .from(calendarAccount).innerJoin(user, eq(user.id, calendarAccount.ownerUserId))
+    .where(inArray(calendarAccount.id, calendars.map(({ calendar }) => calendar.accountId))) : [];
+  const byId = new Map(accounts.map((account) => [account.id, account]));
+  const collections = calendars.flatMap(({ calendar, access }): CollectionView[] => {
+    const account = byId.get(calendar.accountId)!;
+    const own = account.ownerId === principal.userId;
+    // Own imported calendars continue to be served through feeds.
+    if (own && account.provider !== 'hosted') return [];
+    const name = own ? calendar.name : `${calendar.name} (${account.ownerName})`;
+    if (account.provider === 'hosted' && access !== 'read') {
+      const view = hostedCollection(calendar, atLeast(access, 'manage') ? 'manage' : 'write', host);
+      return [{ ...view, segment: own ? calendar.providerCalendarId : calendar.id, display: { ...view.display, name }, shared: !own }];
+    }
+    const ownerAddresses = account.email ? [`mailto:${account.email}`] : [];
+    const spec = { ...memberSpec(calendar.id, ownerAddresses), audience: access === 'read' ? 'member' as const : 'owner' as const };
+    const pub: Pub = { id: `${calendar.id}.r`, slug: calendar.id, name, color: calendar.color, sortOrder: calendar.sortOrder, epoch: calendar.syncEpoch,
+      spec, sources: [{ id: calendar.id, priority: 0, ownerAddresses }], sourceIds: [calendar.id] };
+    return [{ ...publicationCollection(pub, host), calendar, shared: !own }];
+  });
+  // A user's provider_calendar_id wins over a colliding shared calendar id.
+  collections.sort((a, b) => Number(a.shared ?? false) - Number(b.shared ?? false) || a.display.sortOrder - b.display.sortOrder);
+
   await tx.update(davLogin).set({ lastUsedAt: sql`now()` }).where(and(eq(davLogin.id, id), sql`(${davLogin.lastUsedAt} is null or ${davLogin.lastUsedAt} < now() - interval '1 hour')`));
-  return { ...row, ownerEmail: row.email, collections: calendars.map(({ calendar }) => hostedCollection(calendar, 'manage', host)) };
+  return { ...row, ownerEmail: row.email, collections };
 }

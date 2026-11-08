@@ -15,16 +15,14 @@
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import {
-  calendarAccount,
   changesSince,
   connectionStatus,
   publicationState,
-  sourceCalendar,
   tombstoneFloor,
   withTenant,
   type TenantTx,
 } from '@supercal/db';
-import { eq } from 'drizzle-orm';
+import { accessibleCalendars } from '../hosted/access.ts';
 import { hasRole } from '../auth/policy.ts';
 import { resolvePrincipal, type Principal } from '../auth/principal.ts';
 import type { Bus } from '../bus.ts';
@@ -75,15 +73,9 @@ const getStream = createRoute({
   },
 });
 
-/** Source calendars whose events `principal` sees: their own accounts', or the whole tenant's for admins. */
+/** Re-evaluated on every wake so grants and revocations affect open streams. */
 const visibleCalendars = async (tx: TenantTx, principal: Principal) =>
-  (
-    await tx
-      .select({ id: sourceCalendar.id })
-      .from(sourceCalendar)
-      .innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId))
-      .where(hasRole(principal, 'admin') ? undefined : eq(calendarAccount.ownerUserId, principal.userId))
-  ).map((row) => row.id);
+  (await accessibleCalendars(tx, principal, 'read')).map(({ calendar }) => calendar.id);
 
 /** Where a new stream starts: `Last-Event-ID` if still replayable, else the current newest seq (with `reset` if it was not). */
 async function startingPosition(principal: Principal, lastEventId: string | undefined) {

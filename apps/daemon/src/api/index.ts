@@ -23,6 +23,8 @@ import { apiKeyRoutes } from './api-keys.ts';
 import { auditLogRoutes } from './audit-log.ts';
 import { calendarRoutes } from './calendars.ts';
 import { davLoginRoutes } from './dav-logins.ts';
+import { freeBusyRoutes } from './free-busy.ts';
+import { shareRoutes } from './shares.ts';
 import { eventRoutes } from './events.ts';
 import { feedRoutes } from './feeds.ts';
 import { instanceRoutes, type Signup } from './instance.ts';
@@ -120,6 +122,8 @@ export function createApi(
     .route('/', calendarRoutes)
     .route('/', linkRoutes(secrets))
     .route('/', eventRoutes)
+    .route('/', shareRoutes)
+    .route('/', freeBusyRoutes)
     .route('/', auditLogRoutes)
     .route('/', feedRoutes)
     .route('/', davLoginRoutes)

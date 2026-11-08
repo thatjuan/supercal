@@ -3,15 +3,16 @@ import { isDeepStrictEqual } from 'node:util';
 import { createRoute, z } from '@hono/zod-openapi';
 import { Temporal } from '@js-temporal/polyfill';
 import { addMissingTimezones, applyPatch, fromJSCalendar, InvalidPatchError, InvalidSplitError, JSCalendar, JSEvent, LocalDateTime, objectNameFor, parseCalendar, PRODID, recurrenceId, setProp, serializeCalendar, splitEvent, toJSCalendar, UnknownTimeZoneError, type EventResource, type JCalComponent } from '@supercal/core';
-import { calendarAccount, changesSince, resource, resourcesIn, sourceCalendar, sourceObject, tombstoneFloor, withTenant, type SourceCalendar, type TenantTx } from '@supercal/db';
+import { calendarAccount, changesSince, resource, resourcesIn, sourceObject, tombstoneFloor, withTenant, type SourceCalendar, type TenantTx } from '@supercal/db';
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { bodyLimit } from 'hono/body-limit';
 import { stream } from 'hono/streaming';
 import { type Principal } from '../auth/principal.ts';
-import { canManageOwned } from '../auth/policy.ts';
+import { requireAccess } from '../hosted/access.ts';
+import { readResources } from '../hosted/read.ts';
 import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import { expandCalendarResources, Occurrence, occurrenceWindow } from './occurrences.ts';
-import { audit, BadRequest, createApiApp, Forbidden, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
+import { audit, BadRequest, createApiApp, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
 
 const Event = JSEvent.clone().openapi('JSEvent', { description: 'JSCalendar 2.0 Event per draft-ietf-calext-jscalendarbis-22; unknown properties are preserved.' });
 const ReadEvent = JSCalendar.clone().openapi('JSCalendar', { description: 'JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Several detached recurrence instances read as a Group per mapping draft-ietf-calext-jscalendar-icalendar-29 §2.1.2.' });
@@ -68,13 +69,15 @@ function eventError(error: Error): ProblemError {
 }
 async function calendarOf(tx: TenantTx, principal: Principal, id: SourceCalendar['id'], write = false) {
   if (write) await lockHostedCalendar(tx, id);
-  const [row] = await tx.select({ calendar: sourceCalendar, provider: calendarAccount.provider, owner: calendarAccount.ownerUserId }).from(sourceCalendar)
-    .innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId)).where(eq(sourceCalendar.id, id));
-  if (!row) throw new NotFound('No such calendar');
-  if (!canManageOwned(principal, row.owner)) throw new Forbidden('You can only manage your own calendars');
-  if (write && row.provider !== 'hosted') throw new ProblemError(409, 'Calendar is not hosted', undefined, 'calendar-not-hosted');
-  if (write && row.calendar.state !== 'active') throw new ProblemError(409, 'Restore the deleted calendar before writing events');
-  return row.calendar;
+  const { calendar } = await requireAccess(tx, principal, id, write ? 'write' : 'read');
+  const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
+  if (write && account?.provider !== 'hosted') throw new ProblemError(409, 'Calendar is not hosted', undefined, 'calendar-not-hosted');
+  if (write && calendar.state !== 'active') throw new ProblemError(409, 'Restore the deleted calendar before writing events');
+  return calendar;
+}
+async function reads<T extends { data: EventResource | null }>(tx: TenantTx, principal: Principal, calendar: SourceCalendar, rows: T[]) {
+  const { access } = await requireAccess(tx, principal, calendar.id, 'read');
+  return readResources(calendar, access, rows);
 }
 /** Exported calendars use Supercal's PRODID; expose that calendar-level property on JSON entries. */
 function apiEvent(data: EventResource): ReturnType<typeof toJSCalendar> {
@@ -148,12 +151,19 @@ eventRoutes
       const overlap = query.from || query.to ? sql`${resource.span} && tstzrange(${query.from ?? null}::timestamptz, ${query.to ?? null}::timestamptz)` : undefined;
       const rows = await tx.select().from(resource).where(and(eq(resource.sourceCalendarId, calendar.id), eq(resource.deleted, false), after === undefined ? undefined : gt(resource.uid, after), overlap)).orderBy(asc(resource.uid)).limit(query.limit + 1);
       const page = rows.slice(0, query.limit);
-      return { items: page.flatMap((row) => row.data ? [{ etag: tag(row), event: apiEvent(row.data) }] : []), nextCursor: rows.length > query.limit ? encode({ v: 1, uid: page.at(-1)!.uid }) : null };
+      const visible = await reads(tx, c.var.principal, calendar, page);
+      return { items: visible.flatMap((row) => row.data ? [{ etag: tag(row), event: apiEvent(row.data) }] : []), nextCursor: rows.length > query.limit ? encode({ v: 1, uid: page.at(-1)!.uid }) : null };
     });
     return c.json(result, 200);
   })
   .openapi(get, async (c) => {
-    const result = await withTenant(c.var.principal.tenantId, async (tx) => loadEvent(tx, await calendarOf(tx, c.var.principal, c.req.valid('param').id), c.req.valid('param').uid));
+    const result = await withTenant(c.var.principal.tenantId, async (tx) => {
+      const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id);
+      const row = await loadEvent(tx, calendar, c.req.valid('param').uid);
+      const [visible] = await reads(tx, c.var.principal, calendar, [row]);
+      if (!visible) throw new NotFound('No such event');
+      return visible;
+    });
     const etag = tag(result);
     const matches = c.req.header('if-none-match')?.split(',').map((v) => v.trim().replace(/^W\//, ''));
     if (matches?.includes(etag) || matches?.includes('*')) return c.body(null, 304, { ETag: etag });
@@ -230,7 +240,7 @@ eventRoutes
     const window = occurrenceWindow(c.req.valid('query'));
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id);
-      return expandCalendarResources(await resourcesIn(tx, [calendar.id], window), window, calendar.timezone ?? 'UTC');
+      return expandCalendarResources(await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id], window)), window, calendar.timezone ?? 'UTC');
     });
     return c.json(result, 200);
   })
@@ -244,13 +254,19 @@ eventRoutes
         if (after < await tombstoneFloor(tx)) throw syncExpired();
       }
       const page = await changesSince(tx, [calendar.id], after, input.limit);
-      return { changes: page.rows.flatMap<z.infer<typeof Change>>((row) => row.deleted || !row.data ? input.since ? [{ uid: row.uid, deleted: true as const }] : [] : [{ uid: row.uid, deleted: false as const, etag: tag(row), event: apiEvent(row.data) }]),
-        next: encode({ v: 1, e: calendar.syncEpoch, s: page.maxSeq.toString() }), hasMore: page.hasMore };
+      const visible = new Map((await reads(tx, c.var.principal, calendar, page.rows)).map((row) => [row.uid, row.data]));
+      const changes = page.rows.flatMap<z.infer<typeof Change>>((row) => {
+        const data = visible.get(row.uid);
+        // Incremental readers must discard cached events that the member projection now hides.
+        if (row.deleted || !data) return input.since !== undefined ? [{ uid: row.uid, deleted: true }] : [];
+        return [{ uid: row.uid, deleted: false, etag: tag(row), event: apiEvent(data) }];
+      });
+      return { changes, next: encode({ v: 1, e: calendar.syncEpoch, s: page.maxSeq.toString() }), hasMore: page.hasMore };
     });
     return c.json(result, 200);
   })
   .openapi(exportCalendar, async (c) => {
-    const rows = await withTenant(c.var.principal.tenantId, async (tx) => { const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id); return resourcesIn(tx, [calendar.id]); });
+    const rows = await withTenant(c.var.principal.tenantId, async (tx) => { const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id); return reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id])); });
     c.header('Content-Type', 'text/calendar; charset=utf-8');
     return stream(c, async (output) => {
       const empty = serializeCalendar({ props: [], resources: [] });

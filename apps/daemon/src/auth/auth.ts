@@ -17,6 +17,8 @@
 import { apiKey } from '@better-auth/api-key';
 import {
   account,
+  calendarShare,
+  withTenant,
   apikey,
   invitation,
   member,
@@ -185,7 +187,12 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
         sendInvitationEmail: async ({ id, email, organization: tenant, inviter }) => {
           await mailer?.send({ to: email, ...templates.invitation({ url: `${baseURL}/invite/${id}`, inviter: inviter.user.name, tenant: tenant.name }) });
         },
-        organizationHooks: { afterRemoveMember: ({ user }) => publishAuthRevoked(db, user.id) },
+        organizationHooks: {
+          afterRemoveMember: async ({ user, organization }) => {
+            await withTenant(organization.id as TenantId, (tx) => tx.delete(calendarShare).where(eq(calendarShare.granteeUserId, user.id)));
+            await publishAuthRevoked(db, user.id);
+          },
+        },
       }),
       admin({ adminRoles: [OPERATOR_ROLE] }),
       apiKey({ defaultPrefix: 'sc_', enableMetadata: true, rateLimit: { enabled: false } }),

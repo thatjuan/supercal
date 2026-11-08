@@ -5,6 +5,7 @@
  */
 import {
   calendarAccount,
+  calendarShare,
   closeDb,
   feed,
   connectDb,
@@ -334,6 +335,26 @@ describe.skipIf(!testDatabaseUrl)('live update stream', () => {
 
     expect((await open(base, signedOut)).status).toBe(401);
     expect((await open(base, { key: key.key })).status).toBe(401);
+  });
+
+  test('read grants reach an already open stream and free-busy grants reveal no changes', async () => {
+    const reader = await joined(tenantA, 'member'), busyOnly = await joined(tenantA, 'member');
+    const readStream = await open(base, reader), busyStream = await open(base, busyOnly);
+    await Bun.sleep(300);
+    await withTenant(tenantA, (tx) => tx.insert(calendarShare).values([
+      { tenantId: tenantA, calendarId: calendars.ownerA, granteeUserId: reader.id, access: 'read', createdBy: ownerA.id },
+      { tenantId: tenantA, calendarId: calendars.ownerA, granteeUserId: busyOnly.id, access: 'free-busy', createdBy: ownerA.id },
+    ]));
+    await change(tenantA, calendars.ownerA);
+    await eventually(() => changed(readStream).some((event) => event.calendarIds.includes(calendars.ownerA)));
+    await Bun.sleep(300);
+    expect(changed(busyStream)).toEqual([]);
+    await withTenant(tenantA, (tx) => tx.delete(calendarShare).where(eq(calendarShare.granteeUserId, reader.id)));
+    const count = changed(readStream).length;
+    await change(tenantA, calendars.ownerA);
+    await Bun.sleep(350);
+    expect(changed(readStream)).toHaveLength(count);
+    readStream.close(); busyStream.close();
   });
 
   test('a user may hold 20 streams; the 21st gets 429', async () => {

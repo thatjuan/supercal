@@ -20,7 +20,7 @@ const href = (path: string) => `<d:href>${esc(path)}</d:href>`;
 
 /** Baseline privileges for feeds and read-only collections. */
 const READ_ONLY = '<d:privilege><d:read/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege>';
-const REPORTS = ['cal:calendar-query', 'cal:calendar-multiget', 'd:sync-collection']
+const reports = (freeBusy: boolean) => ['cal:calendar-query', 'cal:calendar-multiget', 'd:sync-collection', ...(freeBusy ? ['cal:free-busy-query'] : [])]
   .map((r) => `<d:supported-report><d:report><${r}/></d:report></d:supported-report>`)
   .join('');
 
@@ -65,7 +65,7 @@ export const collectionProps = (a: Account, c: Collection, privilege: Privilege 
     [NS.CS, 'getctag', esc(c.token)],
     [NS.DAV, 'sync-token', esc(c.token)],
     [NS.CALDAV, 'supported-calendar-component-set', '<cal:comp name="VEVENT"/>'],
-    [NS.DAV, 'supported-report-set', REPORTS],
+    [NS.DAV, 'supported-report-set', reports(a.writable ?? false)],
     [NS.CALDAV, 'calendar-description', c.description == null ? null : esc(c.description)],
     [NS.CALDAV, 'calendar-timezone', c.timezone == null ? null : esc(c.timezone)],
     [NS.CALDAV, 'max-resource-size', c.maxResourceSize === undefined ? null : String(c.maxResourceSize)],

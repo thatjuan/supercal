@@ -53,7 +53,7 @@ export type PublicationSpec = {
   /** `mailto:` addresses of the account owners, for the declined filter. The organizer rule uses `SourceResource.ownerAddresses`. */
   ownerAddresses: string[];
   /** HMAC key (`feed.uid_secret` or `calendar_link.uid_secret`) for title-only and busy-only UIDs. */
-  uidSecret: CryptoKey;
+  uidSecret: CryptoKey | null;
 };
 
 export type SourceResource = {
@@ -234,7 +234,8 @@ const hmacSha256 = async (key: CryptoKey, s: string) => b64url(await crypto.subt
 export async function outputUidFor(spec: UidSpec, sourceUid: string): Promise<string> {
   if (spec.privacy === "full" && spec.kind === "passthrough") return sourceUid;
   const input = `${spec.id}\u0000${sourceUid}`;
-  const digest = spec.privacy === "full" ? await sha256(input) : await hmacSha256(spec.uidSecret, input);
+  if (spec.privacy !== "full" && !spec.uidSecret) throw new Error("Privacy UIDs require a secret");
+  const digest = spec.privacy === "full" ? await sha256(input) : await hmacSha256(spec.uidSecret!, input);
   return `${digest.slice(0, 26)}@supercal`;
 }
 

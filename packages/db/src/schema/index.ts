@@ -1,3 +1,4 @@
+import type { calendarShare } from './shares.ts';
 /** The full Postgres schema (architecture §4) and the row types other packages use. */
 import type { apiKeyTenant, calendarAccount, oauthFlow, pushLease, sourceCalendar } from './accounts.ts';
 import type { graphOccurrence, resource, sourceObject } from './events.ts';
@@ -29,3 +30,6 @@ export type SinkEvent = typeof sinkEvent.$inferSelect;
 export type SyncTarget = typeof syncTarget.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
 export type SystemSetting = typeof systemSetting.$inferSelect;
+
+export * from './shares.ts';
+export type CalendarShare = typeof calendarShare.$inferSelect;

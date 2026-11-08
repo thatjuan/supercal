@@ -12,3 +12,5 @@ export * from "./projection.ts";
 
 export * from "./hosted.ts";
 export * from './jscalendar/index.ts';
+
+export * from './free-busy.ts';
