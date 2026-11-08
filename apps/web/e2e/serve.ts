@@ -1,12 +1,12 @@
 /**
  * Playwright's web server (run with Bun): a real daemon (API, CalDAV/ICS and sync worker) over a
  * fresh `<TEST_DATABASE_URL>_e2e` database, serving the built dashboard (`dist/`) on `E2E_PORT` in
- * open sign-up mode, so the browser talks to it same-origin exactly as in production. An ICS
- * calendar is served at `http://127.0.0.1:<E2E_FIXTURE_PORT>/team.ics`, which the egress allowlist
- * lets the daemon reach.
+ * open sign-up mode, so the browser talks to it same-origin exactly as in production. ICS
+ * calendars are served on `http://127.0.0.1:<E2E_FIXTURE_PORT>` (see `fixture.ts`), which the egress
+ * allowlist lets the daemon reach.
  */
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
-import { ICS_FIXTURE } from './fixture.ts';
+import { fixtureResponse } from './fixture.ts';
 
 const port = process.env.E2E_PORT;
 const fixturePort = process.env.E2E_FIXTURE_PORT;
@@ -15,8 +15,7 @@ if (!testDatabaseUrl || !port || !fixturePort) throw new Error('e2e needs TEST_D
 const fixture = Bun.serve({
   hostname: '127.0.0.1',
   port: Number(fixturePort),
-  fetch: (request) =>
-    new URL(request.url).pathname === '/team.ics' ? new Response(ICS_FIXTURE(), { headers: { 'content-type': 'text/calendar' } }) : new Response('not found', { status: 404 }),
+  fetch: fixtureResponse,
 });
 
 const scratch = await scratchDatabase('e2e');

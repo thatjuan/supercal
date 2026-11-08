@@ -16,10 +16,14 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountsRouteImport } from './routes/_app/accounts'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppOperatorRouteImport } from './routes/_app/operator'
+import { Route as AppPreviewRouteImport } from './routes/_app/preview'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppWelcomeRouteImport } from './routes/_app/welcome'
 import { Route as authInviteTokenRouteImport } from './routes/(auth)/invite.$token'
+import { Route as AppCalendarsIndexRouteImport } from './routes/_app/calendars/index'
 import { Route as AppFeedsIndexRouteImport } from './routes/_app/feeds/index'
+import { Route as AppCalendarsVirtualPublicationIdRouteImport } from './routes/_app/calendars/virtual.$publicationId'
+import { Route as AppCalendarsVirtualNewRouteImport } from './routes/_app/calendars/virtual.new'
 import { Route as AppFeedsFeedIdSubscribeRouteImport } from './routes/_app/feeds/$feedId/subscribe'
 
 const AppRoute = AppRouteImport.update({
@@ -56,6 +60,11 @@ const AppOperatorRoute = AppOperatorRouteImport.update({
   path: '/operator',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPreviewRoute = AppPreviewRouteImport.update({
+  id: '/preview',
+  path: '/preview',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -71,9 +80,25 @@ const authInviteTokenRoute = authInviteTokenRouteImport.update({
   path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppCalendarsIndexRoute = AppCalendarsIndexRouteImport.update({
+  id: '/calendars/',
+  path: '/calendars/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppFeedsIndexRoute = AppFeedsIndexRouteImport.update({
   id: '/feeds/',
   path: '/feeds/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCalendarsVirtualPublicationIdRoute =
+  AppCalendarsVirtualPublicationIdRouteImport.update({
+    id: '/calendars/virtual/$publicationId',
+    path: '/calendars/virtual/$publicationId',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppCalendarsVirtualNewRoute = AppCalendarsVirtualNewRouteImport.update({
+  id: '/calendars/virtual/new',
+  path: '/calendars/virtual/new',
   getParentRoute: () => AppRoute,
 } as any)
 const AppFeedsFeedIdSubscribeRoute = AppFeedsFeedIdSubscribeRouteImport.update({
@@ -89,10 +114,14 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AppAccountsRoute
   '/admin': typeof AppAdminRoute
   '/operator': typeof AppOperatorRoute
+  '/preview': typeof AppPreviewRoute
   '/settings': typeof AppSettingsRoute
   '/welcome': typeof AppWelcomeRoute
   '/invite/$token': typeof authInviteTokenRoute
+  '/calendars/': typeof AppCalendarsIndexRoute
   '/feeds/': typeof AppFeedsIndexRoute
+  '/calendars/virtual/$publicationId': typeof AppCalendarsVirtualPublicationIdRoute
+  '/calendars/virtual/new': typeof AppCalendarsVirtualNewRoute
   '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
 }
 export interface FileRoutesByTo {
@@ -101,11 +130,15 @@ export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
   '/admin': typeof AppAdminRoute
   '/operator': typeof AppOperatorRoute
+  '/preview': typeof AppPreviewRoute
   '/settings': typeof AppSettingsRoute
   '/welcome': typeof AppWelcomeRoute
   '/': typeof AppIndexRoute
   '/invite/$token': typeof authInviteTokenRoute
+  '/calendars': typeof AppCalendarsIndexRoute
   '/feeds': typeof AppFeedsIndexRoute
+  '/calendars/virtual/$publicationId': typeof AppCalendarsVirtualPublicationIdRoute
+  '/calendars/virtual/new': typeof AppCalendarsVirtualNewRoute
   '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
 }
 export interface FileRoutesById {
@@ -116,11 +149,15 @@ export interface FileRoutesById {
   '/_app/accounts': typeof AppAccountsRoute
   '/_app/admin': typeof AppAdminRoute
   '/_app/operator': typeof AppOperatorRoute
+  '/_app/preview': typeof AppPreviewRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/welcome': typeof AppWelcomeRoute
   '/_app/': typeof AppIndexRoute
   '/(auth)/invite/$token': typeof authInviteTokenRoute
+  '/_app/calendars/': typeof AppCalendarsIndexRoute
   '/_app/feeds/': typeof AppFeedsIndexRoute
+  '/_app/calendars/virtual/$publicationId': typeof AppCalendarsVirtualPublicationIdRoute
+  '/_app/calendars/virtual/new': typeof AppCalendarsVirtualNewRoute
   '/_app/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
 }
 export interface FileRouteTypes {
@@ -132,10 +169,14 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/admin'
     | '/operator'
+    | '/preview'
     | '/settings'
     | '/welcome'
     | '/invite/$token'
+    | '/calendars/'
     | '/feeds/'
+    | '/calendars/virtual/$publicationId'
+    | '/calendars/virtual/new'
     | '/feeds/$feedId/subscribe'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -144,11 +185,15 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/admin'
     | '/operator'
+    | '/preview'
     | '/settings'
     | '/welcome'
     | '/'
     | '/invite/$token'
+    | '/calendars'
     | '/feeds'
+    | '/calendars/virtual/$publicationId'
+    | '/calendars/virtual/new'
     | '/feeds/$feedId/subscribe'
   id:
     | '__root__'
@@ -158,11 +203,15 @@ export interface FileRouteTypes {
     | '/_app/accounts'
     | '/_app/admin'
     | '/_app/operator'
+    | '/_app/preview'
     | '/_app/settings'
     | '/_app/welcome'
     | '/_app/'
     | '/(auth)/invite/$token'
+    | '/_app/calendars/'
     | '/_app/feeds/'
+    | '/_app/calendars/virtual/$publicationId'
+    | '/_app/calendars/virtual/new'
     | '/_app/feeds/$feedId/subscribe'
   fileRoutesById: FileRoutesById
 }
@@ -224,6 +273,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOperatorRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/preview': {
+      id: '/_app/preview'
+      path: '/preview'
+      fullPath: '/preview'
+      preLoaderRoute: typeof AppPreviewRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings': {
       id: '/_app/settings'
       path: '/settings'
@@ -245,11 +301,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof authInviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/calendars/': {
+      id: '/_app/calendars/'
+      path: '/calendars'
+      fullPath: '/calendars/'
+      preLoaderRoute: typeof AppCalendarsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/feeds/': {
       id: '/_app/feeds/'
       path: '/feeds'
       fullPath: '/feeds/'
       preLoaderRoute: typeof AppFeedsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/calendars/virtual/$publicationId': {
+      id: '/_app/calendars/virtual/$publicationId'
+      path: '/calendars/virtual/$publicationId'
+      fullPath: '/calendars/virtual/$publicationId'
+      preLoaderRoute: typeof AppCalendarsVirtualPublicationIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/calendars/virtual/new': {
+      id: '/_app/calendars/virtual/new'
+      path: '/calendars/virtual/new'
+      fullPath: '/calendars/virtual/new'
+      preLoaderRoute: typeof AppCalendarsVirtualNewRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/feeds/$feedId/subscribe': {
@@ -266,10 +343,14 @@ interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRoute
   AppAdminRoute: typeof AppAdminRoute
   AppOperatorRoute: typeof AppOperatorRoute
+  AppPreviewRoute: typeof AppPreviewRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppWelcomeRoute: typeof AppWelcomeRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppCalendarsIndexRoute: typeof AppCalendarsIndexRoute
   AppFeedsIndexRoute: typeof AppFeedsIndexRoute
+  AppCalendarsVirtualPublicationIdRoute: typeof AppCalendarsVirtualPublicationIdRoute
+  AppCalendarsVirtualNewRoute: typeof AppCalendarsVirtualNewRoute
   AppFeedsFeedIdSubscribeRoute: typeof AppFeedsFeedIdSubscribeRoute
 }
 
@@ -277,10 +358,14 @@ const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRoute,
   AppAdminRoute: AppAdminRoute,
   AppOperatorRoute: AppOperatorRoute,
+  AppPreviewRoute: AppPreviewRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppWelcomeRoute: AppWelcomeRoute,
   AppIndexRoute: AppIndexRoute,
+  AppCalendarsIndexRoute: AppCalendarsIndexRoute,
   AppFeedsIndexRoute: AppFeedsIndexRoute,
+  AppCalendarsVirtualPublicationIdRoute: AppCalendarsVirtualPublicationIdRoute,
+  AppCalendarsVirtualNewRoute: AppCalendarsVirtualNewRoute,
   AppFeedsFeedIdSubscribeRoute: AppFeedsFeedIdSubscribeRoute,
 }
 
