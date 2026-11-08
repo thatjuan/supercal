@@ -13,7 +13,12 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as authSignInRouteImport } from './routes/(auth)/sign-in'
 import { Route as authSignUpRouteImport } from './routes/(auth)/sign-up'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAdminRouteImport } from './routes/_app/admin'
+import { Route as AppOperatorRouteImport } from './routes/_app/operator'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as authInviteTokenRouteImport } from './routes/(auth)/invite.$token'
+import { Route as AppFeedsIndexRouteImport } from './routes/_app/feeds/index'
+import { Route as AppFeedsFeedIdSubscribeRouteImport } from './routes/_app/feeds/$feedId/subscribe'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -34,44 +39,107 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOperatorRoute = AppOperatorRouteImport.update({
+  id: '/operator',
+  path: '/operator',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
 const authInviteTokenRoute = authInviteTokenRouteImport.update({
   id: '/(auth)/invite/$token',
   path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppFeedsIndexRoute = AppFeedsIndexRouteImport.update({
+  id: '/feeds/',
+  path: '/feeds/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFeedsFeedIdSubscribeRoute = AppFeedsFeedIdSubscribeRouteImport.update({
+  id: '/feeds/$feedId/subscribe',
+  path: '/feeds/$feedId/subscribe',
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/sign-in': typeof authSignInRoute
   '/sign-up': typeof authSignUpRoute
+  '/admin': typeof AppAdminRoute
+  '/operator': typeof AppOperatorRoute
+  '/settings': typeof AppSettingsRoute
   '/invite/$token': typeof authInviteTokenRoute
+  '/feeds/': typeof AppFeedsIndexRoute
+  '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof authSignInRoute
   '/sign-up': typeof authSignUpRoute
+  '/admin': typeof AppAdminRoute
+  '/operator': typeof AppOperatorRoute
+  '/settings': typeof AppSettingsRoute
   '/': typeof AppIndexRoute
   '/invite/$token': typeof authInviteTokenRoute
+  '/feeds': typeof AppFeedsIndexRoute
+  '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/(auth)/sign-in': typeof authSignInRoute
   '/(auth)/sign-up': typeof authSignUpRoute
+  '/_app/admin': typeof AppAdminRoute
+  '/_app/operator': typeof AppOperatorRoute
+  '/_app/settings': typeof AppSettingsRoute
   '/_app/': typeof AppIndexRoute
   '/(auth)/invite/$token': typeof authInviteTokenRoute
+  '/_app/feeds/': typeof AppFeedsIndexRoute
+  '/_app/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/sign-in' | '/sign-up' | '/invite/$token'
+  fullPaths:
+    | '/'
+    | '/sign-in'
+    | '/sign-up'
+    | '/admin'
+    | '/operator'
+    | '/settings'
+    | '/invite/$token'
+    | '/feeds/'
+    | '/feeds/$feedId/subscribe'
   fileRoutesByTo: FileRoutesByTo
-  to: '/sign-in' | '/sign-up' | '/' | '/invite/$token'
+  to:
+    | '/sign-in'
+    | '/sign-up'
+    | '/admin'
+    | '/operator'
+    | '/settings'
+    | '/'
+    | '/invite/$token'
+    | '/feeds'
+    | '/feeds/$feedId/subscribe'
   id:
     | '__root__'
     | '/_app'
     | '/(auth)/sign-in'
     | '/(auth)/sign-up'
+    | '/_app/admin'
+    | '/_app/operator'
+    | '/_app/settings'
     | '/_app/'
     | '/(auth)/invite/$token'
+    | '/_app/feeds/'
+    | '/_app/feeds/$feedId/subscribe'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -111,6 +179,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin': {
+      id: '/_app/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/operator': {
+      id: '/_app/operator'
+      path: '/operator'
+      fullPath: '/operator'
+      preLoaderRoute: typeof AppOperatorRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/(auth)/invite/$token': {
       id: '/(auth)/invite/$token'
       path: '/invite/$token'
@@ -118,15 +207,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof authInviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/feeds/': {
+      id: '/_app/feeds/'
+      path: '/feeds'
+      fullPath: '/feeds/'
+      preLoaderRoute: typeof AppFeedsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/feeds/$feedId/subscribe': {
+      id: '/_app/feeds/$feedId/subscribe'
+      path: '/feeds/$feedId/subscribe'
+      fullPath: '/feeds/$feedId/subscribe'
+      preLoaderRoute: typeof AppFeedsFeedIdSubscribeRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRoute
+  AppOperatorRoute: typeof AppOperatorRoute
+  AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppFeedsIndexRoute: typeof AppFeedsIndexRoute
+  AppFeedsFeedIdSubscribeRoute: typeof AppFeedsFeedIdSubscribeRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRoute,
+  AppOperatorRoute: AppOperatorRoute,
+  AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppFeedsIndexRoute: AppFeedsIndexRoute,
+  AppFeedsFeedIdSubscribeRoute: AppFeedsFeedIdSubscribeRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

@@ -2,6 +2,7 @@ import type { components } from '@supercal/api-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { authClient } from '../../auth.ts';
+import { forgetFeedSecrets } from '../../secrets.ts';
 import { useTheme, type ThemePreference } from '../../theme.ts';
 import { Icon } from '../ui/icon.tsx';
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from '../ui/menu.tsx';
@@ -25,6 +26,7 @@ export function UserMenu({ me }: { me: Me }) {
   async function signOut() {
     await authClient.signOut();
     queryClient.clear();
+    forgetFeedSecrets();
     await navigate({ to: '/sign-in' });
   }
 
