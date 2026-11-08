@@ -14,7 +14,8 @@ test('sign up, land in the shell, sign out, sign in', async ({ page }) => {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Create account' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  // A new user has no accounts, so the shell opens on onboarding.
+  await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Ada Lovelace.*Switch tenant/ })).toBeVisible();
   // The live stream authenticates with the same cookie.
   await expect(page.getByRole('status')).toHaveText('Live');
@@ -28,6 +29,6 @@ test('sign up, land in the shell, sign out, sign in', async ({ page }) => {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
+  await expect(page).toHaveURL(/\/welcome$/);
 });

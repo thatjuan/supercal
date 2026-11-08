@@ -10,7 +10,8 @@ async function signUp(page: Page, name: string, email = unique(name.split(' ')[0
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Create account' }).click();
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  // A user with no accounts lands on onboarding (#18).
+  await expect(page).toHaveURL(/\/welcome$/);
   return email;
 }
 
@@ -97,12 +98,13 @@ test('an invited member joins without the Admin menu', async ({ page }) => {
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Create account and join' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  // A member with no accounts yet lands on onboarding.
+  await expect(page).toHaveURL(/\/welcome$/);
   await expect(page.getByRole('button', { name: /Olga Owner.*Switch tenant/ })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Settings' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Admin' })).toHaveCount(0);
 
   // The route is guarded too, not just hidden.
   await page.goto('/admin');
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  await expect(page).toHaveURL(/\/welcome$/);
 });

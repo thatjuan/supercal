@@ -51,6 +51,22 @@ export async function loadAccount(tx: TenantTx, principal: Principal, id: Accoun
 }
 
 /**
+ * Lists the calendars `credentials` can see, which proves them (`AuthFailedError` and the other
+ * provider errors propagate). Returns the listing and the credentials as the adapter left them.
+ */
+async function verifyCredentials(deps: SyncDeps, given: ProviderCredentials) {
+  let credentials = given;
+  const infos = await adapterFor(deps.adapters, given.provider).listCalendars({
+    fetch: deps.fetch,
+    credentials,
+    saveCredentials: async (next) => void (credentials = next),
+    log: deps.log.child({ provider: given.provider }),
+    signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
+  });
+  return { infos, credentials };
+}
+
+/**
  * Connects an account for the principal: lists its calendars first (which proves the credentials;
  * `AuthFailedError` propagates), then stores the account, its calendars, their publications and
  * targets in one transaction. Discovery runs again at once.
@@ -58,14 +74,7 @@ export async function loadAccount(tx: TenantTx, principal: Principal, id: Accoun
 export async function connectAccount(deps: SyncDeps, principal: Principal, input: NewAccount): Promise<{ account: CalendarAccount; calendars: SourceCalendar[] }> {
   const { provider } = input.credentials;
   const adapter = adapterFor(deps.adapters, provider);
-  let credentials = input.credentials;
-  const infos = await adapter.listCalendars({
-    fetch: deps.fetch,
-    credentials,
-    saveCredentials: async (next) => void (credentials = next),
-    log: deps.log.child({ provider }),
-    signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS),
-  });
+  const { infos, credentials } = await verifyCredentials(deps, input.credentials);
 
   const id = newId('acc');
   const tenantId = principal.tenantId;
@@ -160,12 +169,21 @@ export async function findOwnAccount(principal: Principal, provider: CalendarAcc
   return row ?? null;
 }
 
+/** What a reconnect changes beside the credentials, and how it is audited. */
+type ReconnectOptions = { email: string | null; serverUrl?: string | null; action?: 'account.reconnect' | 'account.credentials.update' };
+
 /**
- * Reconnects an account with new credentials (OAuth reconnect): stores them, makes the account
- * `active`, stops its old push subscriptions and wakes every target, so parked targets run again
- * and push is set up afresh.
+ * Reconnects an account with new credentials (an OAuth reconnect, or `replaceCredentials`): stores
+ * them, makes the account `active`, stops its old push subscriptions and wakes every target, so
+ * parked targets run again and push is set up afresh.
  */
-export async function reconnectAccount(deps: SyncDeps, principal: Principal, id: AccountId, credentials: ProviderCredentials, { email }: { email: string | null }): Promise<CalendarAccount> {
+export async function reconnectAccount(
+  deps: SyncDeps,
+  principal: Principal,
+  id: AccountId,
+  credentials: ProviderCredentials,
+  { email, serverUrl, action = 'account.reconnect' }: ReconnectOptions,
+): Promise<CalendarAccount> {
   const { account, leases } = await withTenant(principal.tenantId, async (tx) => {
     const current = await loadAccount(tx, principal, id);
     const [row] = await tx
@@ -175,13 +193,14 @@ export async function reconnectAccount(deps: SyncDeps, principal: Principal, id:
         status: 'active',
         statusDetail: null,
         email,
+        ...(serverUrl !== undefined && { serverUrl }),
         updatedAt: new Date(),
       })
       .where(eq(calendarAccount.id, id))
       .returning();
     if (!row) throw new NotFound('No such account');
     await notifyEvent(tx, row.tenantId, { type: 'account.status', accountId: id, status: 'active' });
-    await audit(tx, principal, 'account.reconnect', { type: 'account', id }, { provider: row.provider });
+    await audit(tx, principal, action, { type: 'account', id }, { provider: row.provider });
     return { account: row, leases: await tx.select().from(pushLease).where(eq(pushLease.accountId, id)) };
   });
   await teardownLeases(deps, account, leases);
@@ -191,6 +210,23 @@ export async function reconnectAccount(deps: SyncDeps, principal: Principal, id:
     await wakeTargets(tx, targets.map((t) => t.id));
   });
   return account;
+}
+
+/**
+ * Replaces the credentials of a credential-based account (`PUT /accounts/{id}/credentials`): `build`
+ * turns the current account into the new credentials and columns, which are proved by listing
+ * calendars before `reconnectAccount` stores them.
+ */
+export async function replaceCredentials(
+  deps: SyncDeps,
+  principal: Principal,
+  id: AccountId,
+  build: (account: CalendarAccount) => { credentials: ProviderCredentials; email: string | null; serverUrl: string | null },
+): Promise<CalendarAccount> {
+  const current = await withTenant(principal.tenantId, (tx) => loadAccount(tx, principal, id));
+  const next = build(current);
+  const { credentials } = await verifyCredentials(deps, next.credentials);
+  return reconnectAccount(deps, principal, id, credentials, { email: next.email, serverUrl: next.serverUrl, action: 'account.credentials.update' });
 }
 
 /** Makes every target of the account due now and wakes the workers. 429 within 30 s of the previous request. */

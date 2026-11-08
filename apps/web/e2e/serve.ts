@@ -1,12 +1,23 @@
 /**
- * Playwright's web server (run with Bun): a real daemon over a fresh `<TEST_DATABASE_URL>_e2e`
- * database, serving the built dashboard (`dist/`), CalDAV and ICS on `E2E_PORT` in open sign-up mode, so
- * the browser talks to it same-origin exactly as in production.
+ * Playwright's web server (run with Bun): a real daemon (API, CalDAV/ICS and sync worker) over a
+ * fresh `<TEST_DATABASE_URL>_e2e` database, serving the built dashboard (`dist/`) on `E2E_PORT` in
+ * open sign-up mode, so the browser talks to it same-origin exactly as in production. An ICS
+ * calendar is served at `http://127.0.0.1:<E2E_FIXTURE_PORT>/team.ics`, which the egress allowlist
+ * lets the daemon reach.
  */
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
+import { ICS_FIXTURE } from './fixture.ts';
 
 const port = process.env.E2E_PORT;
-if (!testDatabaseUrl || !port) throw new Error('e2e needs TEST_DATABASE_URL and E2E_PORT');
+const fixturePort = process.env.E2E_FIXTURE_PORT;
+if (!testDatabaseUrl || !port || !fixturePort) throw new Error('e2e needs TEST_DATABASE_URL, E2E_PORT and E2E_FIXTURE_PORT');
+
+const fixture = Bun.serve({
+  hostname: '127.0.0.1',
+  port: Number(fixturePort),
+  fetch: (request) =>
+    new URL(request.url).pathname === '/team.ics' ? new Response(ICS_FIXTURE(), { headers: { 'content-type': 'text/calendar' } }) : new Response('not found', { status: 404 }),
+});
 
 const scratch = await scratchDatabase('e2e');
 const origin = `http://127.0.0.1:${port}`;
@@ -18,7 +29,8 @@ const daemon = Bun.spawn(['bun', new URL('../../daemon/src/main.ts', import.meta
     SUPERCAL_PUBLIC_URL: origin,
     SUPERCAL_INSECURE_DEV: '1',
     SUPERCAL_SIGNUP: 'open',
-    SUPERCAL_ROLES: 'api,dav',
+    SUPERCAL_ROLES: 'api,dav,worker',
+    SUPERCAL_EGRESS_ALLOW: `http://127.0.0.1:${fixturePort}=127.0.0.1/32`,
     SUPERCAL_WEB_DIR: new URL('../dist', import.meta.url).pathname,
   },
   stdout: 'inherit',
@@ -26,7 +38,10 @@ const daemon = Bun.spawn(['bun', new URL('../../daemon/src/main.ts', import.meta
 });
 
 // Playwright signals the whole process group; either way, the database goes once the daemon exits.
-const stop = () => daemon.kill('SIGTERM');
+const stop = () => {
+  daemon.kill('SIGTERM');
+  void fixture.stop();
+};
 process.on('SIGTERM', stop);
 process.on('SIGINT', stop);
 const code = await daemon.exited;

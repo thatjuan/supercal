@@ -14,6 +14,7 @@ export type AuditAction =
   | 'account.delete'
   | 'account.sync'
   | 'account.reconnect'
+  | 'account.credentials.update'
   | 'feed.create'
   | 'feed.update'
   | 'feed.delete'

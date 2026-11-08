@@ -13,9 +13,11 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as authSignInRouteImport } from './routes/(auth)/sign-in'
 import { Route as authSignUpRouteImport } from './routes/(auth)/sign-up'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppAccountsRouteImport } from './routes/_app/accounts'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppOperatorRouteImport } from './routes/_app/operator'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppWelcomeRouteImport } from './routes/_app/welcome'
 import { Route as authInviteTokenRouteImport } from './routes/(auth)/invite.$token'
 import { Route as AppFeedsIndexRouteImport } from './routes/_app/feeds/index'
 import { Route as AppFeedsFeedIdSubscribeRouteImport } from './routes/_app/feeds/$feedId/subscribe'
@@ -39,6 +41,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAccountsRoute = AppAccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -52,6 +59,11 @@ const AppOperatorRoute = AppOperatorRouteImport.update({
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWelcomeRoute = AppWelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
   getParentRoute: () => AppRoute,
 } as any)
 const authInviteTokenRoute = authInviteTokenRouteImport.update({
@@ -74,9 +86,11 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/sign-in': typeof authSignInRoute
   '/sign-up': typeof authSignUpRoute
+  '/accounts': typeof AppAccountsRoute
   '/admin': typeof AppAdminRoute
   '/operator': typeof AppOperatorRoute
   '/settings': typeof AppSettingsRoute
+  '/welcome': typeof AppWelcomeRoute
   '/invite/$token': typeof authInviteTokenRoute
   '/feeds/': typeof AppFeedsIndexRoute
   '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
@@ -84,9 +98,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/sign-in': typeof authSignInRoute
   '/sign-up': typeof authSignUpRoute
+  '/accounts': typeof AppAccountsRoute
   '/admin': typeof AppAdminRoute
   '/operator': typeof AppOperatorRoute
   '/settings': typeof AppSettingsRoute
+  '/welcome': typeof AppWelcomeRoute
   '/': typeof AppIndexRoute
   '/invite/$token': typeof authInviteTokenRoute
   '/feeds': typeof AppFeedsIndexRoute
@@ -97,9 +113,11 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/(auth)/sign-in': typeof authSignInRoute
   '/(auth)/sign-up': typeof authSignUpRoute
+  '/_app/accounts': typeof AppAccountsRoute
   '/_app/admin': typeof AppAdminRoute
   '/_app/operator': typeof AppOperatorRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/welcome': typeof AppWelcomeRoute
   '/_app/': typeof AppIndexRoute
   '/(auth)/invite/$token': typeof authInviteTokenRoute
   '/_app/feeds/': typeof AppFeedsIndexRoute
@@ -111,9 +129,11 @@ export interface FileRouteTypes {
     | '/'
     | '/sign-in'
     | '/sign-up'
+    | '/accounts'
     | '/admin'
     | '/operator'
     | '/settings'
+    | '/welcome'
     | '/invite/$token'
     | '/feeds/'
     | '/feeds/$feedId/subscribe'
@@ -121,9 +141,11 @@ export interface FileRouteTypes {
   to:
     | '/sign-in'
     | '/sign-up'
+    | '/accounts'
     | '/admin'
     | '/operator'
     | '/settings'
+    | '/welcome'
     | '/'
     | '/invite/$token'
     | '/feeds'
@@ -133,9 +155,11 @@ export interface FileRouteTypes {
     | '/_app'
     | '/(auth)/sign-in'
     | '/(auth)/sign-up'
+    | '/_app/accounts'
     | '/_app/admin'
     | '/_app/operator'
     | '/_app/settings'
+    | '/_app/welcome'
     | '/_app/'
     | '/(auth)/invite/$token'
     | '/_app/feeds/'
@@ -179,6 +203,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/accounts': {
+      id: '/_app/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/admin': {
       id: '/_app/admin'
       path: '/admin'
@@ -198,6 +229,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/welcome': {
+      id: '/_app/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof AppWelcomeRouteImport
       parentRoute: typeof AppRoute
     }
     '/(auth)/invite/$token': {
@@ -225,18 +263,22 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppAccountsRoute: typeof AppAccountsRoute
   AppAdminRoute: typeof AppAdminRoute
   AppOperatorRoute: typeof AppOperatorRoute
   AppSettingsRoute: typeof AppSettingsRoute
+  AppWelcomeRoute: typeof AppWelcomeRoute
   AppIndexRoute: typeof AppIndexRoute
   AppFeedsIndexRoute: typeof AppFeedsIndexRoute
   AppFeedsFeedIdSubscribeRoute: typeof AppFeedsFeedIdSubscribeRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAccountsRoute: AppAccountsRoute,
   AppAdminRoute: AppAdminRoute,
   AppOperatorRoute: AppOperatorRoute,
   AppSettingsRoute: AppSettingsRoute,
+  AppWelcomeRoute: AppWelcomeRoute,
   AppIndexRoute: AppIndexRoute,
   AppFeedsIndexRoute: AppFeedsIndexRoute,
   AppFeedsFeedIdSubscribeRoute: AppFeedsFeedIdSubscribeRoute,

@@ -18,7 +18,7 @@ type NavItem = { label: string; icon: IconName; to?: LinkProps['to']; adminOnly?
  */
 const NAV: readonly NavItem[] = [
   { label: 'Overview', icon: 'home', to: '/' },
-  { label: 'Accounts', icon: 'users' },
+  { label: 'Accounts', icon: 'users', to: '/accounts' },
   { label: 'Calendars', icon: 'calendar' },
   { label: 'Preview', icon: 'eye' },
   { label: 'Subscribe', icon: 'link', to: '/feeds' },
