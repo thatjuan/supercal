@@ -505,7 +505,7 @@ export interface components {
             };
             publicationIds: string[];
         };
-        NewAccount: components["schemas"]["NewIcsAccount"];
+        NewAccount: components["schemas"]["NewIcsAccount"] | components["schemas"]["NewCaldavAccount"] | components["schemas"]["NewIcloudAccount"];
         NewIcsAccount: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -518,6 +518,32 @@ export interface components {
              */
             url: string;
             displayName?: string;
+        };
+        NewCaldavAccount: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            provider: "caldav";
+            /**
+             * Format: uri
+             * @description The CalDAV server; discovery starts at its /.well-known/caldav
+             */
+            serverUrl: string;
+            username: string;
+            /** @description Basic auth only; stored encrypted */
+            password: string;
+            displayName?: string;
+        };
+        NewIcloudAccount: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            provider: "icloud";
+            appleId: string;
+            /** @description An app-specific password from appleid.apple.com; stored encrypted */
+            appSpecificPassword: string;
         };
         CalendarList: {
             items: components["schemas"]["Calendar"][];
