@@ -19,7 +19,7 @@ import {
 import type { EventResource, JCalComponent, JCalProperty } from "./model.ts";
 
 // Without this ical.js re-quotes FEATURE=AUDIO,VIDEO into the single value "AUDIO,VIDEO".
-Object.assign(ICAL.design.icalendar.param, { feature: { multiValue: "," } });
+Object.assign(ICAL.design.icalendar.param, { feature: { multiValue: "," }, role: { multiValue: "," } });
 
 export const PRODID = "-//Supercal//EN";
 
@@ -153,7 +153,10 @@ export function serializeCalendar({ props, resources }: { props: JCalProperty[];
         if (tz && !timezones.has(tzid)) timezones.set(tzid, tz);
       }
   const vcalendar: JCalComponent = ["vcalendar", calProps, [...timezones.values(), ...resources.flatMap(componentsOf)]];
-  return ICAL.stringify(vcalendar).replace(/(\r\n)*$/, "\r\n");
+  return ICAL.stringify(vcalendar)
+    // mapping-29 requires JSPTR to be quoted even when its value needs no escaping.
+    .replace(/^JSPROP(?:[^\r\n]|\r\n[ \t])*/gm, (line) => ICAL.helpers.foldline(line.replace(/\r\n[ \t]/g, '').replace(/;JSPTR=([^";:]+)(?=[;:])/, ';JSPTR="$1"')))
+    .replace(/(\r\n)*$/, "\r\n");
 }
 
 /** One property as an unfolded content line, e.g. `RRULE:FREQ=WEEKLY;BYDAY=MO` (Google `recurrence[]` entries). */

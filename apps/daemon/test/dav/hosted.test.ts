@@ -67,7 +67,7 @@ describe.skipIf(!testDatabaseUrl)('hosted CalDAV', () => {
     expect(await sqlState(withControl((tx) => tx.select({ name: davLogin.name }).from(davLogin)))).toBe('42501');
   });
 
-  test('PUT and GET preserve bytes and share the direct REST revision ETag', async () => {
+  test('PUT and GET preserve bytes and share one ETag with REST', async () => {
     const body = ics('bytes').replace('SUMMARY:Hosted', 'SUMMARY:Unusual\r\n folding\r\nX-CUSTOM:untouched');
     const put = await request('PUT', `${path}client%20name.ics`, body);
     expect(put.status).toBe(201);
@@ -76,6 +76,8 @@ describe.skipIf(!testDatabaseUrl)('hosted CalDAV', () => {
     expect(get.headers.get('etag')).toBe(put.headers.get('etag'));
     const [row] = await unsafeDb().select({ revision: resource.revision }).from(resource).where(and(eq(resource.sourceCalendarId, calendar.id), eq(resource.uid, 'bytes')));
     expect(put.headers.get('etag')).toBe(`"${row?.revision}"`);
+    const rest = await call(`/calendars/${calendar.id}/events/bytes`);
+    expect(rest.headers.get('etag')).toBe(put.headers.get('etag'));
     const replaced = await request('PUT', `${path}client%20name.ics`, ics('bytes', 'Updated'), { 'If-Match': put.headers.get('etag') ?? '' });
     expect(replaced.status).toBe(204);
     expect((await request('DELETE', `${path}client%20name.ics`, undefined, { 'If-Match': replaced.headers.get('etag') ?? '' })).status).toBe(204);
