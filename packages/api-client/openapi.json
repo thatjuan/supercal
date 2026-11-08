@@ -1651,6 +1651,140 @@
         ],
         "description": "One-click links that subscribe to the combined feed (`all.ics`)"
       },
+      "SinkList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sink"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Sink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^snk_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "snk_01h455vb4pex5vsknk084sn02q"
+          },
+          "publicationId": {
+            "type": "string",
+            "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "pub_01h455vb4pex5vsknk084sn02q"
+          },
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "acc_01h455vb4pex5vsknk084sn02q"
+          },
+          "calendarId": {
+            "type": "string",
+            "description": "The Google calendar the sink writes"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "syncing",
+              "up_to_date",
+              "error",
+              "calendar_missing"
+            ],
+            "description": "`calendar_missing`: the calendar was deleted in Google and the sink stopped; remove the sink, or remove and create it again"
+          },
+          "lastWriteAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "integer",
+                "description": "Objects mirrored into the calendar"
+              }
+            },
+            "required": [
+              "events"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "publicationId",
+          "accountId",
+          "calendarId",
+          "status",
+          "lastWriteAt",
+          "error",
+          "counts",
+          "createdAt"
+        ]
+      },
+      "NeedsConsentProblem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Problem"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "authorizationUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "authorizationUrl"
+            ]
+          }
+        ],
+        "description": "`type` …/problems/needs-consent: send the browser to `authorizationUrl`, then create the sink again. Any other 409: the sink exists already"
+      },
+      "NewSink": {
+        "type": "object",
+        "properties": {
+          "publicationId": {
+            "type": "string",
+            "pattern": "^pub_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "pub_01h455vb4pex5vsknk084sn02q"
+          },
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+            "example": "acc_01h455vb4pex5vsknk084sn02q"
+          },
+          "returnTo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "default": "/",
+            "description": "Where Google sends the browser back after consent, when consent is needed"
+          }
+        },
+        "required": [
+          "publicationId",
+          "accountId"
+        ]
+      },
       "StreamEvent": {
         "oneOf": [
           {
@@ -3167,7 +3301,7 @@
         ],
         "responses": {
           "302": {
-            "description": "Back to `returnTo`, with `accountId` on success or `error` (e.g. `access_denied`, `missing_scopes`, `flow_expired`)"
+            "description": "Back to `returnTo`, with `accountId` on success or `error` (e.g. `access_denied`, `missing_scopes`, `flow_expired`, and for incremental consent `consent_declined`, `account_mismatch`)"
           },
           "400": {
             "description": "Bad request",
@@ -5154,6 +5288,334 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sinks": {
+      "get": {
+        "operationId": "listSinks",
+        "tags": [
+          "Sinks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Your sinks (admins: the tenant’s)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSink",
+        "tags": [
+          "Sinks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSink"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The sink; its calendar exists and its events are being written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sink"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Consent is needed, or the sink exists already",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedsConsentProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable content",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sinks/{id}": {
+      "get": {
+        "operationId": "getSink",
+        "tags": [
+          "Sinks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^snk_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "snk_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sink",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sink"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSink",
+        "tags": [
+          "Sinks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^snk_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "snk_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "false",
+              "description": "Also delete the Google calendar; otherwise it stays in Google, no longer updated"
+            },
+            "required": false,
+            "description": "Also delete the Google calendar; otherwise it stays in Google, no longer updated",
+            "name": "deleteCalendar",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
             "content": {
               "application/problem+json": {
                 "schema": {

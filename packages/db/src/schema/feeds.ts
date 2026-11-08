@@ -89,24 +89,47 @@ export const publicationSource = pgTable(
   (t) => [primaryKey({ columns: [t.publicationId, t.sourceCalendarId] })],
 );
 
-/** Writes a publication into a provider calendar on one of the owner's accounts. */
-export const sink = pgTable('sink', {
-  id: idColumn('snk'),
-  tenantId: tenantId(),
-  publicationId: text('publication_id')
-    .$type<PublicationId>()
-    .notNull()
-    .references(() => publication.id, { onDelete: 'cascade' }),
-  accountId: text('account_id')
-    .$type<AccountId>()
-    .notNull()
-    .references(() => calendarAccount.id, { onDelete: 'cascade' }),
-  provider: accountProvider('provider').notNull(),
-  providerSubject: text('provider_subject'),
-  providerCalendarId: text('provider_calendar_id').notNull(),
-  status: connectionStatus('status').notNull().default('active'),
-});
+/** `calendar_missing`: the user deleted the sink's calendar at the provider, so the sink stopped. */
+export const sinkStatus = pgEnum('sink_status', ['active', 'calendar_missing']);
+export type SinkStatus = (typeof sinkStatus.enumValues)[number];
 
+/**
+ * Mirrors a publication into a calendar Supercal created on one of the owner's provider accounts.
+ * `provider_subject` + `provider_calendar_id` identify that calendar across every account linked
+ * to the same identity, so discovery never ingests it (loop prevention). One sink per publication
+ * and account.
+ */
+export const sink = pgTable(
+  'sink',
+  {
+    id: idColumn('snk'),
+    tenantId: tenantId(),
+    publicationId: text('publication_id')
+      .$type<PublicationId>()
+      .notNull()
+      .references(() => publication.id, { onDelete: 'cascade' }),
+    accountId: text('account_id')
+      .$type<AccountId>()
+      .notNull()
+      .references(() => calendarAccount.id, { onDelete: 'cascade' }),
+    provider: accountProvider('provider').notNull(),
+    providerSubject: text('provider_subject'),
+    providerCalendarId: text('provider_calendar_id').notNull(),
+    status: sinkStatus('status').notNull().default('active'),
+    /** The IANA zone the provider calendar was created in; floating times are read in it. */
+    timeZone: text('time_zone'),
+    /** When the runner last wrote (or deleted) a provider event. */
+    lastWriteAt: timestamp('last_write_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique().on(t.publicationId, t.accountId)],
+);
+
+/**
+ * The write ledger: one row per mirrored object (output UID). `provider_event_id` is the master's
+ * (or only) provider event, `event_ids` every provider event written for the UID (master and
+ * overrides), and `applied_revision` what was last written, so only real changes are rewritten.
+ */
 export const sinkEvent = pgTable(
   'sink_event',
   {
@@ -117,6 +140,7 @@ export const sinkEvent = pgTable(
       .references(() => sink.id, { onDelete: 'cascade' }),
     uid: text('uid').notNull(),
     providerEventId: text('provider_event_id').notNull(),
+    eventIds: text('event_ids').array().notNull().default(sql`'{}'::text[]`),
     appliedRevision: text('applied_revision').notNull(),
   },
   (t) => [primaryKey({ columns: [t.sinkId, t.uid] })],

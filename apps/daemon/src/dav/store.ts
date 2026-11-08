@@ -3,7 +3,7 @@
  * specs, the per-publication object index (href → UID, ETag) built without rendering, and
  * rendered objects. Everything except `loginByUsername` takes the request's `TenantTx`.
  */
-import { addMissingTimezones, hrefFor, objectEtag, project, serializeCalendar, type PublicationSpec, type SourceResource } from '@supercal/core';
+import { addMissingTimezones, hrefFor, objectEtag, project, serializeCalendar, type ProjectedObject, type PublicationSpec, type SourceResource } from '@supercal/core';
 import {
   calendarAccount,
   feed,
@@ -122,14 +122,19 @@ export async function pubIndex(tx: TenantTx, pub: Pub): Promise<PubIndex> {
 
 export type Rendered = { href: string; ics: string };
 
-/** Projects `rows` (live copies from `pub`'s sources) and serialises each object as its own VCALENDAR, by source UID. */
-export async function render(pub: Pub, rows: LiveResource[]): Promise<Map<string, Rendered>> {
+/** Projects `rows` (live copies from `pub`'s sources); rows of other calendars are ignored. Sinks mirror exactly this. */
+export function projectRows(pub: Pub, rows: LiveResource[]): Promise<ProjectedObject[]> {
   const sources = new Map(pub.sources.map((s) => [s.id, s]));
   const inputs = rows.flatMap((r): SourceResource[] => {
     const source = sources.get(r.sourceCalendarId);
     return source ? [{ sourceCalendarId: source.id, priority: source.priority, ownerAddresses: source.ownerAddresses, resource: r.data }] : [];
   });
-  const objects = await project(pub.spec, inputs);
+  return project(pub.spec, inputs);
+}
+
+/** Projects `rows` (live copies from `pub`'s sources) and serialises each object as its own VCALENDAR, by source UID. */
+export async function render(pub: Pub, rows: LiveResource[]): Promise<Map<string, Rendered>> {
+  const objects = await projectRows(pub, rows);
   return new Map(
     objects.map((o) => [o.sourceUid, { href: o.href, ics: serializeCalendar({ props: [], resources: [addMissingTimezones(o.resource)] }) }]),
   );

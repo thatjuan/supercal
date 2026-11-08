@@ -43,6 +43,8 @@ const OAuthState = z.object({
   }),
   flowId: z.string(),
   returnTo: z.url(),
+  /** Incremental consent: the extra scopes asked for, on behalf of this existing account. */
+  consent: z.object({ accountId: z.string(), scopes: z.array(z.string()) }).optional(),
   exp: z.number(),
 });
 export type OAuthState = z.infer<typeof OAuthState>;

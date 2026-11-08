@@ -1,15 +1,19 @@
 /**
  * Subscribe (docs/product.md screen 7): get one feed into every calendar app. Secrets come from
  * memory (secrets.ts) after a rotation here or in Settings; otherwise each tab offers to rotate.
+ * The Google tab also offers sinks (live updates), whose consent round trip returns here.
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { feedsQuery, subscribeQuery } from '../../../../components/feeds/queries.ts';
 import { PageHeader } from '../../../../components/page-header.tsx';
+import { LiveUpdates } from '../../../../components/subscribe/sink-card.tsx';
+import { sinkSearch } from '../../../../components/subscribe/sinks.ts';
 import { SubscribeTabs, tabForDevice } from '../../../../components/subscribe/subscribe-tabs.tsx';
 import { useFeedSecrets } from '../../../../secrets.ts';
 
 export const Route = createFileRoute('/_app/feeds/$feedId/subscribe')({
+  validateSearch: sinkSearch,
   loader: ({ context, params }) =>
     Promise.all([context.queryClient.ensureQueryData(feedsQuery), context.queryClient.ensureQueryData(subscribeQuery(params.feedId))]),
   component: Subscribe,
@@ -18,6 +22,7 @@ export const Route = createFileRoute('/_app/feeds/$feedId/subscribe')({
 function Subscribe() {
   const { feedId } = Route.useParams();
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const { data: feeds } = useSuspenseQuery(feedsQuery);
   const { data: info } = useSuspenseQuery(subscribeQuery(feedId));
   const secrets = useFeedSecrets(feedId);
@@ -43,16 +48,15 @@ function Subscribe() {
         </label>
       )}
       <section aria-label={`Subscribe to ${feed?.name ?? 'feed'}`} className="rounded-[14px] border border-line bg-surface px-4 pt-2 pb-5 shadow-xs sm:px-5">
-        <SubscribeTabs feedId={feedId} info={info} secrets={secrets} defaultTab={tabForDevice(navigator.userAgent)} googleExtra={<SinkSlot />} />
+        <SubscribeTabs
+          feedId={feedId}
+          info={info}
+          secrets={secrets}
+          defaultTab={search.sinkPublication ? 'google' : tabForDevice(navigator.userAgent)}
+          googleExtra={<LiveUpdates feedId={feedId} search={search} clearSearch={() => void navigate({ to: '/feeds/$feedId/subscribe', params: { feedId }, search: {}, replace: true })} />}
+        />
       </section>
     </div>
   );
 }
 
-/**
- * SINK SLOT (#21): feature-flagged on `instance.providers.google` and the sinks endpoints, #21
- * renders its "Get live updates instead" card here, linking to sink setup.
- */
-function SinkSlot() {
-  return null;
-}

@@ -4,8 +4,6 @@
  *
  *   metrics.leaseLost.inc({});
  *   metrics.syncDuration.observe({ provider, outcome: 'ok' }, seconds);
- *
- * `supercal_sink_writes_total` is registered ahead of the sink runner, so dashboards can rely on it.
  */
 import { pushLease, withControl, type PushTarget } from '@supercal/db';
 import { count, sql } from 'drizzle-orm';
@@ -28,7 +26,7 @@ export const metrics = {
   icsCacheHits: registry.counter('supercal_ics_cache_hits_total', 'ICS bodies served from the in-process cache.'),
   icsCacheMisses: registry.counter('supercal_ics_cache_misses_total', 'ICS bodies rendered because the cache had no copy.'),
   pushLeases: registry.gauge('supercal_push_leases', 'Push subscriptions in the database, by provider and state (active or expired).', ['provider', 'state']),
-  sinkWrites: registry.counter('supercal_sink_writes_total', 'Events written to sink calendars, by outcome.', ['outcome']),
+  sinkWrites: registry.counter('supercal_sink_writes_total', 'Event writes and deletes on sink calendars, by outcome (ok, throttled, calendar_missing or error).', ['outcome']),
 };
 
 /** A lease's provider follows from its target; `supercal_control` may not read `calendar_account`. */

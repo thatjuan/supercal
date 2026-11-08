@@ -12,6 +12,7 @@
 import {
   calendarAccount,
   NO_FRESHNESS,
+  sink,
   sourceCalendar,
   syncTarget,
   withTenant,
@@ -26,6 +27,8 @@ import { AuthFailedError, ProviderCredentials, type AdapterContext, type Adapter
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { notifyEvent } from '../bus.ts';
 import type { FeedService } from '../feeds/service.ts';
+import type { WriteBudget } from '../sinks/budget.ts';
+import type { GoogleSinkClient } from '../sinks/google.ts';
 import type { Logger } from '../log.ts';
 import { StopTargetError, type Job } from './scheduler.ts';
 
@@ -39,6 +42,10 @@ export type SyncDeps = {
   pushBaseUrl: string | null;
   /** Runs `fn` within the account's concurrency limit (`createSlots`). */
   accountSlot: <T>(accountId: string, fn: () => Promise<T>) => Promise<T>;
+  /** Google sink calls; null when Google is not configured. */
+  googleSinks: GoogleSinkClient | null;
+  /** Sink writes per provider user (`createWriteBudget`). */
+  sinkBudget: WriteBudget;
 };
 
 /** A job of a tenant's target (anything but maintenance). */
@@ -111,11 +118,12 @@ async function transition(tx: TenantTx, account: CalendarAccount, status: Connec
   if (row) await notifyEvent(tx, account.tenantId, { type: 'account.status', accountId: account.id, status, ...(detail !== null && { detail }) });
 }
 
-/** The account's targets: its `discover` target and every calendar's targets. */
+/** The account's targets: its `discover` target, every calendar's targets and its sinks' targets. */
 export const accountTargets = (account: Pick<CalendarAccount, 'id'>) =>
   or(
     eq(syncTarget.targetId, account.id),
     inArray(syncTarget.targetId, sql`(select ${sourceCalendar.id} from ${sourceCalendar} where ${sourceCalendar.accountId} = ${account.id})`),
+    inArray(syncTarget.targetId, sql`(select ${sink.id} from ${sink} where ${sink.accountId} = ${account.id})`),
   );
 
 /** `reauth_required`: parks the account's targets until reconnect, and marks its calendars stale. Published data stays. */

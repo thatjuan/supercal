@@ -22,7 +22,9 @@ export type AuditAction =
   | 'publication.create'
   | 'publication.update'
   | 'publication.delete'
-  | 'publication.reorder';
+  | 'publication.reorder'
+  | 'sink.create'
+  | 'sink.delete';
 
 /** The actor recorded on each entry: who acted and how they authenticated. */
 export const AuditActor = z.object({ kind: z.literal('user'), userId: z.string(), via: z.enum(['session', 'apiKey']) }).openapi('AuditActor');

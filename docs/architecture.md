@@ -256,7 +256,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 
 ## 11. Sinks
 
-- **Google sink (v1, opt-in).** Incremental consent for `calendar.app.created`. Create a dedicated secondary calendar and record `provider_subject` + calendar id **before** any write, so ingestion excludes it (also across reconnects and double-linked accounts).
+- **Google sink (v1, opt-in).** Incremental consent for `calendar.app.created`. Create a dedicated secondary calendar and record `provider_subject` + calendar id **before** any write, so ingestion excludes it (also across reconnects and double-linked accounts). Its description starts with the marker `Managed by Supercal`, and the Google adapter's listing leaves out such calendars, so a mirror stays out after its `sink` row is gone (publication or account deleted). The row is the authority; the marker is the recovery hint.
   - Events are written without attendees, organizer or conference creation, with `sendUpdates=none`; deterministic event ids give idempotency.
   - Private extended properties hold origin metadata.
   - The sink is a `sync_target` of kind `sink`. Its cursor is `{epoch, seq}` of the publication. A run projects the publication's resources with `seq > cursor.seq`, compares each with `sink_event.applied_revision`, and writes within a per-user write budget. An epoch change triggers a full reconcile. There is no outbox.
