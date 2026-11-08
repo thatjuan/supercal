@@ -267,10 +267,10 @@ curl --fail https://cal.example.com/api/v1/dav-logins \
 ```
 
 The 201 response contains `id`, `name`, `username`, `password`, `serverUrl` and `createdAt`.
-Save the password now; it is shown only in this response. In Apple Calendar, Thunderbird or DAVx5,
-add a CalDAV account using the returned server URL, username and password. Discovery finds your
-active hosted calendars. You can create calendars and create, edit and delete events from the app;
-Supercal has no event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
+Save the password now; it is shown only in this response. Add a CalDAV account using the returned
+server URL, username and password. Discovery exposes your active hosted calendars; the client
+coverage and limitations below describe what has actually been observed. Supercal has no event
+editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
 `/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
 MKCALENDAR, PROPPATCH, PUT and DELETE.
 
@@ -280,6 +280,44 @@ devices. A tenant admin can revoke a member's device login too. Each user may ha
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
 Feed usernames and passwords continue to provide read-only publications; use a DAV login to
 edit hosted calendars. Device credentials cannot open the management API or ICS feeds.
+
+### Observed client coverage
+
+The [verification record](verification.md) covers revision `f9d5b3b` on 2026-11-08. Verification
+is incomplete. Thunderbird 153.6.0esr on Debian 13, running in a separate container with a virtual
+display, is the only calendar application exercised in this run. It discovered hosted calendars,
+created timed, all-day and weekly events, edited and deleted individual occurrences, and deleted
+an event. REST occurrence expansion matched those writes. A REST-created event survived a client
+edit with matching REST/CalDAV ETags, and a custom X-property survived client and REST title edits.
+Revoking its DAV login produced an authentication prompt after refresh.
+
+Observed limitations:
+
+- Thunderbird changed calendar names and colours locally; the API metadata stayed unchanged.
+- Its tested recurrence menu offered this occurrence or all occurrences, with no this-and-following
+  option. Its network-calendar workflow subscribed/unsubscribed calendars; remote calendar creation
+  and deletion were not verified. Use the calendar REST API for lifecycle operations.
+- An offline Thunderbird edit competing with a REST edit produced a conflict prompt. Discarding
+  the local edit preserved the server value. A conflict between two calendar applications remains
+  unverified.
+- A full published link displayed successfully despite the existing `VALUE=UNKNOWN` parameters on
+  `CALSCALE` and `METHOD`. After revocation and a manual refresh, cached events remained visible
+  during a short observation; long-term refresh behavior was not measured.
+- A Cloudflare quick tunnel returned 501 for `MKCALENDAR`, while the origin accepted it, so clients
+  can't create calendars through one. Other DAV reads and tested event writes worked through it. A
+  named Cloudflare tunnel did pass `MKCALENDAR` to the origin. Check that your proxy forwards this
+  method before relying on client calendar creation.
+
+Thunderbird displayed Invite Attendees and warned that invitations require an email identity;
+the test profile had no identity. AgentMail inbox creation hit its capacity limit, so no attendee
+was entered and client-originated mail, refusal behavior, inbox delivery and attendee redaction in
+populated publications remain unverified. Supercal scheduling is not implemented; attendee data
+does not establish that invitations will be sent by the server or a client.
+
+macOS Calendar, iOS Calendar, DAVx5 with an Android calendar app, Fantastical and BusyCal remain
+unverified. Google Calendar From URL, Outlook on the web, real-client sharing, Google virtual
+publication deduplication and Google sink delivery also remain unverified. Separate HTTP checks
+in the record cover server behavior and do not establish compatibility with those clients.
 
 ## CalDAV servers on your LAN
 
