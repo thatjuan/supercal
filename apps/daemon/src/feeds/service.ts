@@ -10,7 +10,7 @@
  * `publicationChangeKind` decides, and writes the audit log, in the caller's transaction.
  */
 import { Temporal } from '@js-temporal/polyfill';
-import { expandOccurrences, project, summary, textValue, UnknownTimeZoneError, type SourceResource } from '@supercal/core';
+import { expandOccurrences, project, summary, textValue, UnknownTimeZoneError, type PublicationSpec, type SourceResource } from '@supercal/core';
 import {
   bumpConfigVersion,
   bumpEpoch,
@@ -525,12 +525,13 @@ export function createFeedService(secrets: SecretBox) {
       );
       const zoneOf = new Map<string, string>();
       for (const input of inputs) if (!zoneOf.has(input.resource.uid)) zoneOf.set(input.resource.uid, calendars.get(input.sourceCalendarId as SourceCalendarId)?.zone ?? 'UTC');
-      const spec = {
+      const spec: PublicationSpec = {
         id: p.id,
         kind: p.kind,
         privacy: p.privacy,
         filters: p.filters,
         keepAlarms: p.keepAlarms,
+        audience: 'owner',
         ownerAddresses: [...new Set(inputs.flatMap((i) => i.ownerAddresses))],
         uidSecret,
       };

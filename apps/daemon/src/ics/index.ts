@@ -1,7 +1,7 @@
 /**
  * ICS feeds (architecture §6, §9), mounted at `/ics` when the `dav` role is enabled:
  * `GET|HEAD /ics/<token>/<pubSlug>.ics` serves one enabled publication and `/ics/<token>/all.ics`
- * every enabled publication combined.
+ * every enabled publication combined. `/ics/l/<token>.ics` serves one published calendar link.
  *
  * The ETag and Last-Modified come from one aggregate query per publication, so conditional
  * requests get a 304 before anything renders. Rendered bodies are cached as br and gzip under
@@ -9,15 +9,15 @@
  * slug is a 404 with an empty body, so token existence never leaks. Tokens are never logged.
  */
 import { RENDER_VERSION } from '@supercal/core';
-import { feed, publicationState, withControl, withTenant, type SecretBox } from '@supercal/db';
-import { eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { calendarLink, feed, publicationState, resource, sourceCalendar, withControl, withTenant, type SecretBox } from '@supercal/db';
+import { and, eq, max } from 'drizzle-orm';
+import { Hono, type Context } from 'hono';
 import { brotliCompressSync, constants } from 'node:zlib';
 import { icsTokenHash } from '../feeds/credentials.ts';
 import { createLogger, redact } from '../log.ts';
 import { metrics } from '../ops/metrics.ts';
 import { createByteLru } from './cache.ts';
-import { enabledPublications, renderIcs } from './render.ts';
+import { enabledPublications, renderIcs, renderLink } from './render.ts';
 
 const log = createLogger({ component: 'ics' });
 
@@ -66,6 +66,58 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
     return c.body(null, 500);
   });
 
+  /** Conditional handling, negotiation and compressed-body caching for both ICS surfaces. */
+  async function serveIcs(c: Context, { etag, lastModified, render }: { etag: string; lastModified: Date | null; render: () => Promise<string> }) {
+    const headers: Record<string, string> = { ...BASE_HEADERS, ETag: etag, ...(lastModified && { 'Last-Modified': lastModified.toUTCString() }) };
+
+    if (notModified({ ifNoneMatch: c.req.header('If-None-Match'), ifModifiedSince: c.req.header('If-Modified-Since') }, etag, lastModified))
+      return c.body(null, 304, headers);
+
+    const encoding = negotiate(c.req.header('Accept-Encoding'));
+    if (encoding !== 'identity') headers['Content-Encoding'] = encoding;
+    const cached = cache.get(`${etag}:${encoding === 'br' ? 'br' : 'gzip'}`);
+    if (cached) {
+      metrics.icsCacheHits.inc({});
+      return c.body(encoding === 'identity' ? Bun.gunzipSync(cached) : cached, 200, headers);
+    }
+    metrics.icsCacheMisses.inc({});
+
+    const body = new TextEncoder().encode(await render());
+    const variants = {
+      br: new Uint8Array(brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } })),
+      gzip: Bun.gzipSync(body),
+    };
+    cache.set(`${etag}:br`, variants.br);
+    cache.set(`${etag}:gzip`, variants.gzip);
+    return c.body(encoding === 'identity' ? body : variants[encoding], 200, headers);
+  }
+
+  // Register before the two-segment feed route: `l` is reserved for published links.
+  app.get('/l/:file', async (c) => {
+    const file = c.req.param('file');
+    if (!file.endsWith('.ics')) return c.body(null, 404);
+    const token = file.slice(0, -'.ics'.length);
+    const [owner] = await withControl((tx) => tx
+      .select({ id: calendarLink.id, tenantId: calendarLink.tenantId, expiresAt: calendarLink.expiresAt })
+      .from(calendarLink).where(eq(calendarLink.tokenHash, icsTokenHash(token))));
+    if (!owner || (owner.expiresAt && owner.expiresAt.getTime() <= Date.now())) return c.body(null, 404);
+
+    return withTenant(owner.tenantId, async (tx) => {
+      const [link] = await tx.select().from(calendarLink).where(eq(calendarLink.id, owner.id));
+      if (!link || (link.expiresAt && link.expiresAt.getTime() <= Date.now())) return c.body(null, 404);
+      // Epoch, metadata and resource state come from the same aggregate snapshot, including tombstones.
+      const [state] = await tx.select({ calendar: sourceCalendar, maxSeq: max(resource.seq), lastChangedAt: max(resource.changedAt) })
+        .from(sourceCalendar).leftJoin(resource, eq(resource.sourceCalendarId, sourceCalendar.id))
+        .where(and(eq(sourceCalendar.id, link.calendarId), eq(sourceCalendar.state, 'active')))
+        .groupBy(sourceCalendar.id);
+      if (!state) return c.body(null, 404);
+      const { calendar } = state;
+      const etag = `"lnk.${link.id}.${calendar.syncEpoch}.${state.maxSeq ?? 0n}.${calendar.updatedAt.getTime()}.${RENDER_VERSION}"`;
+      const lastModified = state.lastChangedAt && state.lastChangedAt > calendar.updatedAt ? state.lastChangedAt : calendar.updatedAt;
+      return serveIcs(c, { etag, lastModified, render: () => renderLink(tx, secrets, link, calendar) });
+    });
+  });
+
   // Hono answers HEAD with this GET handler and drops the body.
   app.get('/:token/:file', async (c) => {
     const file = c.req.param('file');
@@ -91,28 +143,7 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
       // Edits to names and order change no `changed_at`, so the rows' own update times count too.
       const times = [...states.map((s) => s.lastChangedAt), ...publications.map((p) => p.updatedAt), ...(combined ? [target.updatedAt] : [])];
       const lastModified = times.reduce<Date | null>((latest, t) => (t && (!latest || t > latest) ? t : latest), null);
-      const headers: Record<string, string> = { ...BASE_HEADERS, ETag: etag, ...(lastModified && { 'Last-Modified': lastModified.toUTCString() }) };
-
-      if (notModified({ ifNoneMatch: c.req.header('If-None-Match'), ifModifiedSince: c.req.header('If-Modified-Since') }, etag, lastModified))
-        return c.body(null, 304, headers);
-
-      const encoding = negotiate(c.req.header('Accept-Encoding'));
-      if (encoding !== 'identity') headers['Content-Encoding'] = encoding;
-      const cached = cache.get(`${etag}:${encoding === 'br' ? 'br' : 'gzip'}`);
-      if (cached) {
-        metrics.icsCacheHits.inc({});
-        return c.body(encoding === 'identity' ? Bun.gunzipSync(cached) : cached, 200, headers);
-      }
-      metrics.icsCacheMisses.inc({});
-
-      const body = new TextEncoder().encode(await render(tx, secrets, { feed: target, publications, combined }));
-      const variants = {
-        br: new Uint8Array(brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } })),
-        gzip: Bun.gzipSync(body),
-      };
-      cache.set(`${etag}:br`, variants.br);
-      cache.set(`${etag}:gzip`, variants.gzip);
-      return c.body(encoding === 'identity' ? body : variants[encoding], 200, headers);
+      return serveIcs(c, { etag, lastModified, render: () => render(tx, secrets, { feed: target, publications, combined }) });
     });
   });
   app.all('*', (c) => c.body(null, 404));

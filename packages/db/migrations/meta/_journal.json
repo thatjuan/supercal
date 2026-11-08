@@ -71,6 +71,13 @@
       "when": 1794161497688,
       "tag": "0009_hosted_calendars",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794162230474,
+      "tag": "0010_needy_arclight",
+      "breakpoints": true
     }
   ]
 }

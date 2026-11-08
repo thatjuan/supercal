@@ -10,6 +10,8 @@ import {
   publicationSource,
   resourcesIn,
   sourceCalendar,
+  type CalendarLink,
+  type SourceCalendar,
   type Feed,
   type FeedId,
   type LiveResource,
@@ -102,6 +104,7 @@ export async function renderIcs(tx: TenantTx, secrets: SecretBox, { feed, public
       privacy: p.privacy,
       filters: p.filters,
       keepAlarms: p.keepAlarms,
+      audience: 'owner',
       ownerAddresses: [...new Set(inputs.flatMap((i) => i.ownerAddresses))],
       uidSecret,
     };
@@ -113,4 +116,23 @@ export async function renderIcs(tx: TenantTx, secrets: SecretBox, { feed, public
   const name = combined ? feed.name : (publications[0]?.name ?? feed.name);
   const color = combined ? null : (publications[0]?.color ?? null);
   return serializeCalendar({ props: calendarProps(name, color), resources: objects.map((o) => o.resource) });
+}
+
+/** Projects the calendar's live resources for an unauthenticated published-link audience. */
+export async function renderLink(tx: TenantTx, secrets: SecretBox, link: CalendarLink, calendar: SourceCalendar): Promise<string> {
+  const [account] = await tx.select({ email: calendarAccount.email }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
+  const ownerAddresses = account?.email ? [`mailto:${account.email}`] : [];
+  const spec: PublicationSpec = {
+    id: link.id,
+    kind: 'passthrough',
+    privacy: link.privacy,
+    audience: 'public',
+    filters: { hideDeclined: false, hideCancelled: false, hideAllDay: false },
+    keepAlarms: false,
+    ownerAddresses,
+    uidSecret: await openUidSecret(secrets, link, tx, 'calendar_link'),
+  };
+  const inputs = (await resourcesIn(tx, [calendar.id])).map((row) => ({ sourceCalendarId: calendar.id, priority: 0, ownerAddresses, resource: row.data }));
+  const objects = await project(spec, inputs);
+  return serializeCalendar({ props: calendarProps(calendar.name, calendar.color), resources: objects.map((object) => object.resource) });
 }

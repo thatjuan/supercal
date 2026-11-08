@@ -74,6 +74,7 @@ export async function loadAccount(tx: TenantTx, secrets: SecretBox, feedId: Feed
       privacy: p.privacy,
       filters: p.filters,
       keepAlarms: p.keepAlarms,
+      audience: 'owner',
       ownerAddresses: [...new Set(own.flatMap((s) => s.ownerAddresses))],
       uidSecret,
     };
