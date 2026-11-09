@@ -1,5 +1,5 @@
 import { MAX_OBJECT_BYTES } from '@supercal/core';
-import { auditLog, closeDb, connectDb, davLogin, feed, member, migrate, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
+import { auditLog, closeDb, connectDb, davLogin, feed, member, migrate, organization, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
 import { scratchDatabase, sqlState, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -136,6 +136,22 @@ describe.skipIf(!testDatabaseUrl)('hosted CalDAV', () => {
       expect((await request('PUT', path + name, ics('bad-name'))).status).toBe(403);
     expect((await request('PUT', `${path}${'a'.repeat(251)}.ics`, ics('long-name'))).status).toBe(201);
   });
+
+  test('an impossible RRULE PUT returns and another tenant can still PROPFIND', async () => {
+    const other = { tenantId: 'org_budget_other' as TenantId, userId: 'user_budget_other', username: 'budget-other-abcdefgh', password: 'other-device-password' };
+    const now = new Date();
+    await unsafeDb().insert(organization).values({ id: other.tenantId, name: 'Other tenant', slug: other.tenantId, createdAt: now });
+    await unsafeDb().insert(user).values({ id: other.userId, name: 'Other writer', email: 'budget-other@example.test', updatedAt: now });
+    await unsafeDb().insert(member).values({ id: 'member_budget_other', organizationId: other.tenantId, userId: other.userId, role: 'member', createdAt: now });
+    await unsafeDb().insert(davLogin).values({ tenantId: other.tenantId, userId: other.userId, name: 'Other device', username: other.username, passwordHash: await Bun.password.hash(other.password, { algorithm: 'argon2id' }) });
+    const otherCalendar = await withTenant(other.tenantId, (tx) => createCalendar(tx, createFeedService(testSecrets), other.userId, { name: 'Other' }));
+    const started = performance.now();
+    const put = await request('PUT', `${path}impossible.ics`, eventIcs('impossible', ['DTSTART:20260101T090000Z', 'RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30;COUNT=2']));
+    expect(put.status).toBe(201);
+    const propfind = await request('PROPFIND', `/dav/${other.username}/cal/${otherCalendar.providerCalendarId}/`, undefined, { Authorization: basic(other.username, other.password) });
+    expect(propfind.status).toBe(207);
+    expect(performance.now() - started).toBeLessThan(2000);
+  }, 5000);
 
   test('incremental sync uses stored names and tombstones; changing a recreated UID name expires the token', async () => {
     const before = tokenOf((await request('REPORT', path, sync())).text);

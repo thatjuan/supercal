@@ -1,16 +1,28 @@
 import { Temporal } from '@js-temporal/polyfill';
 import { textValue } from './accessors.ts';
 import type { EventResource } from './model.ts';
-import { expandOccurrences, type TimeWindow } from './time.ts';
+import { expandOccurrences, MAX_ITERATIONS, type TimeWindow } from './time.ts';
 
 export type BusyInterval = { start: Temporal.Instant; end: Temporal.Instant; status: 'busy' | 'tentative' };
+
+const MAX_WINDOW_MS = 62 * 86_400_000;
+const MAX_FUTURE_MS = 5 * 365 * 86_400_000;
+
+/** Why a free-busy window is refused, or null. Expansion runs from DTSTART to `to`, so the far end costs work whatever the width. */
+export function freeBusyWindowProblem({ from, to }: TimeWindow, now = Temporal.Now.instant()): string | null {
+  if (Temporal.Instant.compare(from, to) >= 0) return 'Window must be positive';
+  if (to.epochMilliseconds - from.epochMilliseconds > MAX_WINDOW_MS) return 'Window must be at most 62 days';
+  if (to.epochMilliseconds > now.epochMilliseconds + MAX_FUTURE_MS) return 'Window must end within 5 years';
+  return null;
+}
 
 /** Merged busy time clipped to the window; busy takes precedence over tentative. */
 export function freeBusy(resources: EventResource[], window: TimeWindow, calendarZone: string): { intervals: BusyInterval[]; truncated: boolean } {
   const edges: { time: Temporal.Instant; busy: number; tentative: number }[] = [];
   let truncated = false;
+  const budget = { remaining: MAX_ITERATIONS };
   for (const resource of resources) {
-    const expanded = expandOccurrences(resource, window, calendarZone);
+    const expanded = expandOccurrences(resource, window, calendarZone, undefined, budget);
     truncated ||= expanded.truncated;
     for (const occurrence of expanded.occurrences) {
       const component = occurrence.component;
@@ -22,6 +34,7 @@ export function freeBusy(resources: EventResource[], window: TimeWindow, calenda
       const busy = status === 'TENTATIVE' ? 0 : 1;
       edges.push({ time: start, busy, tentative: 1 - busy }, { time: end, busy: -busy, tentative: busy - 1 });
     }
+    if (truncated) break;
   }
   edges.sort((a, b) => Temporal.Instant.compare(a.time, b.time));
   const intervals: BusyInterval[] = [];

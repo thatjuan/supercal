@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Temporal } from '@js-temporal/polyfill';
-import { freeBusy, parseCalendar, type EventResource } from '../src/index.ts';
+import { freeBusy, freeBusyWindowProblem, parseCalendar, MAX_ITERATIONS, type EventResource } from '../src/index.ts';
 
 const instant = Temporal.Instant.from;
 function events(...components: string[][]): EventResource[] {
@@ -47,5 +47,29 @@ describe('freeBusy', () => {
   test('expansion limits propagate as truncated', () => {
     const data = events(['UID:dense', 'DTSTART:20261109T000000Z', 'DURATION:PT1S', 'RRULE:FREQ=SECONDLY;COUNT=6000']);
     expect(query(data, '2026-11-09T00:00:00Z', '2026-11-10T00:00:00Z').truncated).toBe(true);
+  });
+});
+
+
+describe('free-busy budgets', () => {
+  test('refuses nonpositive, over-62-day and far-future windows', () => {
+    const now = instant('2026-11-09T00:00:00Z');
+    const problem = (from: string, to: string) => freeBusyWindowProblem({ from: instant(from), to: instant(to) }, now);
+    expect(problem('2526-11-09T00:00:00Z', '2526-11-10T00:00:00Z')).toBe('Window must end within 5 years');
+    expect(freeBusyWindowProblem({ from: now, to: now.add({ hours: 500 * 24 }) }, now)).toBe('Window must be at most 62 days');
+    expect(freeBusyWindowProblem({ from: now, to: now }, now)).toBe('Window must be positive');
+    expect(freeBusyWindowProblem({ from: now, to: now.add({ hours: 62 * 24 }) }, now)).toBeNull();
+  });
+
+  test('stops before inspecting a second resource when the first truncates', () => {
+    const data = events(...['first', 'second'].map((uid) => [`UID:${uid}`, 'DTSTART:20260101T000000Z', 'RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30']));
+    Object.defineProperty(data[1]!, 'master', { get() { throw new Error('second resource was expanded'); } });
+    expect(query(data, '2026-11-09T00:00:00Z', '2026-11-10T00:00:00Z')).toEqual({ intervals: [], truncated: true });
+  });
+
+  test('shares the RRULE value budget across resources', () => {
+    const count = MAX_ITERATIONS / 2 + 1;
+    const data = events(...['first', 'second'].map((uid) => [`UID:${uid}`, 'DTSTART:19000101T000000Z', `RRULE:FREQ=DAILY;COUNT=${count}`]));
+    expect(query(data, '2026-11-09T00:00:00Z', '2026-11-10T00:00:00Z')).toEqual({ intervals: [], truncated: true });
   });
 });

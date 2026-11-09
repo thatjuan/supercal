@@ -3,7 +3,7 @@
  * each request then uses one tenant transaction. Shared handlers read CollectionView; only device
  * logins can enter the hosted write path. Listings fetch metadata without rendering payloads.
  */
-import { assertIanaZone, freeBusy, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
+import { assertIanaZone, freeBusy, freeBusyWindowProblem, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
 import { Temporal } from '@js-temporal/polyfill';
 import { sourceCalendar, sourceObject, resourcesIn, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
 import { Hono, type Context } from 'hono';
@@ -289,8 +289,9 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
       let from: Temporal.Instant, to: Temporal.Instant;
       try {
         from = instant(range?.attrs.start); to = instant(range?.attrs.end);
-        if (Temporal.Instant.compare(from, to) >= 0) throw new Error('Invalid window');
       } catch { return c.body('expected a valid time-range with UTC start and end', 400); }
+      const problem = freeBusyWindowProblem({ from, to });
+      if (problem) return c.body(problem, 400);
       const rows = await resourcesIn(tx, [view.calendar.id], { from: new Date(from.epochMilliseconds), to: new Date(to.epochMilliseconds) });
       const result = freeBusy(rows.map((row) => row.data), { from, to }, view.calendar.timezone ?? 'UTC');
       if (result.truncated) return davError(403, 'd:number-of-matches-within-limits');
