@@ -8,6 +8,7 @@ import { apiReference } from '@scalar/hono-api-reference';
 import type { SecretBox } from '@supercal/db';
 import { createGuardedFetch, type AdapterRegistry, type GoogleClientOptions, type GuardedFetch } from '@supercal/providers';
 import type { MiddlewareHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Auth } from '../auth/auth.ts';
 import { requirePrincipal, type ApiEnv } from '../auth/principal.ts';
@@ -93,6 +94,7 @@ export function createApi(
     microsoft: oauthConfig?.microsoft ?? null,
   };
   const app = createApiApp();
+  app.use('/api/auth/*', bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ message: 'Request body too large' }, 413) }));
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
   app.openAPIRegistry.registerComponent('securitySchemes', 'session', { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' });
   app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {

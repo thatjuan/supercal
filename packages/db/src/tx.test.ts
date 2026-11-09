@@ -43,6 +43,13 @@ describe.skipIf(!testDatabaseUrl)('tenant isolation', () => {
     await closeDb();
   });
 
+  test('the shared pool bounds idle transactions without limiting active statements', async () => {
+    const [idle] = await unsafeDb().execute<{ idle_in_transaction_session_timeout: string }>(sql`show idle_in_transaction_session_timeout`);
+    const [statement] = await unsafeDb().execute<{ statement_timeout: string }>(sql`show statement_timeout`);
+    expect(idle?.idle_in_transaction_session_timeout).toBe('1min');
+    expect(statement?.statement_timeout).toBe('0');
+  });
+
   test('a query without WHERE sees only the current tenant, as supercal_app', async () => {
     const seen = await withTenant(tenantA, async (tx) => {
       const [role] = await tx.execute<{ current_user: string }>(sql`select current_user`);

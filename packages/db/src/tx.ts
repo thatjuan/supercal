@@ -15,7 +15,11 @@ declare const controlTx: unique symbol;
 export type TenantTx = DrizzleTx & { readonly [tenantTx]: TenantId };
 export type ControlTx = DrizzleTx & { readonly [controlTx]: true };
 
-/** Runs `fn` in a transaction as `supercal_app`, where RLS limits every table to `tenantId`. */
+/**
+ * Runs `fn` in a transaction as `supercal_app`, where RLS limits every table to `tenantId`.
+ * Inside withTenant or withControl callbacks, never open another pooled transaction or wait on
+ * the client: resolve membership and buffer request bodies before entering the transaction.
+ */
 export function withTenant<T>(tenantId: TenantId, fn: (tx: TenantTx) => Promise<T>): Promise<T> {
   return unsafeDb().transaction(async (tx) => {
     await tx.execute(sql`select set_config('role', 'supercal_app', true), set_config('app.tenant_id', ${tenantId}, true)`);
