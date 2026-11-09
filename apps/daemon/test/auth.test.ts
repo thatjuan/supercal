@@ -7,7 +7,7 @@ import { apiKeyTenant, closeDb, connectDb, createControlDatabase, member, migrat
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { createApi } from '../src/api/index.ts';
 import { idleBus } from '../src/bus.ts';
 import { createAuth, type AuthConfig } from '../src/auth/auth.ts';
@@ -203,9 +203,9 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
       expect((await app.request(profile, { headers: { authorization: `Bearer ${key.key}`, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(200);
     });
 
-    test('editing key metadata through Better Auth does not move the key to another tenant', async () => {
+    test('Better Auth key-update is disabled', async () => {
       const update = await call('open', '/api/auth/api-key/update', { cookie: user.cookie, body: { keyId: key.id, metadata: { tenantId: operator.me.tenant.id } } });
-      expect(update.status).toBe(200);
+      expect(update.status).toBe(404);
       expect((await me('open', { key: key.key })).body.tenant.id).toBe(user.me.tenant.id);
     });
 
@@ -319,6 +319,143 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
       expect(await res.json()).toMatchObject({ id: operator.me.tenant.id, name: 'Operations' });
       const entries = (await (await call('open', '/api/v1/audit-log', { cookie: operator.cookie })).json()) as { items: { action: string }[] };
       expect(entries.items.map((entry) => entry.action)).toContain('tenant.update');
+    });
+  });
+
+  describe('tenant policy and membership audit', () => {
+    type Entry = { action: string; actor: { kind: string; userId: string; via: string }; targetType: string; targetId: string; data: Record<string, unknown> };
+    const entries = async (cookie: string) => {
+      const res = await call('open', '/api/v1/audit-log?limit=100', { cookie });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { items: Entry[] }).items;
+    };
+
+    test('admins cannot bypass owner policy; owner role changes validate, audit and preserve the last owner', async () => {
+      const owner = await signUp('open');
+      const ownerMe = (await me('open', owner)).body;
+      const admin = await signUp('open');
+      const adminMe = (await me('open', admin)).body;
+      const memberId = crypto.randomUUID();
+      await unsafeDb().insert(member).values({ id: memberId, organizationId: ownerMe.tenant.id, userId: adminMe.user.id, role: 'admin', createdAt: new Date() });
+      expect((await call('open', '/api/auth/organization/set-active', { cookie: admin.cookie, body: { organizationId: ownerMe.tenant.id } })).status).toBe(200);
+      for (const [path, body] of [
+        ['/api/auth/organization/update', { data: { name: 'Bypass', slug: 'INVALID SLUG' } }],
+        ['/api/auth/organization/update-member-role', { memberId, role: 'owner' }],
+      ] as const) expect((await call('open', path, { cookie: admin.cookie, body })).status).toBe(404);
+      expect((await call('open', '/api/v1/tenant', { cookie: admin.cookie, method: 'PATCH', body: { name: 'Bypass' } })).status).toBe(403);
+      const patch = (cookie: string, id: string, role: string, extra = {}) => call('open', `/api/v1/members/${id}`, { cookie, method: 'PATCH', body: { role, ...extra } });
+      expect((await patch(admin.cookie, memberId, 'owner')).status).toBe(403);
+      expect((await patch(owner.cookie, memberId, 'superadmin')).status).toBe(400);
+      expect((await patch(owner.cookie, memberId, 'member', { userId: ownerMe.user.id })).status).toBe(400);
+      const [ownMember] = await unsafeDb().select().from(member).where(and(eq(member.userId, ownerMe.user.id), eq(member.organizationId, ownerMe.tenant.id)));
+      if (!ownMember) throw new Error('owner membership missing');
+      const lastOwner = await patch(owner.cookie, ownMember.id, 'member');
+      expect(lastOwner.status).toBe(409);
+      expect(await lastOwner.json()).toMatchObject({ type: 'https://supercal.dev/problems/last-owner' });
+      expect((await patch(owner.cookie, 'missing', 'member')).status).toBe(404);
+      const [foreignMember] = await unsafeDb().select().from(member).where(eq(member.organizationId, adminMe.tenant.id));
+      if (!foreignMember) throw new Error('foreign membership missing');
+      expect((await patch(owner.cookie, foreignMember.id, 'member')).status).toBe(404);
+      const calendar = await call('open', '/api/v1/calendars', { cookie: owner.cookie, body: { name: 'Demotion links' } });
+      expect(calendar.status).toBe(201);
+      const { id: calendarId } = await calendar.json() as { id: string };
+      const linksPath = `/api/v1/calendars/${calendarId}/links`;
+      for (const cookie of [owner.cookie, admin.cookie])
+        expect((await call('open', linksPath, { cookie, body: { privacy: 'busy-only' } })).status).toBe(201);
+      await unsafeDb().execute(sql`create function fail_membership_audit() returns trigger language plpgsql as $$
+        begin if NEW.action in ('member.role_update', 'member.invite') then raise exception 'audit unavailable'; end if; return NEW; end $$`);
+      await unsafeDb().execute(sql`create trigger fail_membership_audit before insert on audit_log for each row execute function fail_membership_audit()`);
+      try {
+        expect((await patch(owner.cookie, memberId, 'member')).status).toBe(500);
+        const [unchanged] = await unsafeDb().select({ role: member.role }).from(member).where(eq(member.id, memberId));
+        expect(unchanged?.role).toBe('admin');
+        const links = await (await call('open', linksPath, { cookie: owner.cookie })).json() as { items: unknown[] };
+        expect(links.items).toHaveLength(2);
+        // Better Auth's mutation is already committed: a failed audit must still return success.
+        expect((await call('open', '/api/auth/organization/invite-member', { cookie: owner.cookie, body: { email: `audit-failure-${crypto.randomUUID()}@example.invalid`, role: 'member' } })).status).toBe(200);
+      } finally {
+        await unsafeDb().execute(sql`drop trigger fail_membership_audit on audit_log`);
+        await unsafeDb().execute(sql`drop function fail_membership_audit()`);
+      }
+      expect((await patch(owner.cookie, memberId, 'member')).status).toBe(200);
+      const links = await (await call('open', linksPath, { cookie: owner.cookie })).json() as { items: { createdBy: string }[] };
+      expect(links.items).toHaveLength(1);
+      expect(links.items[0]?.createdBy).toBe(ownerMe.user.id);
+      expect((await entries(owner.cookie)).filter((entry) => entry.action === 'member.role_update')).toEqual([
+        expect.objectContaining({ actor: { kind: 'user', userId: ownerMe.user.id, via: 'session' }, targetType: 'member', targetId: memberId, data: { from: 'admin', to: 'member' } }),
+      ]);
+    });
+
+    test('concurrent owner demotions serialize and retain one owner', async () => {
+      const first = await signUp('open');
+      const firstMe = (await me('open', first)).body;
+      const second = await signUp('open');
+      const secondMe = (await me('open', second)).body;
+      const secondMemberId = crypto.randomUUID();
+      await unsafeDb().insert(member).values({ id: secondMemberId, organizationId: firstMe.tenant.id, userId: secondMe.user.id, role: 'owner', createdAt: new Date() });
+      expect((await call('open', '/api/auth/organization/set-active', { cookie: second.cookie, body: { organizationId: firstMe.tenant.id } })).status).toBe(200);
+      const [firstMember] = await unsafeDb().select().from(member).where(and(eq(member.userId, firstMe.user.id), eq(member.organizationId, firstMe.tenant.id)));
+      if (!firstMember) throw new Error('owner membership missing');
+      const responses = await Promise.all([
+        call('open', `/api/v1/members/${firstMember.id}`, { cookie: first.cookie, method: 'PATCH', body: { role: 'member' } }),
+        call('open', `/api/v1/members/${secondMemberId}`, { cookie: second.cookie, method: 'PATCH', body: { role: 'member' } }),
+      ]);
+      expect(responses.map((res) => res.status).sort()).toEqual([200, 409]);
+      const members = await unsafeDb().select({ role: member.role }).from(member).where(eq(member.organizationId, firstMe.tenant.id));
+      expect(members.filter((row) => row.role === 'owner')).toHaveLength(1);
+    });
+
+    test('every remaining organization mutation records exactly one entry with its acting user', async () => {
+      const owner = await signUp('open');
+      const ownerMe = (await me('open', owner)).body;
+      const created = await call('open', '/api/auth/organization/create', { cookie: owner.cookie, body: { name: 'Audited tenant', slug: `audit-${crypto.randomUUID()}` } });
+      expect(created.status).toBe(200);
+      const tenant = await created.json() as { id: string; name: string; slug: string };
+      const expectEntry = async (action: string, actorId: string, type: string, id: string, data: Record<string, unknown>) => {
+        expect((await entries(owner.cookie)).filter((entry) => entry.action === action && entry.targetId === id)).toEqual([
+          expect.objectContaining({ actor: { kind: 'user', userId: actorId, via: 'session' }, targetType: type, targetId: id, data: expect.objectContaining(data) }),
+        ]);
+      };
+      await expectEntry('tenant.create', ownerMe.user.id, 'tenant', tenant.id, { name: tenant.name, slug: tenant.slug });
+      const invite = async (email: string, role = 'member') => {
+        const res = await call('open', '/api/auth/organization/invite-member', { cookie: owner.cookie, body: { email, role } });
+        expect(res.status).toBe(200);
+        const invitation = await res.json() as { id: string };
+        await expectEntry('member.invite', ownerMe.user.id, 'invitation', invitation.id, { email, role });
+        return invitation.id;
+      };
+      const canceledEmail = `cancel-${crypto.randomUUID()}@example.invalid`;
+      const canceledId = await invite(canceledEmail);
+      expect((await call('open', '/api/auth/organization/cancel-invitation', { cookie: owner.cookie, body: { invitationId: canceledId } })).status).toBe(200);
+      await expectEntry('member.invite_cancel', ownerMe.user.id, 'invitation', canceledId, { email: canceledEmail, role: 'member' });
+
+      const rejected = await signUp('open');
+      const rejectedMe = (await me('open', rejected)).body;
+      const rejectedId = await invite(rejected.email);
+      expect((await call('open', '/api/auth/organization/reject-invitation', { cookie: rejected.cookie, body: { invitationId: rejectedId } })).status).toBe(200);
+      await expectEntry('member.invite_reject', rejectedMe.user.id, 'invitation', rejectedId, { email: rejected.email, role: 'member' });
+
+      const joined = await signUp('open');
+      const joinedMe = (await me('open', joined)).body;
+      const joinedId = await invite(joined.email, 'admin');
+      const accepted = await call('open', '/api/auth/organization/accept-invitation', { cookie: joined.cookie, body: { invitationId: joinedId } });
+      expect(accepted.status).toBe(200);
+      const { member: membership } = await accepted.json() as { member: { id: string } };
+      await expectEntry('member.join', joinedMe.user.id, 'member', membership.id, { email: joined.email, role: 'admin', userId: joinedMe.user.id });
+      const before = await entries(owner.cookie);
+      expect((await call('open', '/api/auth/organization/invite-member', { cookie: joined.cookie, body: { email: `failed-${crypto.randomUUID()}@example.invalid`, role: 'owner' } })).status).not.toBe(200);
+      expect(await entries(owner.cookie)).toEqual(before);
+      expect((await call('open', '/api/auth/organization/remove-member', { cookie: owner.cookie, body: { memberIdOrEmail: membership.id } })).status).toBe(200);
+      await expectEntry('member.remove', ownerMe.user.id, 'member', membership.id, { role: 'admin', userId: joinedMe.user.id });
+      expect((await entries(owner.cookie)).map((entry) => entry.action).sort()).toEqual([
+        'tenant.create', 'member.invite', 'member.invite', 'member.invite', 'member.invite_cancel', 'member.invite_reject', 'member.join', 'member.remove',
+      ].sort());
+    });
+
+    test('operator impersonation, password replacement, tenant deletion and key deletion are disabled', async () => {
+      for (const path of ['/admin/impersonate-user', '/admin/set-user-password', '/organization/delete', '/api-key/update', '/api-key/delete']) {
+        expect((await call('open', `/api/auth${path}`, { cookie: operator.cookie, body: { userId: operator.me.user.id, newPassword: 'replaced-password', organizationId: operator.me.tenant.id, keyId: 'missing' } })).status).toBe(404);
+      }
     });
   });
 });
