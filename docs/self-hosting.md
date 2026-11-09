@@ -143,6 +143,7 @@ Keep these in mind on Kubernetes, Nomad or plain `docker run`:
 - **Probes.** The image has no shell, so it has no `HEALTHCHECK`. Point your orchestrator at `GET /healthz` for liveness (the process is up) and `GET /readyz` for readiness. `/readyz` answers 200 only when the database answers `select 1` within one second, the database's newest migration is the one this binary ships, the notification listener is connected, and, in a process with the `worker` role, the scheduler has ticked in the last 30 seconds. Otherwise it answers 503 with the failing checks, such as `{"status":"not ready","failing":["bus"]}`.
 - **Read-only root filesystem.** Supported, but `/tmp` must stay writable: migrations are written to a temporary directory before they are applied. Mount a tmpfs there (`--read-only --tmpfs /tmp` with `docker run`).
 - **Metrics.** `GET /metrics` serves Prometheus text: sync duration and errors per provider, lost leases, recorded changes, notification lag, feed requests by kind and status, ICS cache hits and misses, push subscriptions by provider and state, and sink writes. Set `SUPERCAL_METRICS_TOKEN` to require `Authorization: Bearer <token>`, or keep the path off your public proxy.
+- **Time zone data.** Supercal converts zoned times with the time zone rules in Bun's built-in ICU data, which can lag behind tzdata. The image ships newer ICU rule files in `/app/icu-tz` and sets `ICU_TIMEZONE_FILES_DIR=/app/icu-tz` so ICU loads them instead; keep that variable if you override the environment. Running the binary outside the image, point `ICU_TIMEZONE_FILES_DIR` at the same four `.res` files (the Dockerfile names them), or times in zones whose rules changed recently, such as `America/Vancouver` from November 2026, are off by the change.
 - **Shutdown.** On SIGTERM, Supercal stops accepting requests, hands back its sync leases and exits within ten seconds.
 
 ## Database setup
@@ -331,6 +332,8 @@ Postgres holds all of Supercal's state, so back up the database with your usual 
 ## Upgrading
 
 Build or pull the new image and restart your replicas with it. With the default `SUPERCAL_MIGRATE=auto`, each process applies pending migrations at startup under a Postgres advisory lock: the first one applies them, the others wait and find nothing left to do.
+
+When a release changes how events are normalised, such as a time zone rules update that moves stored time ranges, the first worker to start re-normalises every stored event from its raw copy. Connected calendars run one incremental sync to finish it. Only events whose result changed are written, and calendar apps see those as changed.
 
 To run migrations as a separate step, for example as a job before a rolling deploy, set `SUPERCAL_MIGRATE=off` on the replicas and run the binary's `migrate` command with the owner credential:
 

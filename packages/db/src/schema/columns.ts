@@ -21,11 +21,17 @@ export type Span = { start: Date; end: Date | 'infinity' };
 
 const RANGE = /^\[(?:"([^"]+)"|([^,]+)),(?:"([^"]+)"|([^\]\)]+))[\]\)]$/;
 
-/** Postgres `tstzrange`, which Drizzle has no native column for. */
-export const tstzrange = customType<{ data: Span; driverData: string }>({
+/**
+ * Postgres `tstzrange`, which Drizzle has no native column for. `empty` reads as null: builds before
+ * 2026-11-08 stored a zero-duration span as `[t,t)`, which Postgres keeps as `empty`, losing `t`.
+ * The no-op check in `recordChanges` treats a null span as changed, so re-normalising rewrites it.
+ */
+export const tstzrange = customType<{ data: Span | null; driverData: string | null }>({
   dataType: () => 'tstzrange',
-  toDriver: ({ start, end }) => `[${start.toISOString()},${end === 'infinity' ? end : end.toISOString()}${end !== 'infinity' && start.getTime() === end.getTime() ? ']' : ')'}`,
+  toDriver: (span) =>
+    span && `[${span.start.toISOString()},${span.end === 'infinity' ? span.end : span.end.toISOString()}${span.end !== 'infinity' && span.start.getTime() === span.end.getTime() ? ']' : ')'}`,
   fromDriver: (value) => {
+    if (value === null || value === 'empty') return null;
     const match = RANGE.exec(value);
     const start = match?.[1] ?? match?.[2];
     const end = match?.[3] ?? match?.[4];
