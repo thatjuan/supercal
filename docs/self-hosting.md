@@ -204,7 +204,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 | `MICROSOFT_CLIENT_SECRET` |  |  | Microsoft Entra client secret value. |
 | `SUPERCAL_EGRESS_ALLOW` |  |  | LAN servers accounts may reach, as `https://host[:port]=cidr` entries separated by commas. |
 | `SUPERCAL_ICS_CACHE_MB` |  | `64` | Memory bound, in MiB, of the cache of rendered ICS feeds. |
-| `SUPERCAL_SYNC_CONCURRENCY` |  | `8` | Sync jobs a worker process runs at once (at most 2 per account). |
+| `SUPERCAL_SYNC_CONCURRENCY` |  | `8` | Sync jobs a worker process runs at once (at most 2 per account; one tenant uses at most half, rounded up). |
 | `SUPERCAL_METRICS_TOKEN` |  |  | When set, `/metrics` requires `Authorization: Bearer <token>`. |
 | `RESEND_API_KEY` |  |  | Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email. |
 | `MAIL_FROM` |  |  | Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend. |

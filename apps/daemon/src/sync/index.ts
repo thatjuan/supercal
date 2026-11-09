@@ -16,7 +16,7 @@ import { runPushRenew } from './push.ts';
 import { runEvents } from './runner.ts';
 import { createSlots, StopTargetError, type Job, type JobHandler } from './scheduler.ts';
 
-/** Concurrent jobs per account (Graph allows 4 concurrent requests per mailbox). */
+/** Concurrent jobs per account; excess jobs defer instead of holding worker slots. */
 const PER_ACCOUNT = 2;
 
 export type { SyncDeps } from './context.ts';

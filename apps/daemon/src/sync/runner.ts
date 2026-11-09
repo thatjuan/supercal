@@ -31,10 +31,11 @@ import {
   type TenantTx,
 } from '@supercal/db';
 import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type Provider, type SourceCalendarRef, type SyncEnd, type SyncPage } from '@supercal/providers';
-import { and, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
 import { normalizeDirtyGroups } from './changes.ts';
 import type { Logger } from '../log.ts';
 import { metrics } from '../ops/metrics.ts';
+import { MAX_OBJECTS_PER_CALENDAR } from '../hosted/objects.ts';
 import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
 import { LeaseLostError, nextPollMs, StopTargetError, type JobResult } from './scheduler.ts';
 
@@ -243,7 +244,12 @@ export async function runEvents(deps: SyncDeps, job: TenantJob, signal: AbortSig
     for await (const item of adapter.sync(ctx, ref, cursor)) {
       signal.throwIfAborted();
       if (item.kind === 'page') {
-        await fenced(job, (tx) => writePage(tx, job, calendar, adapter.format, item));
+        const total = await fenced(job, async (tx) => {
+          await writePage(tx, job, calendar, adapter.format, item);
+          const [row] = await tx.select({ count: count() }).from(sourceObject).where(eq(sourceObject.sourceCalendarId, calendar.id));
+          return row?.count ?? 0;
+        });
+        if (total > MAX_OBJECTS_PER_CALENDAR) throw new StopTargetError('This calendar has more than 50,000 events');
         continue;
       }
       return fenced(job, async (tx) => {

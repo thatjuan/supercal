@@ -19,10 +19,10 @@ import {
   type TenantTx,
 } from '@supercal/db';
 import { ProviderCredentials, type JsonValue } from '@supercal/providers';
-import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { audit } from '../api/kit/audit.ts';
 import { notifyEvent } from '../bus.ts';
-import { Forbidden, NotFound, TooManyRequests } from '../api/kit/problem.ts';
+import { Forbidden, NotFound, ProblemError, TooManyRequests } from '../api/kit/problem.ts';
 import { canManageOwned } from '../auth/policy.ts';
 import type { Principal } from '../auth/principal.ts';
 import { accountContext, accountTargets, adapterFor, credentialsContext, type SyncDeps } from './context.ts';
@@ -33,6 +33,8 @@ import { wakeTargets } from './scheduler.ts';
 const SYNC_REQUEST_INTERVAL_MS = 30_000;
 /** How long `POST /accounts` may spend listing calendars. */
 const CONNECT_TIMEOUT_MS = 30_000;
+export const MAX_ACCOUNTS_PER_USER = 20;
+const ACCOUNT_QUOTA_LOCK = 1937011300;
 
 export type NewAccount = {
   credentials: ProviderCredentials;
@@ -79,6 +81,11 @@ export async function connectAccount(deps: SyncDeps, principal: Principal, input
   const id = newId('acc');
   const tenantId = principal.tenantId;
   return withTenant(tenantId, async (tx) => {
+    // Serialize concurrent connects for this tenant member before checking the quota.
+    await tx.execute(sql`select pg_advisory_xact_lock(${ACCOUNT_QUOTA_LOCK}, hashtext(${`${tenantId}:${principal.userId}`}))`);
+    const [total] = await tx.select({ count: count() }).from(calendarAccount)
+      .where(and(eq(calendarAccount.ownerUserId, principal.userId), ne(calendarAccount.provider, 'hosted')));
+    if ((total?.count ?? 0) >= MAX_ACCOUNTS_PER_USER) throw new ProblemError(409, 'Account quota exceeded', undefined, 'account-quota');
     const [account] = await tx
       .insert(calendarAccount)
       .values({
@@ -99,7 +106,8 @@ export async function connectAccount(deps: SyncDeps, principal: Principal, input
     // The account's subscription: a calendar-list watch that wakes discovery, or a mailbox-wide one for events.
     if (adapter.capabilities.calendarDiscovery === 'push' || adapter.capabilities.push === 'account') await wakeTargets(tx, [await ensureTarget(tx, account, 'push_renew', account.id)]);
     await audit(tx, principal, 'account.create', { type: 'account', id }, { provider, displayName: input.displayName, calendars: calendars.length });
-    return { account, calendars };
+    const [listedAccount] = await tx.select().from(calendarAccount).where(eq(calendarAccount.id, account.id));
+    return { account: listedAccount ?? account, calendars };
   });
 }
 
