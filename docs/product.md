@@ -23,8 +23,8 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 ### Hosted calendars
 
 - Create calendars whose events live in Supercal, alongside calendars imported from providers.
-- Manage their name, colour, description, time zone and order through the API. Hosted calendars
-  start unpublished; enable their publications to include them in feeds, ICS, read-only CalDAV,
+- Manage their name, colour, description, time zone and order from the dashboard or the API. Hosted
+  calendars start unpublished; enable their publications to include them in feeds, ICS, read-only CalDAV,
   virtual calendars and sinks.
 - Delete a hosted calendar reversibly for 30 days. Restore retains its events; publications stay
   disabled and removed virtual memberships must be added again. After 30 days, deletion is permanent.
@@ -112,12 +112,13 @@ Screens, in the order a new user meets them:
 1. Sign up / sign in (email + password; magic link when an email provider is configured).
 2. Onboarding: connect the first account, watch calendars appear, get the subscribe step.
 3. Accounts: list with health badges, add, reconnect, remove.
-4. Calendars: every source calendar grouped by account; publish toggle, rename, colour, privacy.
-5. Virtual calendars: create by picking calendars; see the merged result.
-6. Preview: week/agenda view of exactly what the feed publishes, updating live.
-7. Subscribe: per-client instructions, CalDAV credentials, ICS links, QR code, Apple profile, Google/Outlook buttons, sinks.
-8. Settings: profile, API keys, feed credential rotation, extra feeds.
-9. Tenant admin: members and invitations, roles, audit log. Operator: tenants.
+4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy.
+5. Hosted: create, edit, reorder, delete and restore hosted calendars; import and export `.ics` files; calendars shared with you.
+6. Virtual calendars: create by picking calendars; see the merged result.
+7. Preview: week/agenda view of exactly what the feed publishes, updating live.
+8. Subscribe: per-client instructions, CalDAV credentials, ICS links, QR code, Apple profile, Google/Outlook buttons, sinks.
+9. Settings: profile, calendar apps (a CalDAV login per device), API keys, feed credential rotation, extra feeds.
+10. Tenant admin: members and invitations, roles, audit log. Operator: tenants.
 
 ## Out of scope for v1
 

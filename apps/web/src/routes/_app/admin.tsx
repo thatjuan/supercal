@@ -1,4 +1,4 @@
-/** Tenant admin (docs/product.md screen 9): members and invitations, the audit log, the tenant. Admins and owners only. */
+/** Tenant admin (docs/product.md screen 10): members and invitations, the audit log, the tenant. Admins and owners only. */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useMemo } from 'react';

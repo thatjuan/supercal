@@ -257,7 +257,15 @@ Change notifications, like Google push, need an HTTPS `SUPERCAL_PUBLIC_URL`; Mic
 
 ## Connecting a calendar app to hosted calendars
 
-Create a separate DAV login for each device with your tenant API key (or an authenticated session):
+Create a separate login for each device under **Settings → Calendar apps**: choose **New device**,
+name it, and copy the server URL, username and password. The password is shown only then. In Apple
+Calendar, Thunderbird or DAVx5, add a CalDAV account using those three values. Discovery finds your
+active hosted calendars. You can create calendars and create, edit and delete events from the app;
+Supercal has no event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
+`/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
+MKCALENDAR, PROPPATCH, PUT and DELETE.
+
+To automate this, create the login with your tenant API key (or an authenticated session):
 
 ```sh
 curl --fail https://cal.example.com/api/v1/dav-logins \
@@ -267,16 +275,11 @@ curl --fail https://cal.example.com/api/v1/dav-logins \
 ```
 
 The 201 response contains `id`, `name`, `username`, `password`, `serverUrl` and `createdAt`.
-Save the password now; it is shown only in this response. In Apple Calendar, Thunderbird or DAVx5,
-add a CalDAV account using the returned server URL, username and password. Discovery finds your
-active hosted calendars. You can create calendars and create, edit and delete events from the app;
-Supercal has no event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
-`/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
-MKCALENDAR, PROPPATCH, PUT and DELETE.
+Save the password now; it is shown only in this response.
 
-List your devices with `GET /api/v1/dav-logins`. Revoke one with
-`DELETE /api/v1/dav-logins/<id>`; it stops authenticating immediately without affecting other
-devices. A tenant admin can revoke a member's device login too. Each user may have at most
+Revoke a device under **Settings → Calendar apps**, or list them with `GET /api/v1/dav-logins` and
+revoke one with `DELETE /api/v1/dav-logins/<id>`. It stops authenticating immediately without
+affecting other devices. A tenant admin can revoke a member's device login too. Each user may have at most
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
 Feed usernames and passwords continue to provide read-only publications; use a DAV login to
 edit hosted calendars. Device credentials cannot open the management API or ICS feeds.
