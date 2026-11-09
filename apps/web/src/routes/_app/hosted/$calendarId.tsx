@@ -4,6 +4,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { isProblem, meQuery } from '../../../api.ts';
 import { ToastProvider } from '../../../components/accounts/toast.tsx';
+import { EventsTab } from '../../../components/hosted/events/events-tab.tsx';
 import { atLeast, RESTORE_NOTE, useHostedCalendar, useRestoreCalendar, type Access, type CalendarTabProps, type HostedCalendar } from '../../../components/hosted/data.ts';
 import { SettingsTab } from '../../../components/hosted/settings-tab.tsx';
 import { PageHeader } from '../../../components/page-header.tsx';
@@ -13,9 +14,12 @@ import { ProblemAlert, toProblem } from '../../../components/ui/problem-alert.ts
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs.tsx';
 
 /** The detail page's tabs, in order. To add one, add its row here and its panel to `PANELS`. */
-const TABS = [{ id: 'settings', label: 'Settings', min: 'read' }] as const satisfies readonly { id: string; label: string; min: Access }[];
+const TABS = [
+  { id: 'events', label: 'Events', min: 'read' },
+  { id: 'settings', label: 'Settings', min: 'read' },
+] as const satisfies readonly { id: string; label: string; min: Access }[];
 
-const PANELS: Record<(typeof TABS)[number]['id'], (props: CalendarTabProps) => ReactNode> = { settings: SettingsTab };
+const PANELS: Record<(typeof TABS)[number]['id'], (props: CalendarTabProps) => ReactNode> = { events: EventsTab, settings: SettingsTab };
 
 export const Route = createFileRoute('/_app/hosted/$calendarId')({
   validateSearch: (search: Record<string, unknown>): { tab?: string } => (typeof search.tab === 'string' ? { tab: search.tab } : {}),
