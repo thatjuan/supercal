@@ -62,12 +62,13 @@ describe('Google adapter', () => {
     const [first, second] = items;
     if (first?.kind !== 'page' || second?.kind !== 'page') throw new Error('expected pages');
     expect(first.upserts).toEqual([{ id: 'master', etag: '"1"', groupUid: 'm@example.test', payload: master }]);
-    // The sparse cancellation joins its master's group; the cancelled single event is a delete.
+    // The sparse cancellation joins its master's group; cancellation of a master deletes its group.
     expect(second.upserts.map((o) => [o.id, o.groupUid, o.originalStart])).toEqual([
       ['master_20261103', 'm@example.test', '2026-11-03'],
       ['master_20261105', 'm@example.test', '2026-11-05'],
     ]);
-    expect(second.deletes).toEqual(['gone']);
+    expect(second.deletes).toEqual([]);
+    expect(second.deleteGroupsOf).toEqual(['gone']);
     for (const req of requests) {
       expect(req.path).toBe(eventsPath);
       expect(Object.fromEntries([...req.query].filter(([k]) => k !== 'pageToken'))).toEqual({ singleEvents: 'false', showDeleted: 'true', maxResults: '2500' });

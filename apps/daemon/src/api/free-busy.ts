@@ -25,6 +25,7 @@ export const freeBusyRoutes = createApiApp().openapi(route, async (c) => {
       if (!calendar || calendar.state !== 'active') { results[id] = { error: 'not-accessible' }; continue; }
       const rows = await resourcesIn(tx, [id], { from: new Date(from.epochMilliseconds), to: new Date(to.epochMilliseconds) });
       const result = freeBusy(rows.map((row) => row.data), { from, to }, calendar.timezone ?? 'UTC');
+      for (const uid of result.skipped) c.var.sync.log.warn('could not expand free-busy object', { calendarId: id, uid });
       results[id] = { busy: result.intervals.map((interval) => ({ start: interval.start.toString(), end: interval.end.toString(), status: interval.status })), truncated: result.truncated };
     }
     return results;

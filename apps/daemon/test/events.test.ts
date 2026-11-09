@@ -100,6 +100,25 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     expect((await call(`${base}/events/fast`, 'PUT', { ...example, uid: 'fast', timeZone: undefined, duration: 'PT1S', recurrenceRule: { frequency: 'minutely' } })).status).toBe(201);
     const expanded = Occurrences.parse(await (await call(`${base}/occurrences?from=2026-11-12T00:00:00Z&to=2026-11-20T00:00:00Z`)).json()); expect(expanded.items).toHaveLength(5000); expect(expanded.truncated).toBe(true);
   });
+  test('occurrences and free-busy skip unreadable stored objects and retain their neighbours', async () => {
+    const id = await calendar();
+    for (const [uid, hour] of [['first', '09'], ['bad', '11'], ['last', '13']] as const) {
+      expect((await call(`/calendars/${id}/events/${uid}`, 'PUT', { ...example, uid, start: `2026-11-12T${hour}:00:00`, timeZone: 'Etc/UTC', recurrenceRule: undefined })).status).toBe(201);
+    }
+    const stored = await rowFor(id, 'bad');
+    stored.data.master?.[1].push(['exdate', { tzid: 'Unknown/Zone' }, 'date-time', '2026-11-12T11:00:00']);
+    await unsafeDb().update(resource).set({ data: stored.data }).where(and(eq(resource.sourceCalendarId, id), eq(resource.uid, 'bad')));
+    const occurrences = await call(`/calendars/${id}/occurrences?from=2026-11-12T00:00:00Z&to=2026-11-13T00:00:00Z`);
+    expect(occurrences.status).toBe(200);
+    expect(Occurrences.parse(await occurrences.json())).toMatchObject({ truncated: false, items: [{ uid: 'first' }, { uid: 'last' }] });
+    const busy = await call('/free-busy', 'POST', { from: '2026-11-12T00:00:00Z', to: '2026-11-13T00:00:00Z', calendarIds: [id] });
+    expect(busy.status).toBe(200);
+    expect(await busy.json()).toEqual({ calendars: { [id]: { busy: [
+      { start: '2026-11-12T09:00:00Z', end: '2026-11-12T10:00:00Z', status: 'busy' },
+      { start: '2026-11-12T13:00:00Z', end: '2026-11-12T14:00:00Z', status: 'busy' },
+    ], truncated: false } } });
+  });
+
   test('changes resumes create/update/delete, pages, and expires malformed, old-epoch and below-floor tokens', async () => {
     const id = await calendar(), base = `/calendars/${id}`;
     const first = ChangeList.parse(await (await call(`${base}/changes`)).json());

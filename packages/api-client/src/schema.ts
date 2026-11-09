@@ -1985,6 +1985,7 @@ export interface components {
             /** Format: date-time */
             lastWriteAt: string | null;
             error: string | null;
+            problem: string | null;
             counts: {
                 /** @description Objects mirrored into the calendar */
                 events: number;

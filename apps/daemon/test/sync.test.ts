@@ -205,6 +205,26 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
     expect((await target(id)).cursor).not.toEqual(before.cursor);
   });
 
+  test('Google strings jsonb cannot store keep last good groups while an honest delta edit commits', async () => {
+    const fake = createFakeAdapter();
+    const work = fake.calendar('work');
+    const event = (id: string, title: string) => ({ groupUid: `${id}@test`, payload: JSON.stringify({ id, iCalUID: `${id}@test`, summary: title,
+      start: { dateTime: '2026-11-09T09:00:00Z' }, end: { dateTime: '2026-11-09T10:00:00Z' } }) });
+    for (const id of ['null', 'surrogate', 'honest']) work.put(id, event(id, 'old'));
+    const { calendars } = await connect(fake);
+    // The fake transports provider JSON; use the same normalizer as the real Google adapter.
+    adapters.ics = { ...fake.adapter, format: 'google' };
+    const calendarId = (calendars[0] as SourceCalendar).id;
+    const id = await targetOf('events', calendarId);
+    expect(await syncOnce(id)).toBeUndefined();
+    work.put('null', event('null', 'bad\0title')).put('surrogate', event('surrogate', 'bad\ud800title')).put('honest', event('honest', 'edited'));
+    expect(await syncOnce(id)).toBeUndefined();
+    expect(await summaries(calendarId)).toEqual({ 'null@test': 'old', 'surrogate@test': 'old', 'honest@test': 'edited' });
+    const rows = await unsafeDb().select().from(resource).where(eq(resource.sourceCalendarId, calendarId));
+    for (const uid of ['null@test', 'surrogate@test']) expect(rows.find((r) => r.uid === uid)).toMatchObject({ completeness: 'incomplete', completenessReason: 'Object contains a string PostgreSQL cannot store' });
+    expect(rows.find((r) => r.uid === 'honest@test')?.completeness).toBe('complete');
+  });
+
   test('a snapshot that no longer lists an object deletes it only at end', async () => {
     const fake = createFakeAdapter({ mode: 'snapshot' });
     fake.calendar('work').put('a', fakeEvent('a@test')).put('b', fakeEvent('b@test'));

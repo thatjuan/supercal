@@ -16,10 +16,13 @@ import { createFeedService } from '../feeds/service.ts';
 import { createCalendar, deleteCalendar, getOrCreateHostedAccount } from '../hosted/calendars.ts';
 import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import type { Bus } from '../bus.ts';
+import { createLogger } from '../log.ts';
 import { createFeedAuth } from './auth.ts';
 import { collectionProps, homeProps, objectProps, principalProps, propResponse, rootProps, statusResponse, wanted, type Account } from './props.ts';
 import { loadAccount, loadUserAccount, loginByUsername, publicationCollection, type CollectionView } from './store.ts';
 import { NS, child, children, esc, is, parseXml, xmlWriter, type XmlEl } from './xml.ts';
+
+const log = createLogger({ component: 'dav' });
 
 export type DavDeps = {
   secrets: SecretBox;
@@ -294,6 +297,7 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
       if (problem) return c.body(problem, 400);
       const rows = await resourcesIn(tx, [view.calendar.id], { from: new Date(from.epochMilliseconds), to: new Date(to.epochMilliseconds) });
       const result = freeBusy(rows.map((row) => row.data), { from, to }, view.calendar.timezone ?? 'UTC');
+      for (const uid of result.skipped) log.warn('could not expand free-busy object', { calendarId: view.calendar.id, uid });
       if (result.truncated) return davError(403, 'd:number-of-matches-within-limits');
       const stamp = (value: Temporal.Instant) => value.toString({ smallestUnit: 'second' }).replace(/[-:]/g, '');
       const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Supercal//EN', 'BEGIN:VFREEBUSY', `DTSTART:${stamp(from)}`, `DTEND:${stamp(to)}`, `DTSTAMP:${stamp(Temporal.Now.instant())}`,

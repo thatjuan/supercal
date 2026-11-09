@@ -21,6 +21,26 @@ function resource(...vevent: string[]): EventResource {
 
 const starts = (r: EventResource, w = ALL, zone?: string) => expandOccurrences(r, w, zone).occurrences.map((o) => o.start.toString());
 
+describe('spanOf recurrence validation', () => {
+  test('unbounded rules reject unreadable EXDATEs', () => {
+    const data = resource('DTSTART:20261109T090000Z', 'RRULE:FREQ=DAILY', 'EXDATE;TZID=Unknown/Zone:20261110T090000');
+    expect(() => spanOf(data)).toThrow(UnknownTimeZoneError);
+    expect(validateObject(serializeCalendar({ props: [], resources: [data] }))).toMatchObject({ ok: false, code: 'invalid-calendar-data' });
+  });
+
+  test('unbounded rules reject malformed RDATEs', () => {
+    const data = resource('DTSTART:20261109T090000Z', 'RRULE:FREQ=DAILY', 'RDATE:20261110T090000Z');
+    const rdate = data.master?.[1].find((p) => p[0] === 'rdate');
+    if (!rdate) throw new Error('no RDATE');
+    rdate[3] = 'invalid';
+    expect(() => spanOf(data)).toThrow(RangeError);
+  });
+
+  test('unbounded rules with readable recurrence values remain infinite', () => {
+    expect(spanOf(resource('DTSTART:20261109T090000Z', 'RRULE:FREQ=DAILY', 'EXDATE;TZID=Europe/Paris:20261110T090000', 'RDATE:20261111T090000Z')).end).toBe('infinity');
+  });
+});
+
 describe("expandOccurrences", () => {
   test("a weekly New York series crosses both 2026 DST transitions at the right UTC instants", () => {
     const r = resource("DTSTART;TZID=America/New_York:20260301T090000", "DTEND;TZID=America/New_York:20260301T100000", "RRULE:FREQ=WEEKLY");

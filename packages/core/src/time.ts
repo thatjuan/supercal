@@ -275,7 +275,12 @@ export function spanOf(resource: EventResource, calendarZone = "UTC"): Span {
   const cv = converter(resource, calendarZone);
   const rule = resource.master && rrule(resource.master);
   const own = ownTimings(resource, cv);
-  if (rule && !rule.until && rule.count === null) return { start: earliest(own), end: "infinity" };
+  if (rule && !rule.until && rule.count === null) {
+    const start = earliest(own);
+    // Parse recurrence values here so unreadable objects fail at ingestion, before later reads.
+    expandOccurrences(resource, { from: start, to: start }, calendarZone, 1);
+    return { start, end: "infinity" };
+  }
   const { occurrences, truncated } = expandOccurrences(resource, ALL_TIME, calendarZone, MAX_ITERATIONS);
   // Every instance excluded: fall back to the components' own timing.
   const pool = occurrences.length ? occurrences : own;

@@ -9,7 +9,7 @@
  * is not visible in the tenant at all). Every mutation bumps `epoch` or `config_version` as
  * `publicationChangeKind` decides, and writes the audit log, in the caller's transaction.
  */
-import { project, UnknownTimeZoneError, type PublicationSpec, type SourceResource } from '@supercal/core';
+import { project, type PublicationSpec, type SourceResource } from '@supercal/core';
 import {
   bumpConfigVersion,
   bumpEpoch,
@@ -40,12 +40,15 @@ import {
 } from '@supercal/db';
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { audit } from '../api/kit/audit.ts';
+import { createLogger } from '../log.ts';
 import { expandResourceOccurrences } from '../api/occurrences.ts';
 import { BadRequest, Conflict, Forbidden, NotFound } from '../api/kit/problem.ts';
 import { canManageOwned } from '../auth/policy.ts';
 import type { Principal } from '../auth/principal.ts';
 import { notifyEvent, notifyFeedCredentialsRotated } from '../bus.ts';
 import { caldavUsername, newCaldavPassword, newIcsToken, newUidSecret, openUidSecret, ownerHandle } from './credentials.ts';
+
+const log = createLogger({ component: 'feeds' });
 
 export type FeedService = ReturnType<typeof createFeedService>;
 
@@ -539,8 +542,8 @@ export function createFeedService(secrets: SecretBox) {
         try {
           expansion = expandResourceOccurrences(object.resource, range, zoneOf.get(object.sourceUid), MAX_OCCURRENCES);
         } catch (error) {
-          if (error instanceof UnknownTimeZoneError) continue;
-          throw error;
+          log.warn('could not expand preview object', { publicationId: p.id, sourceUid: object.sourceUid, error });
+          continue;
         }
         truncated ||= expansion.truncated;
         for (const o of expansion.items) {
