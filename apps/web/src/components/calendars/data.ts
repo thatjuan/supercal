@@ -9,7 +9,7 @@ import { $api, client, keyPath } from '../../api.ts';
 
 export type Feed = components['schemas']['Feed'];
 export type Account = components['schemas']['Account'];
-export type Calendar = Extract<components['schemas']['Calendar'], { kind: 'connected' }>;
+export type Calendar = components['schemas']['Calendar'];
 export type Publication = components['schemas']['Publication'];
 export type VirtualPublication = Extract<Publication, { kind: 'virtual' }>;
 export type Privacy = Publication['privacy'];
@@ -23,7 +23,13 @@ export const feedSearch = (search: Record<string, unknown>): FeedSearch => (type
 
 /** A source calendar in a feed: its passthrough publication (when the feed has one) and the virtual publications it feeds. */
 export type CalendarRow = { calendar: Calendar; passthrough: Publication | undefined; virtuals: VirtualPublication[] };
-export type AccountGroup = { account: Account; rows: CalendarRow[] };
+/** A section of the Calendars screen: one connected account, or the feed owner's hosted calendars. */
+export type AccountGroup = { id: string; title: string; subtitle: string; rows: CalendarRow[] };
+
+/** The `id` of the group of hosted calendars, which have no account the API lists. */
+export const HOSTED_GROUP = 'hosted';
+
+const PROVIDER = { google: 'Google', microsoft: 'Microsoft 365', icloud: 'iCloud', caldav: 'CalDAV', ics: 'ICS link' } as const satisfies Record<Account['provider'], string>;
 
 /** The user's feeds and the one selected by `?feed=` (falling back to the default feed). */
 export function useFeeds(selected: string | undefined) {
@@ -36,28 +42,32 @@ export function useFeeds(selected: string | undefined) {
 const sourcesOf = (publication: Publication) =>
   publication.kind === 'passthrough' ? [publication.sourceCalendarId] : publication.sources.map((s) => s.calendarId);
 
-/** `feedId`'s publications and the owner's calendars grouped by account, in API order. */
+/** `feedId`'s publications and the owner's calendars grouped by account, in API order, then their active hosted calendars. */
 export function useFeedCalendars(feed: Feed | undefined) {
   const enabled = feed !== undefined;
   const publications = $api.useQuery('get', '/api/v1/feeds/{id}/publications', { params: { path: { id: feed?.id ?? '' } } }, { enabled });
   const accounts = $api.useQuery('get', '/api/v1/accounts');
-  const calendars = $api.useQuery('get', '/api/v1/calendars', {}, { select: (data) => ({ items: data.items.filter((calendar) => calendar.kind === 'connected') }) });
+  const calendars = $api.useQuery('get', '/api/v1/calendars');
 
   const items = publications.data?.items ?? [];
-  const groups: AccountGroup[] = (accounts.data?.items ?? [])
+  const everyCalendar = calendars.data?.items ?? [];
+  const toRow = (calendar: Calendar): CalendarRow => ({
+    calendar,
+    passthrough: items.find((p) => p.kind === 'passthrough' && p.sourceCalendarId === calendar.id),
+    virtuals: items.filter((p): p is VirtualPublication => p.kind === 'virtual' && p.sources.some((s) => s.calendarId === calendar.id)),
+  });
+  const connected: AccountGroup[] = (accounts.data?.items ?? [])
     .filter((account) => account.ownerUserId === feed?.ownerUserId)
     .map((account) => ({
-      account,
-      rows: (calendars.data?.items ?? [])
-        .filter((calendar) => calendar.accountId === account.id)
-        .map((calendar) => ({
-          calendar,
-          passthrough: items.find((p) => p.kind === 'passthrough' && p.sourceCalendarId === calendar.id),
-          virtuals: items.filter((p): p is VirtualPublication => p.kind === 'virtual' && p.sources.some((s) => s.calendarId === calendar.id)),
-        })),
+      id: account.id,
+      title: account.displayName,
+      subtitle: PROVIDER[account.provider],
+      rows: everyCalendar.filter((calendar) => calendar.kind === 'connected' && calendar.accountId === account.id).map(toRow),
     }));
+  const hosted = everyCalendar.filter((calendar) => calendar.kind === 'hosted' && calendar.owner.id === feed?.ownerUserId && calendar.state === 'active').map(toRow);
+  const groups = hosted.length > 0 ? [...connected, { id: HOSTED_GROUP, title: 'Hosted', subtitle: 'Supercal', rows: hosted }] : connected;
 
-  const calendarById = new Map((calendars.data?.items ?? []).map((c) => [c.id, c]));
+  const calendarById = new Map(everyCalendar.map((c) => [c.id, c]));
   /** A publication's colour, else its first source calendar's. */
   const colorOf = (publication: Publication) => publication.color ?? calendarById.get(sourcesOf(publication)[0] ?? '')?.color ?? null;
 

@@ -20,6 +20,7 @@ const NAV: readonly NavItem[] = [
   { label: 'Overview', icon: 'home', to: '/' },
   { label: 'Accounts', icon: 'users', to: '/accounts' },
   { label: 'Calendars', icon: 'calendar', to: '/calendars' },
+  { label: 'Hosted', icon: 'calendar-plus', to: '/hosted' },
   { label: 'Preview', icon: 'eye', to: '/preview' },
   { label: 'Subscribe', icon: 'link', to: '/feeds' },
   { label: 'Settings', icon: 'gear', to: '/settings' },

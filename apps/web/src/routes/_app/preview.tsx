@@ -1,5 +1,5 @@
 /**
- * Preview (product screen 6): exactly what the selected feed publishes this week, from
+ * Preview (product screen 7): exactly what the selected feed publishes this week, from
  * `GET /feeds/{id}/occurrences`, as a week grid or an agenda. The live stream invalidates the query,
  * so source changes show without a reload. Legend toggles hide publications locally only.
  */
@@ -8,6 +8,7 @@ import { keepPreviousData } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { $api } from '../../api.ts';
+import { browserZone, ZONES } from '../../lib/zones.ts';
 import { feedSearch, useFeedCalendars, useFeeds, type Publication } from '../../components/calendars/data.ts';
 import { FeedPicker } from '../../components/calendars/feed-picker.tsx';
 import { FALLBACK_COLOR } from '../../components/calendars/settings-fields.tsx';
@@ -24,8 +25,6 @@ import { ProblemAlert, toProblem } from '../../components/ui/problem-alert.tsx';
 export const Route = createFileRoute('/_app/preview')({ validateSearch: feedSearch, component: Preview });
 
 type View = 'week' | 'agenda';
-const browserZone = Temporal.Now.timeZoneId();
-const ZONES = [...new Set([browserZone, 'UTC', ...Intl.supportedValuesOf('timeZone')])];
 
 function Preview() {
   const search = Route.useSearch();

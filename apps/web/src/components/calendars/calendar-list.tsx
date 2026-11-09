@@ -1,5 +1,5 @@
 /**
- * Every source calendar of the feed owner, grouped by account. The switch is the calendar's
+ * Every source calendar of the feed owner, grouped by account, with hosted calendars in a group of their own. The switch is the calendar's
  * passthrough publication in this feed (created on first publish when the feed has none); clicking a
  * row opens that publication's settings.
  */
@@ -14,8 +14,6 @@ import { useRefreshFeeds } from './data.ts';
 import { freshnessText } from './freshness.ts';
 import { PrivacyBadge } from './privacy.tsx';
 import { FALLBACK_COLOR } from './settings-fields.tsx';
-
-const PROVIDER = { google: 'Google', microsoft: 'Microsoft 365', icloud: 'iCloud', caldav: 'CalDAV', ics: 'ICS link' } as const;
 
 export function CalendarList({ feed, groups, onOpen }: { feed: Feed; groups: AccountGroup[]; onOpen: (row: CalendarRow) => void }) {
   const refresh = useRefreshFeeds();
@@ -41,23 +39,23 @@ export function CalendarList({ feed, groups, onOpen }: { feed: Feed; groups: Acc
         </p>
       </header>
       {error && <ProblemAlert problem={toProblem(error)} className="mx-5 mb-3" />}
-      {groups.length === 0 && <p className="border-t border-line px-5 py-6 text-sm text-ink-2">No calendars yet. Connect an account to see its calendars here.</p>}
+      {groups.length === 0 && <p className="border-t border-line px-5 py-6 text-sm text-ink-2">No calendars yet. Connect an account or create a hosted calendar.</p>}
       {groups.map((group) => (
-        <AccountSection key={group.account.id} group={group} onOpen={onOpen} onPublish={setPublished} />
+        <AccountSection key={group.id} group={group} onOpen={onOpen} onPublish={setPublished} />
       ))}
     </section>
   );
 }
 
 function AccountSection({ group, onOpen, onPublish }: { group: AccountGroup; onOpen: (row: CalendarRow) => void; onPublish: (row: CalendarRow, on: boolean) => void }) {
-  const { account, rows } = group;
+  const { title, subtitle, rows } = group;
   return (
     <details open className="group mx-3 mb-2 border-t border-line">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-3 [&::-webkit-details-marker]:hidden">
         <Icon name="chevron" className="size-4 text-ink-2 transition-transform group-not-open:-rotate-90" />
         <Icon name="calendar" className="size-[18px] text-ink-2" />
-        <span className="font-semibold">{account.displayName}</span>
-        <span className="text-ink-3">· {PROVIDER[account.provider]}</span>
+        <span className="font-semibold">{title}</span>
+        <span className="text-ink-3">· {subtitle}</span>
         <span className="ml-auto text-sm text-ink-2">
           {rows.length} {rows.length === 1 ? 'calendar' : 'calendars'}
         </span>
@@ -103,7 +101,7 @@ function CalendarRowItem({ row, onOpen, onPublish }: { row: CalendarRow; onOpen:
         onCheckedChange={(checked) => onPublish(row, checked)}
       />
       <span className="hidden sm:block">{on && passthrough ? <PrivacyBadge privacy={passthrough.privacy} /> : <span className="pl-3 text-ink-3">—</span>}</span>
-      <span className={cx('col-span-2 text-sm sm:col-span-1', calendar.freshness.stale ? 'text-warning' : 'text-ink-2')}>{freshnessText(calendar.freshness)}</span>
+      <span className={cx('col-span-2 text-sm sm:col-span-1', calendar.freshness.stale ? 'text-warning' : 'text-ink-2')}>{calendar.kind === 'hosted' ? 'Hosted' : freshnessText(calendar.freshness)}</span>
     </li>
   );
 }

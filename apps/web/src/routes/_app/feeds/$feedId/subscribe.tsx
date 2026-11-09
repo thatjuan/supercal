@@ -1,5 +1,5 @@
 /**
- * Subscribe (docs/product.md screen 7): get one feed into every calendar app. Secrets come from
+ * Subscribe (docs/product.md screen 8): get one feed into every calendar app. Secrets come from
  * memory (secrets.ts) after a rotation here or in Settings; otherwise each tab offers to rotate.
  * The Google tab also offers sinks (live updates), whose consent round trip returns here.
  */
