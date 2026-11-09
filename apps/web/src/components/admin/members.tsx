@@ -1,11 +1,12 @@
 /**
  * Tenant admin › Members: members with roles, pending invitations with their copyable links, and
- * invite, change role (owners) and remove. All of it goes through Better Auth's organization API.
- * Invitation email is not wired yet (no `sendInvitationEmail`), so the link is what the admin hands over.
+ * invite, change role (owners) and remove. Role changes use REST; invitations and removal use Better Auth.
+ * Without a configured mailer, the admin hands over the copyable invitation link.
  */
 import type { Problem } from '@supercal/api-client';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
+import { $api } from '../../api.ts';
 import { authClient } from '../../auth.ts';
 import { Badge } from '../ui/badge.tsx';
 import { Button } from '../ui/button.tsx';
@@ -39,19 +40,22 @@ type MembersProps = { tenantId: string; myRole: Role; myUserId: string };
 export function Members({ tenantId, myRole, myUserId }: MembersProps) {
   const organization = useQuery(organizationQuery(tenantId));
   const queryClient = useQueryClient();
+  const updateRole = $api.useMutation('patch', '/api/v1/members/{id}');
   const refresh = () => queryClient.invalidateQueries({ queryKey: organizationQuery(tenantId).queryKey });
   const [problem, setProblem] = useState<Problem | null>(null);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
 
-  /** Runs a Better Auth call, surfacing its error and refreshing the list after. */
-  async function act(call: () => Promise<{ error: unknown }>) {
+  /** Runs a membership mutation, surfacing its error and refreshing the list after. */
+  async function act(call: () => Promise<unknown>) {
     setProblem(null);
-    const { error } = await call();
-    if (error) {
+    try {
+      const result = await call();
+      if (result && typeof result === 'object' && 'error' in result && result.error) throw result.error;
+      await refresh();
+    } catch (error) {
       setProblem(toProblem(error));
       throw error;
     }
-    await refresh();
   }
 
   if (organization.error) return <ProblemAlert problem={toProblem(organization.error)} />;
@@ -79,9 +83,10 @@ export function Members({ tenantId, myRole, myUserId }: MembersProps) {
                     <select
                       aria-label={`Role of ${member.user.name}`}
                       value={role}
-                      onChange={(event) =>
-                        void act(() => authClient.organization.updateMemberRole({ memberId: member.id, role: event.target.value })).catch(() => undefined)
-                      }
+                      onChange={(event) => {
+                        const role = event.target.value;
+                        if (isRole(role)) void act(() => updateRole.mutateAsync({ params: { path: { id: member.id } }, body: { role } })).catch(() => undefined);
+                      }}
                       className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-sm"
                     >
                       {Object.entries(ROLE_LABEL).map(([value, label]) => (

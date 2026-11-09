@@ -21,21 +21,24 @@ import {
   apikey,
   invitation,
   member,
+  parseTenantId,
   organization as organizationTable,
   session,
   user as userTable,
   verification,
+  withTenant,
   type ControlDatabase,
   type ControlTx,
   type TenantId,
 } from '@supercal/db';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
 import { parseCookies } from 'better-auth/cookies';
 import { betterAuth } from 'better-auth/minimal';
 import { admin, openAPI, organization } from 'better-auth/plugins';
 import { and, asc, count, eq, gt, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { audit, type AuditAction } from '../api/kit/audit.ts';
 import { publishAuthRevoked } from '../bus.ts';
 import type { Config } from '../config.ts';
 import { CLIENT_IP_HEADER } from '../client-ip.ts';
@@ -53,6 +56,18 @@ export type AuthConfig = Pick<
 export const OPERATOR_ROLE = 'admin';
 
 const log = createLogger({ component: 'auth' });
+
+const AUDITED: Record<string, AuditAction> = {
+  '/organization/invite-member': 'member.invite',
+  '/organization/cancel-invitation': 'member.invite_cancel',
+  '/organization/reject-invitation': 'member.invite_reject',
+  '/organization/accept-invitation': 'member.join',
+  '/organization/remove-member': 'member.remove',
+  '/organization/create': 'tenant.create',
+};
+
+const AuditedInvitation = z.object({ id: z.string(), organizationId: z.string(), email: z.string(), role: z.string().nullable() });
+const AuditedMember = z.object({ id: z.string(), organizationId: z.string(), userId: z.string(), role: z.string() });
 const signupRefusal = (mode: AuthConfig['SUPERCAL_SIGNUP']) => mode === 'invite' ? 'Sign-up requires a pending invitation' : 'Sign-up is disabled';
 
 /** The extra sign-up body field `invite` mode reads. */
@@ -154,9 +169,13 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
         await mailer?.send({ to: user.email, ...templates.verifyEmail({ url }) });
       },
     },
-    // Keys are issued only by `POST /api/v1/api-keys`, which binds them to a tenant. The server API stays available.
-    // Self-service leave skips the removal hook; the dashboard uses remove-member.
-    disabledPaths: ['/api-key/create', '/organization/leave'],
+    // Tenant policy and key changes go through REST. Leave skips membership cleanup; removal runs it.
+    // Impersonation and password replacement would let operators act under another user's audit identity.
+    disabledPaths: [
+      '/api-key/create', '/api-key/update', '/api-key/delete',
+      '/organization/leave', '/organization/update', '/organization/update-member-role', '/organization/delete',
+      '/admin/impersonate-user', '/admin/set-user-password',
+    ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (!ctx.request || ctx.path !== '/sign-up/email' || config.SUPERCAL_SIGNUP === 'open' || (await isEmptyInstall())) return;
@@ -164,6 +183,39 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
         const email = String(ctx.body?.email ?? '');
         if (config.SUPERCAL_SIGNUP === 'invite' && invited.success && (await hasPendingInvitation(invited.data.invitationId, email))) return;
         throw new APIError('FORBIDDEN', { message: signupRefusal(config.SUPERCAL_SIGNUP), code: 'SIGN_UP_NOT_ALLOWED' });
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        const action = AUDITED[ctx.path];
+        if (!action || ctx.context.returned instanceof APIError) return;
+        // Better Auth has committed already; audit failures must not turn a successful mutation into an error response.
+        try {
+          const session = ctx.context.session ?? (await getSessionFromCtx(ctx));
+          if (!session) throw new Error('Audited organization mutation has no acting session');
+          const returned: unknown = ctx.context.returned;
+          const details = (() => {
+            if (action === 'tenant.create') {
+              const tenant = z.object({ id: z.string(), name: z.string(), slug: z.string() }).parse(returned);
+              return { tenantId: tenant.id, target: { type: 'tenant', id: tenant.id }, data: { name: tenant.name, slug: tenant.slug } };
+            }
+            if (action === 'member.remove') {
+              const { member } = z.object({ member: AuditedMember }).parse(returned);
+              return { tenantId: member.organizationId, target: { type: 'member', id: member.id }, data: { userId: member.userId, role: member.role } };
+            }
+            if (action === 'member.join') {
+              const { invitation, member } = z.object({ invitation: AuditedInvitation, member: AuditedMember }).parse(returned);
+              return { tenantId: member.organizationId, target: { type: 'member', id: member.id }, data: { email: invitation.email, role: member.role, userId: member.userId } };
+            }
+            const invitation = action === 'member.invite_reject'
+              ? z.object({ invitation: AuditedInvitation }).parse(returned).invitation
+              : AuditedInvitation.parse(returned);
+            return { tenantId: invitation.organizationId, target: { type: 'invitation', id: invitation.id }, data: { email: invitation.email, role: invitation.role } };
+          })();
+          const tenantId = parseTenantId(details.tenantId);
+          if (!tenantId) throw new Error('Audited organization mutation has no tenant id');
+          await withTenant(tenantId, (tx) => audit(tx, { kind: 'user', userId: session.user.id, via: 'session', tenantId }, action, details.target, details.data));
+        } catch (error) {
+          log.error('organization mutation audit failed', { action, error });
+        }
       }),
     },
     databaseHooks: {

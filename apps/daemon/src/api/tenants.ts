@@ -1,7 +1,7 @@
 /**
  * Tenants (Better Auth organizations). `GET|PATCH /api/v1/tenant` is the caller's current tenant
  * (PATCH needs owner); `GET|POST /api/v1/tenants` is the operator's install-wide view. Membership
- * and invitations stay on Better Auth's own `/api/auth/organization/*` endpoints.
+ * invitations and removal use Better Auth's `/api/auth/organization/*`; role changes use REST.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import { organization, user, withControl, withTenant } from '@supercal/db';

@@ -310,16 +310,17 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 
 ## 12. Management API
 
-- Base `/api/v1`, OpenAPI 3.1 at `/api/v1/openapi.json`, Scalar at `/api/docs`. Better Auth's endpoints (sign-up/in, sessions, organizations, members, invitations) stay under `/api/auth` with their own spec at `/api/auth/open-api/generate-schema`, linked from our docs *(platform: merging the two specs is not worth it)*.
+- Base `/api/v1`, OpenAPI 3.1 at `/api/v1/openapi.json`, Scalar at `/api/docs`. Better Auth's endpoints (sign-up/in, sessions, organization creation and reads, invitations and member removal) stay under `/api/auth` with their own spec at `/api/auth/open-api/generate-schema`, linked from our docs *(platform: merging the two specs is not worth it)*. Tenant settings, roles and API-key mutations use REST; the corresponding plugin mutation routes are disabled, along with self-service tenant deletion, leave, operator impersonation and operator password replacement.
 - **Conventions**:
   - Errors are RFC 9457 `application/problem+json`, declared on every operation through shared response components.
   - Pagination is cursor-based (opaque, versioned, `(created_at, id)` keyset; limit ≤ 100).
   - Mutable resources return `ETag` and `PATCH` honours `If-Match`, returning 412 on conflict.
   - Timestamps are RFC 3339 UTC; IDs are TypeIDs.
-  - Every mutation writes the audit log.
+  - Every REST mutation writes the audit log in its transaction. One Better Auth after hook audits successful organization creation, invitations, joins and member removal using the acting session and the returned tenant and target. Better Auth commits first, so audit failures are logged without failing its response; removal also runs the membership cleanup hook.
 - **Resources**:
   - `GET /me`.
   - `GET|POST /tenants` (operator), `GET|PATCH /tenant` (current).
+  - `PATCH /members/{id}` (owner): Better Auth member id and a strict `role` body. Locks tenant members, preserves the last owner, commits the role and audit entry together, prunes orphan links on demotion to member, then revokes live streams for revalidation.
   - `GET|POST /dav-logins`, `DELETE /dav-logins/{id}` (per-device CalDAV credentials, password returned once).
   - `GET|POST /api-keys`, `DELETE /api-keys/{id}`.
   - `GET|POST /accounts`, `GET|PATCH|DELETE /accounts/{id}`, `POST /accounts/{id}/sync`. POST covers caldav, icloud and ics: credentials are verified and calendars discovered before 201.

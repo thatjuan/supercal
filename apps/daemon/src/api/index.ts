@@ -34,6 +34,7 @@ import { instanceRoutes, type Signup } from './instance.ts';
 import { createApiApp, Forbidden } from './kit/index.ts';
 import { linkRoutes } from './links.ts';
 import { meRoutes } from './me.ts';
+import { memberRoutes } from './members.ts';
 import { publicationRoutes } from './publications.ts';
 import { sinkRoutes } from './sinks.ts';
 import { subscribeRoutes } from './subscribe.ts';
@@ -155,6 +156,7 @@ export function createApi(
   return app
     .route('/', meRoutes)
     .route('/', tenantRoutes)
+    .route('/', memberRoutes)
     .route('/', apiKeyRoutes)
     .route('/', accountRoutes)
     .route('/', googleOAuthRoutes)
