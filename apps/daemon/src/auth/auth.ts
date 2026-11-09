@@ -38,6 +38,7 @@ import { and, asc, count, eq, gt, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { publishAuthRevoked } from '../bus.ts';
 import type { Config } from '../config.ts';
+import { CLIENT_IP_HEADER } from '../client-ip.ts';
 import type { Mailer } from '../mail/index.ts';
 import * as templates from '../mail/templates.ts';
 
@@ -109,7 +110,8 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
     baseURL,
     secret: config.BETTER_AUTH_SECRET ?? crypto.randomUUID() + crypto.randomUUID(),
     trustedOrigins: [baseURL, ...(config.WEB_ORIGIN ? [config.WEB_ORIGIN] : [])],
-    advanced: { useSecureCookies: !config.SUPERCAL_INSECURE_DEV },
+    rateLimit: { enabled: !config.SUPERCAL_INSECURE_DEV },
+    advanced: { useSecureCookies: !config.SUPERCAL_INSECURE_DEV, ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
     database: drizzleAdapter(db, {
       provider: 'pg',
       schema: { user: userTable, session, account, verification, organization: organizationTable, member, invitation, apikey },

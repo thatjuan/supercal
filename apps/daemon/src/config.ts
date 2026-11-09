@@ -42,6 +42,7 @@ export const configSchema = z
     SUPERCAL_PUBLIC_URL: url
       .optional()
       .describe('Public https base URL, used in feed links, OAuth redirect URIs and push webhooks. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
+    SUPERCAL_CLIENT_IP_HEADER: optional.describe('Header holding the client address, set by a reverse proxy you run. When unset, the socket peer is used.'),
     SUPERCAL_KEYS: optional.describe('Master keys for secrets at rest, `v2:<base64 32 bytes>,v1:…`; the first one encrypts. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
     BETTER_AUTH_SECRET: optional.describe('Secret that signs sessions and OAuth state; at least 32 random characters. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
     SUPERCAL_ROLES: rolesSchema.prefault('api,dav,worker').describe('Comma list of roles this process runs: `api` (API and dashboard), `dav` (CalDAV and ICS feeds), `worker` (sync).'),

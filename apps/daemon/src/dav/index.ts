@@ -7,7 +7,7 @@ import { assertIanaZone, freeBusy, freeBusyWindowProblem, MAX_OBJECT_BYTES, prop
 import { Temporal } from '@js-temporal/polyfill';
 import { sourceCalendar, sourceObject, resourcesIn, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
 import { Hono, type Context } from 'hono';
-import { getConnInfo } from 'hono/bun';
+import { clientIp } from '../client-ip.ts';
 import { bodyLimit } from 'hono/body-limit';
 import { and, eq } from 'drizzle-orm';
 import { audit, ProblemError } from '../api/kit/index.ts';
@@ -24,6 +24,7 @@ import { NS, child, children, esc, is, parseXml, xmlWriter, type XmlEl } from '.
 
 export type DavDeps = {
   secrets: SecretBox;
+  clientIpHeader?: string | undefined;
   /** Invalidates cached feed and device credentials across replicas. */
   bus: Pick<Bus, 'on'>;
   /** `SUPERCAL_PUBLIC_URL`; its host goes into sync tokens. Without it, the request's Host is used. */
@@ -159,7 +160,7 @@ function metadataProperties(body: XmlEl | undefined, creating: boolean) {
 }
 
 /** Builds the CalDAV routes. */
-export function createDav({ secrets, bus, publicUrl }: DavDeps) {
+export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) {
   const feedAuth = createFeedAuth(loginByUsername);
   bus.on('feed-credentials-rotated', ({ feedId }) => feedAuth.forget(feedId));
   bus.on('dav-login-revoked', ({ loginId }) => feedAuth.forget(loginId));
@@ -168,13 +169,7 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
 
   /** Authenticates, opens the tenant transaction, resolves the path and runs `handle`. */
   async function inLogin(c: Context, handle: (r: Request) => Promise<Response>): Promise<Response> {
-    let ip = 'unknown';
-    try {
-      ip = getConnInfo(c).remote.address ?? ip;
-    } catch {
-      // Not served by Bun.serve (app.request in tests): no peer address.
-    }
-    const result = await feedAuth.authenticate(c.req.header('Authorization'), ip);
+    const result = await feedAuth.authenticate(c.req.header('Authorization'), clientIp(c, clientIpHeader));
     const unauthorized = () => c.body('authentication required', 401, { 'WWW-Authenticate': 'Basic realm="Supercal", charset="UTF-8"' });
     if (!result.ok)
       return result.status === 429 ? c.body('too many failed logins', 429, { 'Retry-After': String(result.retryAfter ?? 300) }) : unauthorized();
