@@ -1,4 +1,4 @@
-import { getProp, tzidsOf } from './accessors.ts';
+import { getProp, recurrenceId, tzidsOf } from './accessors.ts';
 import { componentsOf, parseCalendar, splitTopLevel } from './ical.ts';
 import type { EventResource } from './model.ts';
 import { assertIanaZone, spanOf } from './time.ts';
@@ -34,8 +34,8 @@ export function validateObject(payload: string): { ok: true; resource: EventReso
     if (!resource || parsed.resources.length !== 1) return reject('invalid-object', 'Object must contain VEVENTs with exactly one UID');
     for (const component of componentsOf(resource)) {
       if (!getProp(component, 'dtstart')) throw new Error('VEVENT has no DTSTART');
+      if (recurrenceId(component) !== null && getProp(component, 'rrule')) throw new Error('An override cannot carry RRULE');
       for (const tzid of tzidsOf(component)) if (!resource.timezones[tzid]) assertIanaZone(tzid);
-      spanOf({ ...resource, master: component, overrides: [] });
     }
     spanOf(resource);
     return { ok: true, resource };

@@ -277,13 +277,13 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
     const input = { from: '2026-11-09T00:00:00Z', to: '2026-11-10T00:00:00Z', calendarIds: [cal.id, privateCal.id, gone.id, missing] };
     const response = await call(colleague, '/free-busy', 'POST', input); expect(response.status).toBe(200);
     expect(await json(response)).toEqual({ calendars: { [cal.id]: { busy: [{ start: '2026-11-09T09:00:00Z', end: '2026-11-09T10:00:00Z', status: 'busy' }], truncated: false }, [privateCal.id]: { error: 'not-accessible' }, [gone.id]: { error: 'not-accessible' }, [missing]: { error: 'not-accessible' } } });
-    for (const patch of [{ to: input.from }, { to: '2027-01-11T00:00:00Z' }, { calendarIds: Array.from({ length: 51 }, () => cal.id) }]) expect((await call(colleague, '/free-busy', 'POST', { ...input, ...patch })).status).toBe(400);
+    for (const patch of [{ to: input.from }, { to: '2027-01-11T00:00:00Z' }, { from: '2526-11-09T00:00:00Z', to: '2526-11-10T00:00:00Z' }, { calendarIds: Array.from({ length: 51 }, () => cal.id) }]) expect((await call(colleague, '/free-busy', 'POST', { ...input, ...patch })).status).toBe(400);
     expect((await davCall(home, 'PROPFIND', undefined, { Depth: '1' })).text).not.toContain(cal.id);
     const read = await calendar(); await share(read, 'read');
     expect((await davCall(`${home}${read.id}/`)).text).toContain('free-busy-query');
     const report = await davCall(`${home}${read.id}/`, 'REPORT', xml('c:free-busy-query', '<c:time-range start="20261109T000000Z" end="20261110T000000Z"/>'));
     expect(report.status).toBe(200); expect(report.text).toContain('FREEBUSY;FBTYPE=BUSY:20261109T090000Z/20261109T100000Z');
-    for (const range of ['', '<c:time-range start="nonsense"/>', '<c:time-range start="20261110T000000Z" end="20261109T000000Z"/>']) expect((await davCall(`${home}${read.id}/`, 'REPORT', xml('c:free-busy-query', range))).status).toBe(400);
+    for (const range of ['', '<c:time-range start="nonsense"/>', '<c:time-range start="20261110T000000Z" end="20261109T000000Z"/>', '<c:time-range start="20261109T000000Z" end="20270111T000000Z"/>', '<c:time-range start="25261109T000000Z" end="25261110T000000Z"/>']) expect((await davCall(`${home}${read.id}/`, 'REPORT', xml('c:free-busy-query', range))).status).toBe(400);
   });
 
   test('member removal hook deletes personal grants before re-invitation', async () => {
