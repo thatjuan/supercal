@@ -65,7 +65,7 @@ export const configSchema = z
       .min(1)
       .max(256)
       .default(8)
-      .describe('Sync jobs a worker process runs at once (at most 2 per account).'),
+      .describe('Sync jobs a worker process runs at once (at most 2 per account; one tenant uses at most half, rounded up).'),
     SUPERCAL_METRICS_TOKEN: optional.describe('When set, `/metrics` requires `Authorization: Bearer <token>`.'),
     RESEND_API_KEY: optional.describe('Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email.'),
     MAIL_FROM: optional.describe('Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend.'),

@@ -170,7 +170,7 @@ const createAccount = createRoute({
   request: { body: { required: true, content: { 'application/json': { schema: NewAccount } } } },
   responses: {
     201: json('The account and its calendars, each published in your default feed', ConnectedAccount),
-    ...problemResponses(400, 401, 403, 422, 503),
+    ...problemResponses(400, 401, 403, 409, 422, 503),
   },
 });
 

@@ -41,7 +41,7 @@ export type SyncDeps = {
   log: Logger;
   /** The public https URL push notifications are sent to (`/hooks/<provider>` on it); null disables push. */
   pushBaseUrl: string | null;
-  /** Runs `fn` within the account's concurrency limit (`createSlots`). */
+  /** Runs `fn` in an account slot, refusing busy accounts with `AccountBusyError`. */
   accountSlot: <T>(accountId: string, fn: () => Promise<T>) => Promise<T>;
   /** Google sink calls; null when Google is not configured. */
   googleSinks: GoogleSinkClient | null;

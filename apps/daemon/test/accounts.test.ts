@@ -266,4 +266,14 @@ describe.skipIf(!testDatabaseUrl)('accounts and calendars API', () => {
     expect(await events.text()).toContain('retained@departure');
   });
 
+  test('the 21st non-hosted account gets a 409 account-quota problem', async () => {
+    as('bob');
+    await unsafeDb().insert(calendarAccount).values({ tenantId, ownerUserId: userIds.bob, provider: 'hosted', displayName: 'Hosted' });
+    for (let i = 0; i < 20; i++) expect((await connect()).status).toBe(201);
+    const rejected = await connect();
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.type).toBe('https://supercal.dev/problems/account-quota');
+    expect((await call('/api/v1/accounts')).body.items).toHaveLength(20);
+  });
+
 });
