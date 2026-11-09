@@ -13,7 +13,13 @@ import { closeDb, connectDb, unsafeDb } from './unsafe-db.ts';
 test('nothing outside changes.ts writes resource', async () => {
   const root = join(import.meta.dir, '../../..');
   const writes = [/\.(insert|update|delete)\(\s*resource\s*\)/, /\b(insert\s+into|update|delete\s+from)\s+"?resource\b/i];
-  const allowed = new Set(['packages/db/src/changes.ts']);
+  const allowed = new Set([
+    'packages/db/src/changes.ts',
+    // Legacy poison-object fixtures deliberately bypass the ingestion gate to test read isolation.
+    'apps/daemon/test/dav/dav.test.ts',
+    'apps/daemon/test/events.test.ts',
+    'apps/daemon/test/feeds.test.ts',
+  ]);
   const offenders: string[] = [];
   for (const dir of ['apps', 'packages'])
     for await (const file of new Bun.Glob(`${dir}/**/*.{ts,tsx}`).scan({ cwd: root })) {

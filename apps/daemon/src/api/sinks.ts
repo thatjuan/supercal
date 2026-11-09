@@ -19,6 +19,7 @@ export const Sink = z
     }),
     lastWriteAt: z.iso.datetime().nullable(),
     error: z.string().nullable(),
+    problem: z.string().nullable(),
     counts: z.object({ events: z.int().openapi({ description: 'Objects mirrored into the calendar' }) }),
     createdAt: z.iso.datetime(),
   })

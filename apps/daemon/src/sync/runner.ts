@@ -133,6 +133,12 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
     await markGroupsDirty(tx, calendar.id, gone.map((g) => g.groupUid));
   }
 
+  for (const batch of chunks(page.deleteGroupsOf ?? [])) {
+    const groups = await tx.selectDistinct({ groupUid: sourceObject.groupUid }).from(sourceObject).where(where(batch));
+    if (!groups.length) continue;
+    await tx.delete(sourceObject).where(and(eq(sourceObject.sourceCalendarId, calendar.id), inArray(sourceObject.groupUid, groups.map((g) => g.groupUid))));
+  }
+
   for (const batch of chunks(page.occurrences ?? []))
     await tx
       .insert(graphOccurrence)

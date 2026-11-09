@@ -14,8 +14,21 @@ export const spanDates = ({ start, end }: ReturnType<typeof spanOf>): Span => ({
   end: end === 'infinity' ? 'infinity' : new Date(end.epochMilliseconds),
 });
 
-/** The `ResourceChange` for a normalised group. Without `span`, computes it, throwing when the resource has no usable timing. */
+/** Reject strings jsonb cannot represent, including property names and nested jCal values. */
+function assertStorable(value: unknown): void {
+  if (typeof value === 'string') {
+    if (value.includes('\0') || !value.isWellFormed()) throw new RangeError('Object contains a string PostgreSQL cannot store');
+  } else if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      assertStorable(key);
+      assertStorable(nested);
+    }
+  }
+}
+
+/** The `ResourceChange` for a normalised group. Without `span`, computes it, throwing for unreadable timing or strings jsonb cannot store. */
 export function upsertOf(calendar: SourceCalendar, uid: string, data: EventResource, completeness: Completeness, span?: Span): Upsert {
+  assertStorable(data);
   const main = data.master ?? data.overrides[0] ?? null;
   const modified = main && lastModified(main);
   return {

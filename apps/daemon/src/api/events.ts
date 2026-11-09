@@ -241,7 +241,9 @@ eventRoutes
     const window = occurrenceWindow(c.req.valid('query'));
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id);
-      return expandCalendarResources((await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id], window))).rows, window, calendar.timezone ?? 'UTC');
+      const result = expandCalendarResources((await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id], window))).rows, window, calendar.timezone ?? 'UTC');
+      for (const uid of result.skipped) c.var.sync.log.warn('could not expand object', { calendarId: calendar.id, uid });
+      return { items: result.items, truncated: result.truncated };
     });
     return c.json(result, 200);
   })

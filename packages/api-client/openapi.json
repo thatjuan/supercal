@@ -4089,6 +4089,12 @@
               "null"
             ]
           },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "counts": {
             "type": "object",
             "properties": {
@@ -4114,6 +4120,7 @@
           "status",
           "lastWriteAt",
           "error",
+          "problem",
           "counts",
           "createdAt"
         ]

@@ -16,13 +16,20 @@ export function freeBusyWindowProblem({ from, to }: TimeWindow, now = Temporal.N
   return null;
 }
 
-/** Merged busy time clipped to the window; busy takes precedence over tentative. */
-export function freeBusy(resources: EventResource[], window: TimeWindow, calendarZone: string): { intervals: BusyInterval[]; truncated: boolean } {
+/** Merged busy time clipped to the window; unreadable resources are listed in `skipped`, without truncating their neighbours. */
+export function freeBusy(resources: EventResource[], window: TimeWindow, calendarZone: string): { intervals: BusyInterval[]; truncated: boolean; skipped: string[] } {
   const edges: { time: Temporal.Instant; busy: number; tentative: number }[] = [];
   let truncated = false;
+  const skipped: string[] = [];
   const budget = { remaining: MAX_ITERATIONS };
   for (const resource of resources) {
-    const expanded = expandOccurrences(resource, window, calendarZone, undefined, budget);
+    let expanded: ReturnType<typeof expandOccurrences>;
+    try {
+      expanded = expandOccurrences(resource, window, calendarZone, undefined, budget);
+    } catch {
+      skipped.push(resource.uid);
+      continue;
+    }
     truncated ||= expanded.truncated;
     for (const occurrence of expanded.occurrences) {
       const component = occurrence.component;
@@ -49,5 +56,5 @@ export function freeBusy(resources: EventResource[], window: TimeWindow, calenda
     if (previous?.status === status && previous.end.equals(start)) previous.end = end;
     else intervals.push({ start, end, status });
   }
-  return { intervals, truncated };
+  return { intervals, truncated, skipped };
 }

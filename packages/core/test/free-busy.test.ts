@@ -14,6 +14,18 @@ function query(resources: EventResource[], from: string, to: string, zone = 'UTC
   return { intervals: result.intervals.map(({ start, end, status }) => [start.toString(), end.toString(), status]), truncated: result.truncated };
 }
 describe('freeBusy', () => {
+  test('skips one unreadable resource while reporting its two neighbours', () => {
+    const data = events(['UID:first', 'DTSTART:20261109T090000Z', 'DURATION:PT1H'],
+      ['UID:bad', 'DTSTART:20261109T110000Z', 'RRULE:FREQ=DAILY', 'EXDATE;TZID=Unknown/Zone:20261110T110000'],
+      ['UID:last', 'DTSTART:20261109T130000Z', 'DURATION:PT1H']);
+    const result = freeBusy(data, { from: instant('2026-11-09T00:00:00Z'), to: instant('2026-11-10T00:00:00Z') }, 'UTC');
+    expect(result.skipped).toEqual(['bad']);
+    expect(result.truncated).toBe(false);
+    expect(result.intervals.map((i) => [i.start.toString(), i.end.toString()])).toEqual([
+      ['2026-11-09T09:00:00Z', '2026-11-09T10:00:00Z'], ['2026-11-09T13:00:00Z', '2026-11-09T14:00:00Z'],
+    ]);
+  });
+
   test('recurrence uses EXDATE and a moved override', () => {
     const data = events(['UID:series', 'DTSTART:20261109T090000Z', 'DURATION:PT1H', 'RRULE:FREQ=DAILY;COUNT=4', 'EXDATE:20261110T090000Z'],
       ['UID:series', 'RECURRENCE-ID:20261111T090000Z', 'DTSTART:20261111T110000Z', 'DURATION:PT2H', 'STATUS:TENTATIVE']);

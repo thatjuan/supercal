@@ -22,11 +22,18 @@ export function expandResourceOccurrences(resource: EventResource, range: { from
 export function expandCalendarResources(rows: { data: EventResource }[], range: { from: Date; to: Date }, zone: string) {
   const items: z.infer<typeof Occurrence>[] = [];
   let truncated = false;
+  const skipped: string[] = [];
   for (const row of rows) {
-    const expansion = expandResourceOccurrences(row.data, range, zone, MAX_CALENDAR_OCCURRENCES - items.length + 1);
+    let expansion: ReturnType<typeof expandResourceOccurrences>;
+    try {
+      expansion = expandResourceOccurrences(row.data, range, zone, MAX_CALENDAR_OCCURRENCES - items.length + 1);
+    } catch {
+      skipped.push(row.data.uid);
+      continue;
+    }
     items.push(...expansion.items); truncated ||= expansion.truncated;
     if (items.length > MAX_CALENDAR_OCCURRENCES) { truncated = true; break; }
   }
   items.sort((a, b) => a.start.localeCompare(b.start) || a.uid.localeCompare(b.uid) || a.recurrenceId.localeCompare(b.recurrenceId));
-  return { items: items.slice(0, MAX_CALENDAR_OCCURRENCES), truncated };
+  return { items: items.slice(0, MAX_CALENDAR_OCCURRENCES), truncated, skipped };
 }

@@ -14,6 +14,7 @@ import {
   organization,
   publication,
   recordChanges,
+  resource as resourceTable,
   sink,
   sourceCalendar,
   user,
@@ -25,7 +26,7 @@ import {
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { createApi } from '../src/api/index.ts';
 import { idleBus } from '../src/bus.ts';
@@ -289,5 +290,18 @@ describe.skipIf(!testDatabaseUrl)('feeds and publications', () => {
     ]);
     expect(busy.body.items[0]?.outputUid).not.toBe('standup@example.com');
     expect((await call(`/api/v1/feeds/${feedId}/occurrences?from=2026-01-01T00:00:00Z&to=2026-03-15T00:00:00Z`)).status).toBe(400);
+
+    // A stored malformed recurrence value must not poison the whole preview either.
+    const poisoned = structuredClone(resource);
+    poisoned.master?.[1].push(['rdate', {}, 'date-time', 'invalid']);
+    await unsafeDb().update(resourceTable).set({ data: poisoned }).where(and(eq(resourceTable.sourceCalendarId, calendars.work.id), eq(resourceTable.uid, resource.uid)));
+    try {
+      const preview = await call(`/api/v1/feeds/${feedId}/occurrences?${window}&publicationId=${pub.id}`);
+      expect(preview.status).toBe(200);
+      expect(preview.body.items).toEqual([]);
+      expect(preview.body.truncated).toBe(false);
+    } finally {
+      await unsafeDb().update(resourceTable).set({ data: resource }).where(and(eq(resourceTable.sourceCalendarId, calendars.work.id), eq(resourceTable.uid, resource.uid)));
+    }
   });
 });

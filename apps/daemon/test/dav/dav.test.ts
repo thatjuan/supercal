@@ -3,11 +3,11 @@
  * of architecture §9 and every report as whitespace-normalised golden XML, sync-token rules,
  * listing cost, UID separation between collections, and credential rotation.
  */
-import { closeDb, connectDb, migrate, systemSetting, withTenant, type TenantId } from '@supercal/db';
+import { closeDb, resource, connectDb, migrate, systemSetting, withTenant, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { createDatabase, unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { createConnection, type Socket } from 'node:net';
 import { idleBus } from '../../src/bus.ts';
 import { createDav } from '../../src/dav/index.ts';
@@ -400,6 +400,32 @@ describe.skipIf(!testDatabaseUrl)('CalDAV server', () => {
         for (const uid of uids) await deleteEvent('work', uid);
       }
     }, 30_000);
+  });
+
+  test('an unreadable stored object is omitted from queries and 404 in multiget and sync', async () => {
+    const body = '<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop></c:calendar-query>';
+    const before = responses((await dav('REPORT', WORK, { body })).text);
+    const bad = before.find((r) => r.uid === 'series@example.com');
+    const [row] = await unsafeDb().select().from(resource).where(and(eq(resource.tenantId, 'org_dav_alice' as TenantId), eq(resource.uid, 'series@example.com')));
+    if (!bad || !row?.data) throw new Error('no series');
+    const poisoned = structuredClone(row.data);
+    poisoned.master?.[1].push(['exdate', { tzid: 'Unknown/Zone' }, 'date-time', '2026-11-10T09:00:00']);
+    const where = and(eq(resource.sourceCalendarId, row.sourceCalendarId), eq(resource.uid, row.uid));
+    // Bypass ingestion validation to model an object stored before the gate was fixed.
+    await unsafeDb().update(resource).set({ data: poisoned }).where(where);
+    try {
+      const query = await dav('REPORT', WORK, { body });
+      expect(query.status).toBe(207);
+      expect(responses(query.text).map((r) => r.href)).toEqual(before.filter((r) => r !== bad).map((r) => r.href));
+      const multiget = await dav('REPORT', WORK, { body: `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop><d:href>${bad.href}</d:href></c:calendar-multiget>` });
+      expect(multiget.status).toBe(207);
+      expect(responses(multiget.text)).toEqual([expect.objectContaining({ href: bad.href, status: '404' })]);
+      const sync = await dav('REPORT', WORK, { body: syncBody('').replace('<d:getetag/>', '<d:getetag/><c:calendar-data xmlns:c="urn:ietf:params:xml:ns:caldav"/>') });
+      expect(sync.status).toBe(207);
+      expect(responses(sync.text).find((r) => r.href === bad.href)?.status).toBe('404');
+    } finally {
+      await unsafeDb().update(resource).set({ data: row.data }).where(where);
+    }
   });
 
   test('rotating the password makes the old one fail at once on the same process', async () => {

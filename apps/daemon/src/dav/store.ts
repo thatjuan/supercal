@@ -37,6 +37,9 @@ import { deviceHomeCalendars, atLeast } from '../hosted/access.ts';
 import { memberSpec } from '../hosted/read.ts';
 import type { Principal } from '../auth/principal.ts';
 import type { DavLogin } from './auth.ts';
+import { createLogger } from '../log.ts';
+
+const log = createLogger({ component: 'dav' });
 
 /** Look up device logins before feeds, using only control-role credential columns. */
 export async function loginByUsername(username: string): Promise<DavLogin | null> {
@@ -148,9 +151,15 @@ export function projectRows(pub: Pub, rows: LiveResource[]): Promise<ProjectedOb
 /** Projects `rows` (live copies from `pub`'s sources) and serialises each object as its own VCALENDAR, by source UID. */
 export async function render(pub: Pub, rows: LiveResource[]): Promise<Map<string, Rendered>> {
   const objects = await projectRows(pub, rows);
-  return new Map(
-    objects.map((o) => [o.sourceUid, { href: o.href, ics: serializeCalendar({ props: [], resources: [addMissingTimezones(o.resource)] }) }]),
-  );
+  const rendered = new Map<string, Rendered>();
+  for (const object of objects) {
+    try {
+      rendered.set(object.sourceUid, { href: object.href, ics: serializeCalendar({ props: [], resources: [addMissingTimezones(object.resource)] }) });
+    } catch (error) {
+      log.warn('could not render object', { sourceUid: object.sourceUid, error });
+    }
+  }
+  return rendered;
 }
 
 /** Renders the live objects of `uids`. UIDs the projection hides (filters, busy-only free time) are absent. */

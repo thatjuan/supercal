@@ -4,7 +4,7 @@
  * write budget, `calendar_missing` and removal. Every request the suite sends to Google passes the
  * interceptor in `handle`, which records any event write that could invite someone.
  */
-import { auditLog, closeDb, connectDb, member, migrate, organization, publication, publicationSource, sink, sinkEvent, sourceCalendar, syncTarget, user, type AccountId, type PublicationId, type SinkId, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
+import { auditLog, closeDb, connectDb, member, migrate, organization, publication, publicationSource, recordChanges, resource, sink, sinkEvent, sourceCalendar, syncTarget, user, withTenant, type AccountId, type PublicationId, type SinkId, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { createGoogleAdapter, createGuardedFetch } from '@supercal/providers';
@@ -20,6 +20,7 @@ import { registry } from '../src/ops/metrics.ts';
 import { createWriteBudget } from '../src/sinks/budget.ts';
 import { SINK_SCOPE } from '../src/sinks/google.ts';
 import { wakeSinks } from '../src/sinks/wake.ts';
+import { upsertOf } from '../src/sync/changes.ts';
 import { createSyncDeps, syncHandlers } from '../src/sync/index.ts';
 import { claim, complete, StopTargetError, type Job } from '../src/sync/scheduler.ts';
 import { testAuth, testSecrets } from './auth-fixture.ts';
@@ -352,6 +353,38 @@ describe.skipIf(!testDatabaseUrl)('Google sinks', () => {
       ['PUT', 200],
     ]);
     expect(mirrored().filter((e) => e.summary === 'Retro')).toHaveLength(1);
+  });
+
+  test('a malformed stored override removes old details while other edits, deletions and downgrades continue, then recovers', async () => {
+    const original = google.sources.get('work@example.test') ?? [];
+    const [stored] = await unsafeDb().select().from(resource).where(and(eq(resource.sourceCalendarId, ids.work.calendar), eq(resource.uid, 'standup@example.test')));
+    const [calendar] = await unsafeDb().select().from(sourceCalendar).where(eq(sourceCalendar.id, ids.work.calendar));
+    if (!stored?.data || !stored.span || !calendar) throw new Error('no standup');
+    const span = stored.span;
+    const poisoned = structuredClone(stored.data);
+    const override = poisoned.overrides[0];
+    if (!override) throw new Error('no override');
+    override[1] = override[1].filter((p) => p[0] !== 'dtstart');
+    expect(mirrored().some((e) => e.summary === 'Standup')).toBe(true);
+    // Model an object that predates the gate; the sink must contain its failure too.
+    await withTenant(tenantId, (tx) => recordChanges(tx, [upsertOf(calendar, stored.uid, poisoned, 'complete', span)]));
+    google.sources.set('work@example.test', original.map((e) => e.id === 'review' ? { id: e.id, status: 'cancelled' } : e.id === 'retro' ? { ...e, etag: 'edited', summary: 'Edited while poison exists' } : e));
+    expect((await ingestAndMirror(ids.work.calendar)).error).toBeUndefined();
+    expect(mirrored().map((e) => e.summary)).toEqual(['Edited while poison exists']);
+    expect(await unsafeDb().select().from(sinkEvent).where(and(eq(sinkEvent.sinkId, ids.sink), eq(sinkEvent.uid, 'standup@example.test')))).toEqual([]);
+    expect(await (await request(`/api/v1/sinks/${ids.sink}`)).json()).toMatchObject({ status: 'up_to_date', problem: expect.stringContaining('Could not mirror 1 events; first: standup@example.test:') });
+
+    await unsafeDb().update(publication).set({ privacy: 'busy-only', epoch: sql`${publication.epoch} + 1` }).where(eq(publication.id, ids.work.publication));
+    expect(await runNow(await targetOf('sink', ids.sink))).toBeUndefined();
+    expect(mirrored().map((e) => e.summary)).toEqual(['Busy']);
+    expect(mirrored().some((e) => typeof e.description === 'string')).toBe(false);
+    expect((await unsafeDb().select().from(sink).where(eq(sink.id, ids.sink)))[0]?.problem).toContain('has no DTSTART');
+
+    // A corrected upstream object changes seq and is inserted again despite the advanced cursor.
+    google.sources.set('work@example.test', original.map((e) => e.id === 'standup_x' ? { ...e, etag: 'fixed-upstream' } : e));
+    expect((await ingestAndMirror(ids.work.calendar)).error).toBeUndefined();
+    expect(mirrored().map((e) => e.summary)).toEqual(['Busy', 'Busy', 'Busy', 'Busy']);
+    expect(await (await request(`/api/v1/sinks/${ids.sink}`)).json()).toMatchObject({ problem: null, counts: { events: 3 } });
   });
 
   test('an epoch bump (privacy now busy-only) reconciles fully: every title is Busy and nothing is left behind', async () => {

@@ -1,0 +1,1 @@
+ALTER TABLE "sink" ADD COLUMN "problem" text;
