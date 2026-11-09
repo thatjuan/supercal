@@ -44,10 +44,10 @@ afterEach(() => {
 });
 
 test.each([
-  ['member', meAs('member'), ['Overview', 'Subscribe', 'Settings']],
-  ['admin', meAs('admin'), ['Overview', 'Subscribe', 'Settings', 'Admin']],
-  ['owner', meAs('owner'), ['Overview', 'Subscribe', 'Settings', 'Admin']],
-  ['operator (a member of this tenant)', meAs('member', true), ['Overview', 'Subscribe', 'Settings', 'Operator']],
+  ['member', meAs('member'), ['Overview', 'Calendars', 'Hosted', 'Subscribe', 'Settings']],
+  ['admin', meAs('admin'), ['Overview', 'Calendars', 'Hosted', 'Subscribe', 'Settings', 'Admin']],
+  ['owner', meAs('owner'), ['Overview', 'Calendars', 'Hosted', 'Subscribe', 'Settings', 'Admin']],
+  ['operator (a member of this tenant)', meAs('member', true), ['Overview', 'Calendars', 'Hosted', 'Subscribe', 'Settings', 'Operator']],
 ] as const)('%s sees %j', async (_who, me, expected) => {
   const links = await navFor(me);
   expect(links.filter((label) => label !== null && expected.includes(label as never))).toEqual(expected);

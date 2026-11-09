@@ -22,6 +22,8 @@ import { Route as AppWelcomeRouteImport } from './routes/_app/welcome'
 import { Route as authInviteTokenRouteImport } from './routes/(auth)/invite.$token'
 import { Route as AppCalendarsIndexRouteImport } from './routes/_app/calendars/index'
 import { Route as AppFeedsIndexRouteImport } from './routes/_app/feeds/index'
+import { Route as AppHostedIndexRouteImport } from './routes/_app/hosted/index'
+import { Route as AppHostedCalendarIdRouteImport } from './routes/_app/hosted/$calendarId'
 import { Route as AppCalendarsVirtualPublicationIdRouteImport } from './routes/_app/calendars/virtual.$publicationId'
 import { Route as AppCalendarsVirtualNewRouteImport } from './routes/_app/calendars/virtual.new'
 import { Route as AppFeedsFeedIdSubscribeRouteImport } from './routes/_app/feeds/$feedId/subscribe'
@@ -90,6 +92,16 @@ const AppFeedsIndexRoute = AppFeedsIndexRouteImport.update({
   path: '/feeds/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppHostedIndexRoute = AppHostedIndexRouteImport.update({
+  id: '/hosted/',
+  path: '/hosted/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHostedCalendarIdRoute = AppHostedCalendarIdRouteImport.update({
+  id: '/hosted/$calendarId',
+  path: '/hosted/$calendarId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCalendarsVirtualPublicationIdRoute =
   AppCalendarsVirtualPublicationIdRouteImport.update({
     id: '/calendars/virtual/$publicationId',
@@ -118,8 +130,10 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/welcome': typeof AppWelcomeRoute
   '/invite/$token': typeof authInviteTokenRoute
+  '/hosted/$calendarId': typeof AppHostedCalendarIdRoute
   '/calendars/': typeof AppCalendarsIndexRoute
   '/feeds/': typeof AppFeedsIndexRoute
+  '/hosted/': typeof AppHostedIndexRoute
   '/calendars/virtual/$publicationId': typeof AppCalendarsVirtualPublicationIdRoute
   '/calendars/virtual/new': typeof AppCalendarsVirtualNewRoute
   '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
@@ -135,8 +149,10 @@ export interface FileRoutesByTo {
   '/welcome': typeof AppWelcomeRoute
   '/': typeof AppIndexRoute
   '/invite/$token': typeof authInviteTokenRoute
+  '/hosted/$calendarId': typeof AppHostedCalendarIdRoute
   '/calendars': typeof AppCalendarsIndexRoute
   '/feeds': typeof AppFeedsIndexRoute
+  '/hosted': typeof AppHostedIndexRoute
   '/calendars/virtual/$publicationId': typeof AppCalendarsVirtualPublicationIdRoute
   '/calendars/virtual/new': typeof AppCalendarsVirtualNewRoute
   '/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
@@ -154,8 +170,10 @@ export interface FileRoutesById {
   '/_app/welcome': typeof AppWelcomeRoute
   '/_app/': typeof AppIndexRoute
   '/(auth)/invite/$token': typeof authInviteTokenRoute
+  '/_app/hosted/$calendarId': typeof AppHostedCalendarIdRoute
   '/_app/calendars/': typeof AppCalendarsIndexRoute
   '/_app/feeds/': typeof AppFeedsIndexRoute
+  '/_app/hosted/': typeof AppHostedIndexRoute
   '/_app/calendars/virtual/$publicationId': typeof AppCalendarsVirtualPublicationIdRoute
   '/_app/calendars/virtual/new': typeof AppCalendarsVirtualNewRoute
   '/_app/feeds/$feedId/subscribe': typeof AppFeedsFeedIdSubscribeRoute
@@ -173,8 +191,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/welcome'
     | '/invite/$token'
+    | '/hosted/$calendarId'
     | '/calendars/'
     | '/feeds/'
+    | '/hosted/'
     | '/calendars/virtual/$publicationId'
     | '/calendars/virtual/new'
     | '/feeds/$feedId/subscribe'
@@ -190,8 +210,10 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/'
     | '/invite/$token'
+    | '/hosted/$calendarId'
     | '/calendars'
     | '/feeds'
+    | '/hosted'
     | '/calendars/virtual/$publicationId'
     | '/calendars/virtual/new'
     | '/feeds/$feedId/subscribe'
@@ -208,8 +230,10 @@ export interface FileRouteTypes {
     | '/_app/welcome'
     | '/_app/'
     | '/(auth)/invite/$token'
+    | '/_app/hosted/$calendarId'
     | '/_app/calendars/'
     | '/_app/feeds/'
+    | '/_app/hosted/'
     | '/_app/calendars/virtual/$publicationId'
     | '/_app/calendars/virtual/new'
     | '/_app/feeds/$feedId/subscribe'
@@ -315,6 +339,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppFeedsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/hosted/': {
+      id: '/_app/hosted/'
+      path: '/hosted'
+      fullPath: '/hosted/'
+      preLoaderRoute: typeof AppHostedIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/hosted/$calendarId': {
+      id: '/_app/hosted/$calendarId'
+      path: '/hosted/$calendarId'
+      fullPath: '/hosted/$calendarId'
+      preLoaderRoute: typeof AppHostedCalendarIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/calendars/virtual/$publicationId': {
       id: '/_app/calendars/virtual/$publicationId'
       path: '/calendars/virtual/$publicationId'
@@ -347,8 +385,10 @@ interface AppRouteChildren {
   AppSettingsRoute: typeof AppSettingsRoute
   AppWelcomeRoute: typeof AppWelcomeRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppHostedCalendarIdRoute: typeof AppHostedCalendarIdRoute
   AppCalendarsIndexRoute: typeof AppCalendarsIndexRoute
   AppFeedsIndexRoute: typeof AppFeedsIndexRoute
+  AppHostedIndexRoute: typeof AppHostedIndexRoute
   AppCalendarsVirtualPublicationIdRoute: typeof AppCalendarsVirtualPublicationIdRoute
   AppCalendarsVirtualNewRoute: typeof AppCalendarsVirtualNewRoute
   AppFeedsFeedIdSubscribeRoute: typeof AppFeedsFeedIdSubscribeRoute
@@ -362,8 +402,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsRoute: AppSettingsRoute,
   AppWelcomeRoute: AppWelcomeRoute,
   AppIndexRoute: AppIndexRoute,
+  AppHostedCalendarIdRoute: AppHostedCalendarIdRoute,
   AppCalendarsIndexRoute: AppCalendarsIndexRoute,
   AppFeedsIndexRoute: AppFeedsIndexRoute,
+  AppHostedIndexRoute: AppHostedIndexRoute,
   AppCalendarsVirtualPublicationIdRoute: AppCalendarsVirtualPublicationIdRoute,
   AppCalendarsVirtualNewRoute: AppCalendarsVirtualNewRoute,
   AppFeedsFeedIdSubscribeRoute: AppFeedsFeedIdSubscribeRoute,
