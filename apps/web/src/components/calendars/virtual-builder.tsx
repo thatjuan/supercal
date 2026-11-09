@@ -10,12 +10,15 @@ import { ColorChip } from '../ui/calendar-color.tsx';
 import { Input } from '../ui/field.tsx';
 import { Icon } from '../ui/icon.tsx';
 import { fieldErrors, ProblemAlert } from '../ui/problem-alert.tsx';
-import type { AccountGroup, Calendar } from './data.ts';
+import { HOSTED_GROUP, type AccountGroup, type Calendar } from './data.ts';
 import { Checkbox, FALLBACK_COLOR, SettingsFields } from './settings-fields.tsx';
 import { DEFAULT_FILTERS, diffSettings, EPOCH_NOTE, withPriorities, type Settings, type Source } from './settings.ts';
 import { SortableList } from './sortable-list.tsx';
 
 export const NEEDS_TWO = 'Pick at least two calendars to merge';
+
+/** The id of the group a calendar is listed under; a hosted calendar's `accountId` is null. */
+const groupOf = (calendar: Calendar | undefined) => (calendar?.kind === 'hosted' ? HOSTED_GROUP : (calendar?.accountId ?? ''));
 
 export type VirtualDraft = { settings: Settings & { sources: Source[] }; hideIndividuals: boolean };
 
@@ -40,7 +43,7 @@ export function VirtualBuilder({ groups, initial, onSubmit, onCancel, pending, p
   const [tried, setTried] = useState(false);
 
   const calendars = new Map(groups.flatMap((g) => g.rows.map((r) => [r.calendar.id, r.calendar] as const)));
-  const accountName = new Map(groups.map((g) => [g.account.id, g.account.displayName]));
+  const accountName = new Map(groups.map((g) => [g.id, g.title]));
   // ICS calendars often have no colour; the one the user gave their publication is the better hint.
   const colorOf = new Map(groups.flatMap((g) => g.rows.map((r) => [r.calendar.id, r.passthrough?.color ?? r.calendar.color ?? FALLBACK_COLOR] as const)));
   const sources = withPriorities(order);
@@ -59,7 +62,7 @@ export function VirtualBuilder({ groups, initial, onSubmit, onCancel, pending, p
 
   const needle = search.trim().toLowerCase();
   const visible = groups
-    .map((g) => ({ ...g, rows: g.rows.filter((r) => !needle || r.calendar.name.toLowerCase().includes(needle) || g.account.displayName.toLowerCase().includes(needle)) }))
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => !needle || r.calendar.name.toLowerCase().includes(needle) || g.title.toLowerCase().includes(needle)) }))
     .filter((g) => g.rows.length > 0);
 
   return (
@@ -76,8 +79,8 @@ export function VirtualBuilder({ groups, initial, onSubmit, onCancel, pending, p
         </label>
         <div className="grid max-h-80 gap-3 overflow-y-auto pr-1">
           {visible.map((group) => (
-            <fieldset key={group.account.id} className="grid gap-1">
-              <legend className="mb-1 text-[13px] font-medium text-ink-3">{group.account.displayName}</legend>
+            <fieldset key={group.id} className="grid gap-1">
+              <legend className="mb-1 text-[13px] font-medium text-ink-3">{group.title}</legend>
               {group.rows.map(({ calendar }) => (
                 <Checkbox
                   key={calendar.id}
@@ -110,7 +113,7 @@ export function VirtualBuilder({ groups, initial, onSubmit, onCancel, pending, p
               onReorder={setOrder}
               className="rounded-[10px] border border-line px-2"
             >
-              {(id) => <SourceLabel calendar={calendars.get(id)} color={colorOf.get(id) ?? FALLBACK_COLOR} account={accountName.get(calendars.get(id)?.accountId ?? '')} />}
+              {(id) => <SourceLabel calendar={calendars.get(id)} color={colorOf.get(id) ?? FALLBACK_COLOR} account={accountName.get(groupOf(calendars.get(id)))} />}
             </SortableList>
           ) : (
             <p className="rounded-[10px] border border-dashed border-line-strong px-3 py-3 text-sm text-ink-3">Calendars you pick appear here.</p>
