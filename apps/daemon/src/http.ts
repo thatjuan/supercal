@@ -19,12 +19,18 @@ export type AppDeps = ApiDeps & { publicUrl?: string | undefined; icsCacheBytes:
 const feedKind = (path: string) => (path.startsWith('/ics/') ? 'ics' : /^\/(?:dav(?:\/|$)|\.well-known\/caldav$)/.test(path) ? 'caldav' : null);
 
 /**
- * Builds the HTTP app: `/healthz`, `/readyz` and `/metrics` always, plus the route groups of each
+ * Builds the HTTP app: `/healthz`, `/readyz` and gated `/metrics` for every role, plus the route groups of each
  * enabled role (push webhooks come with `api`). With the `api` role and a built dashboard in
  * `webDir`, the dashboard is mounted last, behind every other route.
  */
 export function createApp(roles: ReadonlySet<Role>, deps: AppDeps) {
   const app = new Hono();
+  app.use('*', async (c, next) => {
+    await next();
+    c.header('X-Frame-Options', 'DENY');
+    c.header('Content-Security-Policy', "frame-ancestors 'none'", { append: true });
+    c.header('Cross-Origin-Opener-Policy', 'same-origin');
+  });
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
   app.route('/', opsRoutes({ bus: deps.bus, ...deps.ops }));
   if (roles.has('api')) app.route('/', createApi(deps)).route('/', googleHooks).route('/', microsoftHooks);

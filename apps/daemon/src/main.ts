@@ -94,7 +94,7 @@ const server = Bun.serve({
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,
     signup: config.SUPERCAL_SIGNUP,
     webDir,
-    ops: { metricsToken: config.SUPERCAL_METRICS_TOKEN, ...(roles.has('worker') && { schedulerTickedAt: () => schedulerTickedAt }) },
+    ops: { metricsToken: config.SUPERCAL_METRICS_TOKEN, insecureDev: config.SUPERCAL_INSECURE_DEV, ...(roles.has('worker') && { schedulerTickedAt: () => schedulerTickedAt }) },
   }).fetch,
 });
 log.info('listening', { port: server.port, roles: [...roles], webDir });

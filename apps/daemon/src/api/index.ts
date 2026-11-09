@@ -30,7 +30,7 @@ import { shareRoutes } from './shares.ts';
 import { eventRoutes } from './events.ts';
 import { feedRoutes } from './feeds.ts';
 import { instanceRoutes, type Signup } from './instance.ts';
-import { createApiApp } from './kit/index.ts';
+import { createApiApp, Forbidden } from './kit/index.ts';
 import { linkRoutes } from './links.ts';
 import { meRoutes } from './me.ts';
 import { publicationRoutes } from './publications.ts';
@@ -49,6 +49,9 @@ export const openApiConfig = {
   },
   security: [{ session: [] }, { apiKey: [] }],
 };
+
+// Published 2026-10-23. This release reads localStorage on startup, so a CSP sandbox prevents rendering.
+const SCALAR_CDN = 'https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.0';
 
 /**
  * What the API runs on: Better Auth, the secret box for values stored encrypted, the bus that
@@ -96,6 +99,11 @@ export function createApi(
     microsoft: oauthConfig?.microsoft ?? null,
   };
   const app = createApiApp();
+  app.get('/api/auth/reference', apiReference(async () => ({
+    cdn: SCALAR_CDN,
+    content: await auth.api.generateOpenAPISchema(),
+    pageTitle: 'Supercal authentication API',
+  })));
   app.use('/api/auth/*', bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ message: 'Request body too large' }, 413) }));
   function toAuth(c: Context) {
     const request = new Request(c.req.raw);
@@ -112,7 +120,7 @@ export function createApi(
     description: 'An API key sent as `Authorization: Bearer <key>`',
   });
   app.doc31('/api/v1/openapi.json', openApiConfig);
-  app.get('/api/docs', apiReference({ url: '/api/v1/openapi.json', pageTitle: 'Supercal API' }));
+  app.get('/api/docs', apiReference({ cdn: SCALAR_CDN, url: '/api/v1/openapi.json', pageTitle: 'Supercal API' }));
   const providers = { google: oauth.google !== null, microsoft: oauth.microsoft !== null };
   app.route('/', instanceRoutes({ signup, providers }, auth.isEmptyInstall));
   app.use('/api/v1/*', async (c, next) => {
@@ -120,6 +128,14 @@ export function createApi(
     c.set('feeds', feeds);
     c.set('sync', sync);
     c.set('oauth', oauth);
+    await next();
+  });
+  app.use('/api/v1/*', async (c, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) || c.req.header('Authorization')) return next();
+    const origin = c.req.header('Origin');
+    const site = c.req.header('Sec-Fetch-Site');
+    const allowed = origin ? oauth.returnOrigins.includes(origin) : site === undefined || site === 'same-origin' || site === 'none';
+    if (!allowed) throw new Forbidden('Cross-origin requests are not allowed', 'cross-origin');
     await next();
   });
   app.use('/api/v1/*', authenticate);

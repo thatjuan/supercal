@@ -12,7 +12,7 @@ import type { ApiEnv, Principal } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
 import { writeObject } from '../src/hosted/objects.ts';
 import { upsertOf } from '../src/sync/changes.ts';
-import { testAuth, testSecrets } from './auth-fixture.ts';
+import { TEST_ORIGIN, testAuth, testSecrets } from './auth-fixture.ts';
 
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
 const principal: Principal = { kind: 'user', userId: `events_${crypto.randomUUID()}`, tenantId, role: 'member', via: 'session', isOperator: false };
@@ -200,5 +200,33 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     expect((await importIcs('x'.repeat(8 * 1024 * 1024 + 1))).status).toBe(413);
     const audit = await unsafeDb().select().from(auditLog).where(eq(auditLog.targetId, second));
     expect(audit.filter((row) => row.action === 'calendar.import').every((row) => !JSON.stringify(row.data).includes('Team sync'))).toBe(true);
+  });
+
+  test('calendar exports refuse cross-site cookie navigation and allow same-origin or bearer clients', async () => {
+    const sessionFixture = testAuth('open', scratch.url);
+    try {
+      const api = createApi({ auth: sessionFixture.auth, secrets: testSecrets, bus: idleBus });
+      const signedUp = await api.request('/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { origin: TEST_ORIGIN, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: `export-${crypto.randomUUID()}@example.invalid`, password: 'correct-horse-battery', name: 'Exporter' }),
+      });
+      expect(signedUp.status).toBe(200);
+      const cookie = signedUp.headers.getSetCookie().map((line) => line.split(';')[0]).join('; ');
+      const created = await api.request('/api/v1/calendars', { method: 'POST', headers: { cookie, origin: TEST_ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Export' }) });
+      expect(created.status).toBe(201);
+      const { id } = Calendar.parse(await created.json());
+      const path = `/api/v1/calendars/${id}/export.ics`;
+      expect((await api.request(path, { headers: { cookie, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(403);
+      const sameOrigin = await api.request(path, { headers: { cookie, 'Sec-Fetch-Site': 'same-origin' } });
+      expect(sameOrigin.status).toBe(200);
+      expect(await sameOrigin.text()).toContain('BEGIN:VCALENDAR');
+      const issued = await api.request('/api/v1/api-keys', { method: 'POST', headers: { cookie, origin: TEST_ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Export' }) });
+      expect(issued.status).toBe(201);
+      const { key } = await issued.json() as { key: string };
+      expect((await api.request(path, { headers: { authorization: `Bearer ${key}`, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(200);
+    } finally {
+      await sessionFixture.close();
+    }
   });
 });

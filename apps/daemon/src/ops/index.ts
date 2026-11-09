@@ -3,7 +3,7 @@
  * - `GET /readyz`: 200 when every check passes, otherwise 503 listing the failing ones. Checks: the
  *   database answers within 1 s, its newest migration is this binary's, the bus hears its own
  *   pings, and (worker role) the scheduler loop ticked in the last 30 s.
- * - `GET /metrics`: Prometheus text, behind `Authorization: Bearer <SUPERCAL_METRICS_TOKEN>` when set.
+ * - `GET /metrics`: Prometheus text, requiring a bearer token unless insecure development is enabled.
  */
 import { migrationsCurrent, withControl } from '@supercal/db';
 import { sql } from 'drizzle-orm';
@@ -22,6 +22,8 @@ export type OpsDeps = {
   schedulerTickedAt?: () => number | null;
   /** `SUPERCAL_METRICS_TOKEN`. */
   metricsToken?: string | undefined;
+  /** Allow anonymous metrics only with `SUPERCAL_INSECURE_DEV=1`. */
+  insecureDev?: boolean;
 };
 
 type Check = 'database' | 'migrations' | 'bus' | 'scheduler';
@@ -65,6 +67,7 @@ export function opsRoutes(deps: OpsDeps) {
       return failing.length === 0 ? c.json({ status: 'ready' }) : c.json({ status: 'not ready', failing }, 503);
     })
     .get('/metrics', async (c) => {
+      if (!deps.metricsToken && !deps.insecureDev) return c.notFound();
       if (deps.metricsToken && !sameSecret(c.req.header('Authorization') ?? '', `Bearer ${deps.metricsToken}`))
         return c.body('unauthorized', 401, { 'WWW-Authenticate': 'Bearer' });
       return c.body(await registry.render(), 200, { 'Content-Type': PROMETHEUS_CONTENT_TYPE });

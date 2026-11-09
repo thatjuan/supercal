@@ -203,7 +203,7 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
           await mailer?.send({ to: email, ...templates.magicLink({ url }) });
         },
       }),
-      openAPI(),
+      openAPI({ disableDefaultReference: true }),
     ],
   });
 
