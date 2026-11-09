@@ -512,7 +512,8 @@ nullable `accountId` (null for hosted), description, sort order, update time and
 Hosted freshness is `{ lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false }`.
 The hosted account is absent from account listings, and every account-by-id route returns 404
 for it. The public Account provider union remains the five connected providers. The dashboard
-continues grouping by visible accounts and adds no hosted calendar screen.
+groups connected calendars by visible account, lists hosted calendars in a group of their own, and
+manages them on the Hosted screen.
 
 ### Maintenance
 
