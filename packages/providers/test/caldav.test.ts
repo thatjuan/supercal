@@ -2,7 +2,12 @@
  * The CalDAV adapter (tsdav over a scripted guarded transport): discovery, both incremental modes
  * and the failure rules, where an error must never yield a cursor or a deletion.
  */
-import { describe, expect, test } from 'bun:test';
+import { groupUidsOf } from '@supercal/core';
+import { createDavSession, DavStatusError, type DavSession } from '../src/caldav/session.ts';
+import { syncCollection } from '../src/caldav/sync.ts';
+import { createGuardedFetch, credentialTarget, type GuardedRequest } from '../src/transport/index.ts';
+import { icloudLogin } from '../src/caldav/index.ts';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { AuthFailedError, caldavAdapter, ProviderUnavailableError, UnsupportedAuthError, type SourceCalendarRef, type SyncEnd, type SyncPage } from '../src/index.ts';
 import type { CaldavCursor } from '../src/caldav/index.ts';
 import { collect, davContext, DavFixture, event } from './dav-fixture.ts';
@@ -213,4 +218,180 @@ test('an object with several UIDs is split into href#uid raw objects, and deleti
   server.remove(`${WORK}multi.ics`);
   const gone = await run(ctx, 'sync-collection', split.end.cursor);
   expect(gone.deletes.sort()).toEqual([`${WORK}multi.ics#x`, `${WORK}multi.ics#y`]);
+});
+
+/** A complete XML exchange through tsdav, with a scripted reply body. */
+function xmlSession(body: string) {
+  const ctx = davContext(async (req) => ({ status: 207, headers: new Headers({ 'content-type': 'application/xml' }), body: new TextEncoder().encode(body), finalUrl: req.url }));
+  return createDavSession(ctx, { username: 'u', password: 'p', origins: ['https://dav.test'], hosts: [] });
+}
+const xmlReply = (children: string, attributes = '') => `<d:multistatus xmlns:d="DAV:" ${attributes}>${children}</d:multistatus>`;
+const xmlEntry = (href: string, props = '') => `<d:response><d:href>${href}</d:href><d:propstat><d:prop>${props}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`;
+const padReply = (body: string, bytes: number) => body.replace('</d:multistatus>', `${' '.repeat(Math.max(0, bytes - Buffer.byteLength(body)))}</d:multistatus>`);
+
+const hostileReplies = [
+  padReply(xmlReply('<d:x/>'.repeat(10000), Array.from({ length: 1000 }, (_, i) => `xmlns:n${i}="urn:n${i}"`).join(' ')), 159_000),
+  padReply(xmlReply(Array.from({ length: 2500 }, (_, i) => `<d:x${i}/>`).join('') + Array.from({ length: 700 }, (_, i) => xmlEntry(`/o${i}`)).join('')), 159_000),
+];
+
+test.each(hostileReplies.map((body, index) => ({ body, index })))('159 KB hostile XML shape $index finishes within 500 ms or is refused', async ({ body }) => {
+  expect(Buffer.byteLength(body)).toBe(159_000);
+  const start = performance.now();
+  try {
+    await xmlSession(body).propfind('https://dav.test/', ['d:getetag'], '1');
+  } catch (error) {
+    expect(error).toBeInstanceOf(ProviderUnavailableError);
+  }
+  expect(performance.now() - start).toBeLessThan(500);
+});
+
+test('ordinary 200 KB XML still parses', async () => {
+  const body = padReply(xmlReply(Array.from({ length: 1000 }, (_, i) => xmlEntry(`/o${i}`, '<d:getetag>v1</d:getetag>')).join('')), 200_000);
+  expect(Buffer.byteLength(body)).toBe(200_000);
+  const result = await xmlSession(body).propfind('https://dav.test/', ['d:getetag'], '1');
+  expect(result.entries).toHaveLength(1000);
+  expect(result.entries[999]).toMatchObject({ href: 'https://dav.test/o999', props: { getetag: 'v1' } });
+});
+
+test('three UIDs store only their own components with total bytes close to the original', async () => {
+  const { server, ctx } = setup();
+  const payload = event('x', 'y', 'z');
+  server.put(`${WORK}multi.ics`, payload);
+  const objects = (await run(ctx, 'sync-collection', null)).upserts.filter((o) => o.id.startsWith(`${WORK}multi.ics`));
+  expect(objects).toHaveLength(3);
+  let bytes = 0;
+  for (const object of objects) {
+    if (typeof object.payload !== 'string') throw new Error('not iCalendar');
+    expect(groupUidsOf(object.payload)).toEqual([object.groupUid]);
+    bytes += Buffer.byteLength(object.payload);
+  }
+  expect(bytes).toBeLessThan(Buffer.byteLength(payload) * 1.5);
+});
+
+test('101 UIDs are skipped with a warning, deleting earlier single or split objects', async () => {
+  const { server, ctx } = setup();
+  const warnings: unknown[] = [];
+  ctx.log = { ...ctx.log, warn: (message, fields) => warnings.push({ message, fields }) };
+  const single = `${WORK}single.ics`;
+  const split = `${WORK}split.ics`;
+  server.put(single, event('single')).put(split, event('x', 'y'));
+  const first = await run(ctx, 'sync-collection', null);
+  const payload = event(...Array.from({ length: 101 }, (_, i) => `uid${i}`));
+  server.put(single, payload).put(split, payload);
+  const next = await run(ctx, 'sync-collection', first.end.cursor);
+  expect(next.upserts).toEqual([]);
+  expect(next.deletes.sort()).toEqual([single, `${split}#x`, `${split}#y`]);
+  expect(next.end.cursor.split).toEqual({});
+  expect(warnings).toHaveLength(2);
+  expect(warnings[0]).toMatchObject({ fields: { count: 101, limit: 100 } });
+  expect((await run(ctx, 'sync-collection', null)).upserts.map((o) => o.groupUid)).toEqual(['a', 'b']);
+});
+
+test('a single UID keeps its original payload bytes and etag', async () => {
+  const { server, ctx } = setup();
+  const payload = event('original').replaceAll('\r\n', '\n').replace('VERSION:2.0', 'VERSION:2.0\nX-CUSTOM:untouched');
+  server.put(`${WORK}a.ics`, payload);
+  const object = (await run(ctx, 'sync-collection', null)).upserts.find((o) => o.id === `${WORK}a.ics`);
+  expect(object).toMatchObject({ payload, etag: `"${server.version}"` });
+});
+
+/** Sync-only fake used to exercise pagination bounds without repeated XML parsing. */
+function syncFake(answer: DavSession['syncCollection']): DavSession {
+  return { ...xmlSession(xmlReply('')), syncCollection: answer, multiget: async () => { throw new Error('unexpected multiget'); } };
+}
+const truncated = (token: string) => ({ url: `https://dav.test${WORK}`, syncToken: token, entries: [{ href: `https://dav.test${WORK}`, status: 507, props: {} }] });
+
+test('a server truncating forever fails at 1000 rounds before yielding anything', async () => {
+  let rounds = 0;
+  const dav = syncFake(async () => truncated(`tok-${++rounds}`));
+  await expect(collect(syncCollection(dav, `https://dav.test${WORK}`, 'sync-collection', null))).rejects.toBeInstanceOf(ProviderUnavailableError);
+  expect(rounds).toBe(1000);
+});
+
+test('a server truncating ten times then finishing succeeds', async () => {
+  let rounds = 0;
+  const dav = syncFake(async () => ({ ...truncated(`tok-${++rounds}`), ...(rounds > 10 && { entries: [] }) }));
+  expect(await collect(syncCollection(dav, `https://dav.test${WORK}`, 'sync-collection', null))).toMatchObject([{ kind: 'end', mode: 'snapshot', cursor: { token: 'tok-11' } }]);
+  expect(rounds).toBe(11);
+});
+
+test('sync-collection refuses more than 200000 distinct hrefs, even in a final answer', async () => {
+  const dav = syncFake(async () => ({ ...truncated('tok-1'), entries: Array.from({ length: 200001 }, (_, i) => ({ href: `https://dav.test${WORK}${i}.ics`, status: 200, props: { getetag: 'v1' } })) }));
+  await expect(collect(syncCollection(dav, `https://dav.test${WORK}`, 'sync-collection', null))).rejects.toBeInstanceOf(ProviderUnavailableError);
+});
+
+test('only one invalid-token restart is allowed, and it resets the round budget', async () => {
+  let calls = 0;
+  const dav = syncFake(async (_url, token) => {
+    calls++;
+    if (calls === 1000 || calls === 2000) throw new DavStatusError(403, '<d:valid-sync-token/>');
+    if (calls === 1001) expect(token).toBe('');
+    return truncated(`tok-${calls}`);
+  });
+  await expect(collect(syncCollection(dav, `https://dav.test${WORK}`, 'sync-collection', null))).rejects.toBeInstanceOf(ProviderUnavailableError);
+  expect(calls).toBe(2000);
+});
+
+test.each(['https://dav.test:8443/u/', 'http://dav.test/u/'])('a discovery href to %s fails before sending credentials', async (href) => {
+  const { ctx } = setup();
+  const sent: string[] = [];
+  ctx.fetch = async (req) => {
+    sent.push(req.url);
+    return { status: 207, headers: new Headers({ 'content-type': 'application/xml' }), body: new TextEncoder().encode(xmlReply(xmlEntry('/', `<d:current-user-principal><d:href>${href}</d:href></d:current-user-principal>`))), finalUrl: req.url };
+  };
+  await expect(caldavAdapter.listCalendars(ctx)).rejects.toBeInstanceOf(ProviderUnavailableError);
+  expect(sent).toEqual(['https://dav.test/.well-known/caldav']);
+});
+
+test('a configured HTTP origin may upgrade to HTTPS on its hostname', async () => {
+  const { server } = setup();
+  const inner = server.asGuardedFetch();
+  const sent: string[] = [];
+  const ctx = davContext(async (req) => {
+    sent.push(req.url);
+    const response = await inner(req);
+    return { ...response, finalUrl: req.url.replace('http://dav.test:8080/', 'https://dav.test/') };
+  }, { provider: 'caldav', serverUrl: 'http://dav.test:8080/', username: 'u', password: 'p' });
+  expect((await caldavAdapter.listCalendars(ctx))[0]?.providerCalendarId).toBe(`https://dav.test${WORK}`);
+  expect(sent.slice(0, 2)).toEqual(['http://dav.test:8080/.well-known/caldav', 'https://dav.test/u/']);
+  expect((await run(ctx, 'sync-collection', null)).upserts).toHaveLength(2);
+});
+
+test.each(['https://p42-caldav.icloud.com/', 'https://p42-caldav.icloud.com:443/'])('iCloud partition %s receives credential permission', async (url) => {
+  const requests: GuardedRequest[] = [];
+  const fixture = new DavFixture().collection(WORK);
+  const ctx = davContext(async (req) => { requests.push(req); return fixture.asGuardedFetch()(req); }, { provider: 'icloud', appleId: 'u', appSpecificPassword: 'p' });
+  const login = icloudLogin(ctx.credentials);
+  const dav = createDavSession(ctx, login);
+  await dav.propfind(new URL('/.well-known/caldav', url).href, ['d:getetag'], '1');
+  expect(requests).toHaveLength(1);
+  expect(credentialTarget(new URL(url), requests[0]?.credentialOrigins ?? [], requests[0]?.credentialHosts ?? [])).toBe(true);
+});
+
+test.each(['https://p42-caldav.icloud.com:8443/', 'http://p42-caldav.icloud.com/'])('iCloud partition %s receives no credentials', async (url) => {
+  const sent: unknown[] = [];
+  const ctx = davContext(async (req) => { sent.push(req); throw new Error('unexpected fetch'); }, { provider: 'icloud', appleId: 'u', appSpecificPassword: 'p' });
+  await expect(createDavSession(ctx, icloudLogin(ctx.credentials)).propfind(url, [], '0')).rejects.toBeInstanceOf(ProviderUnavailableError);
+  expect(sent).toEqual([]);
+});
+
+
+test.each(['', ':443', ':8443'])('iCloud redirect to HTTPS partition port "%s" keeps Basic only on the default port', async (port) => {
+  const authorization: (string | null)[] = [];
+  const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (_input: string | URL | Request, init?: RequestInit) => {
+    authorization.push(new Headers(init?.headers).get('authorization'));
+    return authorization.length === 1
+      ? Response.redirect(`https://p42-caldav.icloud.com${port}/`)
+      : new Response(xmlReply(''), { status: 207, headers: { 'content-type': 'application/xml' } });
+  }, { preconnect() {} }));
+  try {
+    const guarded = createGuardedFetch({ allow: [] }, { resolve: async () => [{ address: '1.1.1.1', family: 4 }] });
+    const ctx = davContext(guarded, { provider: 'icloud', appleId: 'u', appSpecificPassword: 'p' });
+    const dav = createDavSession(ctx, icloudLogin(ctx.credentials));
+    await dav.propfind('https://caldav.icloud.com/', [], '0');
+    const basic = `Basic ${btoa('u:p')}`;
+    expect(authorization).toEqual([basic, port === ':8443' ? null : basic]);
+  } finally {
+    fetch.mockRestore();
+  }
 });

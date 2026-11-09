@@ -11,9 +11,9 @@
  * Changed hrefs are multigot in batches of 100. Malformed, partial or incomplete answers throw
  * `ProviderUnavailableError` before any cursor exists, so an error never becomes a deletion.
  */
-import { groupUidsOf } from '@supercal/core';
+import { parseCalendar, serializeCalendar } from '@supercal/core';
 import { z } from 'zod';
-import { ProviderUnavailableError, type RawObject, type SyncEnd, type SyncPage } from '../adapter.ts';
+import { ProviderUnavailableError, type Logger, type RawObject, type SyncEnd, type SyncPage } from '../adapter.ts';
 import type { Incremental } from './discovery.ts';
 import { DavStatusError, Text, type DavSession } from './session.ts';
 
@@ -29,6 +29,9 @@ type SplitMap = z.infer<typeof Split>;
 type Item = SyncPage | SyncEnd<CaldavCursor>;
 
 const MULTIGET_BATCH = 100;
+const MAX_UIDS_PER_OBJECT = 100;
+const MAX_SYNC_ROUNDS = 1000;
+const MAX_SYNC_HREFS = 200_000;
 
 /** Thrown when the server definitely does not do sync-collection on this collection. */
 class SyncUnsupported extends Error {}
@@ -51,11 +54,20 @@ export function canonicalPath(href: string): string {
 const idsOf = (path: string, split: SplitMap) => split[path]?.map((uid) => `${path}#${uid}`) ?? [path];
 
 /** One CalDAV object as raw objects, one per UID. Records (or clears) the href in `split`. */
-export function rawObjects(path: string, etag: string, payload: string, split: SplitMap): RawObject[] {
-  const uids = [...new Set(groupUidsOf(payload))];
-  if (uids.length > 1) split[path] = uids;
-  else delete split[path];
-  return uids.map((uid) => ({ id: uids.length > 1 ? `${path}#${uid}` : path, etag, groupUid: uid, payload }));
+export function rawObjects(path: string, etag: string, payload: string, split: SplitMap, log?: Logger): RawObject[] {
+  const parsed = parseCalendar(payload);
+  const uids = [...new Set(parsed.resources.map((resource) => resource.uid))];
+  if (uids.length <= 1) {
+    delete split[path];
+    return uids.map((uid) => ({ id: path, etag, groupUid: uid, payload }));
+  }
+  if (uids.length > MAX_UIDS_PER_OBJECT) {
+    delete split[path];
+    log?.warn('skipping a CalDAV object with too many UIDs', { count: uids.length, limit: MAX_UIDS_PER_OBJECT });
+    return [];
+  }
+  split[path] = uids;
+  return parsed.resources.map((resource) => ({ id: `${path}#${resource.uid}`, etag, groupUid: resource.uid, payload: serializeCalendar({ props: [], resources: [resource] }) }));
 }
 
 /** Multigets `paths` in batches and yields one page each; the ids a changed href no longer has are deleted with it. */
@@ -76,7 +88,7 @@ async function* fetchChanged(dav: DavSession, collection: string, paths: string[
     const deletes: string[] = [];
     for (const [path, { etag, data }] of got) {
       const before = idsOf(path, split);
-      const objects = rawObjects(path, etag, data, split);
+      const objects = rawObjects(path, etag, data, split, dav.log);
       const now = new Set(objects.map((o) => o.id));
       upserts.push(...objects);
       deletes.push(...before.filter((id) => !now.has(id)));
@@ -111,14 +123,21 @@ async function* viaSyncCollection(dav: DavSession, collection: string, cursor: E
   const deleted = new Set<string>();
   const isChild = childOf(collection);
   const self = dirPath(collection);
+  let rounds = 0;
+  let restarted = false;
+  const unfinished = () => new ProviderUnavailableError('the CalDAV server never finished its sync-collection answer');
 
   for (;;) {
+    if (++rounds > MAX_SYNC_ROUNDS || changed.size + deleted.size > MAX_SYNC_HREFS) throw unfinished();
     let result;
     try {
       result = await dav.syncCollection(collection, token, [403, 405, 501]);
     } catch (error) {
       if (!(error instanceof DavStatusError)) throw error;
-      if (error.status === 403 && token && /valid-sync-token/.test(error.body)) {
+      if (error.status === 403 && /valid-sync-token/.test(error.body)) {
+        if (!token || restarted) throw unfinished();
+        restarted = true;
+        rounds = 0;
         token = '';
         snapshot = true;
         split = {};
@@ -147,6 +166,7 @@ async function* viaSyncCollection(dav: DavSession, collection: string, cursor: E
         throw new ProviderUnavailableError(`the sync-collection answer is incomplete (status ${entry.status})`);
       }
     }
+    if (changed.size + deleted.size > MAX_SYNC_HREFS) throw unfinished();
     token = result.syncToken;
     if (!truncated) break;
   }

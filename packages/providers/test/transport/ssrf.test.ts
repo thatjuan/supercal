@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from 'bun:test';
 import { gzipSync } from 'node:zlib';
-import { createGuardedFetch, EgressBlockedError, type EgressPolicy, type Resolver } from '../../src/transport/index.ts';
+import { createGuardedFetch, credentialTarget, EgressBlockedError, type EgressPolicy, type Resolver } from '../../src/transport/index.ts';
 import { isPublicIp, normalizeUrl, resolveTarget } from '../../src/transport/policy.ts';
 import { runChild } from './child.ts';
 
@@ -128,7 +128,7 @@ test('gzip with sloppy MIME is decoded after a same-origin redirect', async () =
   expect(redirected.finalUrl).toBe(`${origin}/host`);
 });
 
-test('cross-origin redirects drop credentials, cookies and conditional headers unless the host is a credential host', async () => {
+test('cross-origin redirects drop credentials, cookies and conditional headers unless the origin is trusted', async () => {
   const req = {
     url: `${origin}/cross`,
     headers: { Cookie: 'a=1', 'If-None-Match': '"v1"', 'If-Modified-Since': 'Sat, 07 Nov 2026 00:00:00 GMT' },
@@ -137,7 +137,7 @@ test('cross-origin redirects drop credentials, cookies and conditional headers u
   const stripped = await guarded(req);
   expect(stripped.finalUrl).toBe(`${other}/headers`);
   expect(JSON.parse(text(stripped.body))).toEqual({ authorization: null, cookie: null, 'if-none-match': null, 'if-modified-since': null });
-  const kept = await guarded({ ...req, credentialHosts: ['*.test'] });
+  const kept = await guarded({ ...req, credentialOrigins: [other] });
   expect(JSON.parse(text(kept.body))).toEqual({
     authorization: `Basic ${btoa('u:p')}`,
     cookie: 'a=1',
@@ -157,4 +157,55 @@ test('ambient proxy is rejected before network access', async () => {
   } finally {
     proxy.stop(true);
   }
+});
+
+test('refused, mixed, empty and failed DNS answers share a tenant message; addresses stay in operator logs', async () => {
+  const cases: { resolve: Resolver; reason: EgressBlockedError['reason']; address?: string }[] = [
+    { resolve: loopback, reason: 'address', address: '127.0.0.1' },
+    { resolve: async () => [{ address: '1.1.1.1', family: 4 }, { address: '10.2.3.4', family: 4 }], reason: 'mixed-dns', address: '10.2.3.4' },
+    { resolve: async () => [], reason: 'unresolved' },
+    { resolve: async () => { throw new Error('DNS failed at 192.168.1.2'); }, reason: 'unresolved' },
+  ];
+  for (const { resolve, reason, address } of cases) {
+    const logged: unknown[] = [];
+    const fetch = createGuardedFetch({ allow: [] }, { resolve, log: (entry) => logged.push(entry) });
+    try {
+      await fetch({ url: 'https://calendar.test/private' });
+      throw new Error('expected refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EgressBlockedError);
+      if (!(error instanceof EgressBlockedError)) throw error;
+      expect(error.message).toBe('The destination calendar.test is blocked or could not be resolved');
+      expect(error.reason).toBe(reason);
+      expect(error.address).toBe(address);
+      expect(logged).toEqual([{ host: 'calendar.test', reason, ...(address && { address }) }]);
+    }
+  }
+});
+
+test('same-hostname redirects to another port drop Authorization', async () => {
+  let received: string | null = 'not called';
+  const destination = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (req) => { received = req.headers.get('authorization'); return new Response('ok'); } });
+  const source = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.redirect(`http://calendar.test:${destination.port}/`) });
+  try {
+    const sourceOrigin = `http://calendar.test:${source.port}`;
+    const destinationOrigin = `http://calendar.test:${destination.port}`;
+    const fetch = createGuardedFetch({ allow: [sourceOrigin, destinationOrigin].map((origin) => ({ origin, cidrs: ['127.0.0.1/32'] })) }, { resolve: loopback });
+    await fetch({ url: sourceOrigin, credentials: { kind: 'basic', username: 'u', password: 'p' }, credentialOrigins: [sourceOrigin], credentialHosts: ['calendar.test'] });
+    expect(received).toBeNull();
+  } finally {
+    source.stop(true);
+    destination.stop(true);
+  }
+});
+
+test('credential hosts require HTTPS on the default port; exact origins preserve configured ports', () => {
+  const hosts = ['caldav.icloud.com', '*.icloud.com'];
+  expect(credentialTarget(new URL('https://p42-caldav.icloud.com'), [], hosts)).toBe(true);
+  expect(credentialTarget(new URL('https://p42-caldav.icloud.com:443'), [], hosts)).toBe(true);
+  expect(credentialTarget(new URL('https://p42-caldav.icloud.com:8443'), [], hosts)).toBe(false);
+  expect(credentialTarget(new URL('http://p42-caldav.icloud.com'), [], hosts)).toBe(false);
+  expect(credentialTarget(new URL('https://caldav.icloud.com.evil.test'), [], hosts)).toBe(false);
+  expect(credentialTarget(new URL('http://calendar.test:8080'), ['http://calendar.test:8080'], [])).toBe(true);
+  expect(credentialTarget(new URL('http://calendar.test:8081'), ['http://calendar.test:8080'], [])).toBe(false);
 });
