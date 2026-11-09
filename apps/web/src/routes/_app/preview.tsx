@@ -8,23 +8,20 @@ import { keepPreviousData } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { $api } from '../../api.ts';
-import { browserZone, ZONES } from '../../lib/zones.ts';
+import { browserZone } from '../../lib/zones.ts';
 import { feedSearch, useFeedCalendars, useFeeds, type Publication } from '../../components/calendars/data.ts';
 import { FeedPicker } from '../../components/calendars/feed-picker.tsx';
 import { FALLBACK_COLOR } from '../../components/calendars/settings-fields.tsx';
 import { PageHeader } from '../../components/page-header.tsx';
 import { Agenda } from '../../components/preview/agenda.tsx';
 import { weekOf, windowOf, type Occurrence } from '../../components/preview/layout.ts';
+import { WeekControls, type View } from '../../components/preview/week-controls.tsx';
 import { WeekGrid } from '../../components/preview/week-grid.tsx';
-import { Button } from '../../components/ui/button.tsx';
 import { ColorChip } from '../../components/ui/calendar-color.tsx';
 import { cx } from '../../components/ui/cx.ts';
-import { Icon } from '../../components/ui/icon.tsx';
 import { ProblemAlert, toProblem } from '../../components/ui/problem-alert.tsx';
 
 export const Route = createFileRoute('/_app/preview')({ validateSearch: feedSearch, component: Preview });
-
-type View = 'week' | 'agenda';
 
 function Preview() {
   const search = Route.useSearch();
@@ -47,7 +44,9 @@ function Preview() {
 
   const enabled = publications.filter((p) => p.enabled);
   const byId = new Map(publications.map((p) => [p.id, p]));
-  const shown = (occurrences.data?.items ?? []).filter((o) => !hidden.has(o.publicationId));
+  const shown = (occurrences.data?.items ?? [])
+    .filter((o) => !hidden.has(o.publicationId))
+    .map((o) => ({ ...o, key: `${o.publicationId}/${o.outputUid}/${o.recurrenceId}`, title: o.summary }));
   const colorOfOccurrence = (o: Occurrence) => {
     const publication = byId.get(o.publicationId);
     return o.color ?? (publication ? colorOf(publication) : null) ?? FALLBACK_COLOR;
@@ -60,7 +59,6 @@ function Preview() {
     });
 
   const error = feedsError ?? occurrences.error;
-  const range = `${days[0]?.toLocaleString('en', { month: 'short', day: 'numeric' })} – ${days[6]?.toLocaleString('en', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
   return (
     <>
@@ -68,43 +66,7 @@ function Preview() {
       {feed && <FeedPicker feeds={feeds} value={feed} onChange={(id) => void navigate({ search: { feed: id } })} />}
       {error && <ProblemAlert problem={toProblem(error)} className="mb-5 max-w-2xl" />}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex items-center">
-          <Button size="sm" variant="ghost" aria-label="Previous week" onClick={() => setAnchor((d) => d.subtract({ weeks: 1 }))}>
-            <Icon name="chevron-left" className="size-4" />
-          </Button>
-          <Button size="sm" onClick={() => setAnchor(Temporal.Now.plainDateISO(zone))}>
-            Today
-          </Button>
-          <Button size="sm" variant="ghost" aria-label="Next week" onClick={() => setAnchor((d) => d.add({ weeks: 1 }))}>
-            <Icon name="chevron-right" className="size-4" />
-          </Button>
-        </div>
-        <h2 className="mr-auto text-[17px] font-semibold tracking-tight">{range}</h2>
-        <div role="group" aria-label="View" className="inline-flex rounded-[9px] border border-line bg-surface p-0.5 shadow-xs">
-          {(['week', 'agenda'] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={view === v}
-              onClick={() => setView(v)}
-              className={cx('h-7 rounded-[7px] px-3 text-[13px] font-medium capitalize', view === v ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:text-ink')}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-2 text-[13px] text-ink-2">
-          Time zone
-          <select value={zone} onChange={(e) => setZone(e.target.value)} className="h-8 max-w-48 rounded-lg border border-line-strong bg-surface px-2 text-[13px] text-ink shadow-xs">
-            {ZONES.map((z) => (
-              <option key={z} value={z}>
-                {z === browserZone ? `${z} (this browser)` : z}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <WeekControls days={days} view={view} onView={setView} zone={zone} onZone={setZone} onAnchor={setAnchor} />
 
       <Legend publications={enabled} hidden={hidden} onToggle={toggle} colorOf={(p) => colorOf(p) ?? FALLBACK_COLOR} />
 
@@ -114,7 +76,7 @@ function Preview() {
         </p>
       )}
 
-      {view === 'week' ? <WeekGrid days={days} occurrences={shown} zone={zone} colorOf={colorOfOccurrence} /> : <Agenda days={days} occurrences={shown} zone={zone} colorOf={colorOfOccurrence} />}
+      {view === 'week' ? <WeekGrid days={days} items={shown} zone={zone} colorOf={colorOfOccurrence} /> : <Agenda days={days} items={shown} zone={zone} colorOf={colorOfOccurrence} />}
     </>
   );
 }

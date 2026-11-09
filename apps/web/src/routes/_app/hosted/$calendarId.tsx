@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { isProblem, meQuery } from '../../../api.ts';
 import { ToastProvider } from '../../../components/accounts/toast.tsx';
 import { AvailabilityTab } from '../../../components/hosted/availability.tsx';
+import { EventsTab } from '../../../components/hosted/events/events-tab.tsx';
 import { atLeast, RESTORE_NOTE, useHostedCalendar, useRestoreCalendar, type Access, type CalendarTabProps, type HostedCalendar } from '../../../components/hosted/data.ts';
 import { LinksTab } from '../../../components/hosted/links.tsx';
 import { SettingsTab } from '../../../components/hosted/settings-tab.tsx';
@@ -17,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui
 
 /** The detail page's tabs, in order. To add one, add its row here and its panel to `PANELS`. */
 const TABS = [
+  { id: 'events', label: 'Events', min: 'read' },
   { id: 'availability', label: 'Availability', min: 'free-busy' },
   { id: 'sharing', label: 'Sharing', min: 'manage' },
   { id: 'links', label: 'Links', min: 'manage' },
@@ -24,6 +26,7 @@ const TABS = [
 ] as const satisfies readonly { id: string; label: string; min: Access }[];
 
 const PANELS: Record<(typeof TABS)[number]['id'], (props: CalendarTabProps) => ReactNode> = {
+  events: EventsTab,
   availability: AvailabilityTab,
   sharing: SharingTab,
   links: LinksTab,
