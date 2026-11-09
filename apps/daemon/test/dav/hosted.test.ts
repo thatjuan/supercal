@@ -1,5 +1,5 @@
 import { MAX_OBJECT_BYTES } from '@supercal/core';
-import { auditLog, closeDb, connectDb, davLogin, feed, member, migrate, organization, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
+import { apikey, apiKeyTenant, auditLog, closeDb, connectDb, davLogin, feed, member, migrate, organization, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
 import { scratchDatabase, sqlState, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -16,6 +16,7 @@ import { createFeedService } from '../../src/feeds/service.ts';
 import { createCalendar } from '../../src/hosted/calendars.ts';
 import { testAuth, testSecrets } from '../auth-fixture.ts';
 import { eventIcs } from './fixture.ts';
+import { departureActors, basicCredentials } from '../departure-fixture.ts';
 import { DEVICE, seedHosted } from './hosted-fixture.ts';
 
 const principal: Principal = { kind: 'user', via: 'session', userId: DEVICE.userId, tenantId: DEVICE.tenantId, role: 'member', isOperator: false };
@@ -310,4 +311,34 @@ describe.skipIf(!testDatabaseUrl)('hosted CalDAV', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ type: 'https://supercal.dev/problems/dav-login-quota' });
   });
+  test('removal deletes API keys and device logins permanently, even after re-invitation', async () => {
+    const actors = await departureActors(auth.auth);
+    const issued = await actors.apiCall('/api-keys', 'POST', { name: 'Departure key', expiresInDays: 1 });
+    expect(issued.status).toBe(201);
+    const key = z.object({ id: z.string(), key: z.string() }).parse(await issued.json());
+    const bearer = { Authorization: `Bearer ${key.key}`, 'content-type': 'application/json' };
+    const readKey = () => actors.api.request('/api/v1/me', { headers: bearer });
+    expect((await readKey()).status).toBe(200);
+    const successor = await actors.api.request('/api/v1/api-keys', { method: 'POST', headers: bearer, body: JSON.stringify({ name: 'Successor' }) });
+    expect(successor.status).toBe(403);
+    // Bearer keys may still enroll a CalDAV-only device, by product policy.
+    const issuedDevice = await actors.api.request('/api/v1/dav-logins', { method: 'POST', headers: bearer, body: JSON.stringify({ name: 'Departure device' }) });
+    expect(issuedDevice.status).toBe(201);
+    const device = createdLogin.parse(await issuedDevice.json());
+    const readDevice = () => dav.request(`/dav/${device.username}/cal/`, { method: 'PROPFIND', headers: { Authorization: basicCredentials(device) } });
+    expect((await readDevice()).status).toBe(207);
+    expect((await actors.authCall('/organization/leave', actors.cookie, { organizationId: actors.tenantId })).status).toBe(404);
+    await actors.remove();
+    expect((await readKey()).status).toBe(401);
+    expect((await readDevice()).status).toBe(401);
+    expect(await unsafeDb().select().from(apikey).where(eq(apikey.id, key.id))).toEqual([]);
+    expect(await unsafeDb().select().from(apiKeyTenant).where(eq(apiKeyTenant.apiKeyId, key.id))).toEqual([]);
+    expect(await unsafeDb().select().from(davLogin).where(eq(davLogin.userId, actors.departing.id))).toEqual([]);
+    await actors.rejoin();
+    expect((await readKey()).status).toBe(401);
+    expect((await readDevice()).status).toBe(401);
+    const keys = await actors.apiCall('/api-keys');
+    expect(await keys.json()).toMatchObject({ items: [] });
+  });
+
 });

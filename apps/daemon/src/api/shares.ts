@@ -3,7 +3,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { calendarAccount, calendarShare, member, sourceCalendar, user, withTenant, type CalendarShare, type AccountId, type SourceCalendarId, type TenantTx } from '@supercal/db';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Principal } from '../auth/principal.ts';
-import { ACCESS_LEVELS, requireAccess, requireGrantChange, type Access } from '../hosted/access.ts';
+import { ACCESS_LEVELS, pruneOrphanLinks, requireAccess, requireGrantChange, type Access } from '../hosted/access.ts';
 import { audit, createApiApp, etagOf, ifMatchHeaders, NotFound, Problem, ProblemError, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
 
 const Grantee = z.discriminatedUnion('type', [
@@ -100,6 +100,7 @@ export const shareRoutes = createApiApp()
       requireIfMatch(c, etagOf(before));
       const [row] = await tx.update(calendarShare).set({ access: input.access, updatedAt: new Date(Math.max(Date.now(), before.updatedAt.getTime() + 1)) }).where(eq(calendarShare.id, shareId)).returning();
       if (!row) throw new NotFound('No such share');
+      if (input.access !== 'manage') await pruneOrphanLinks(tx, id);
       await audit(tx, principal, 'share.update', { type: 'calendar_share', id: shareId });
       return info(tx, row);
     });
@@ -114,6 +115,7 @@ export const shareRoutes = createApiApp()
       if (!row) throw new NotFound('No such share');
       requireGrantChange(access, row.access);
       await tx.delete(calendarShare).where(eq(calendarShare.id, shareId));
+      await pruneOrphanLinks(tx, id);
       await audit(tx, principal, 'share.delete', { type: 'calendar_share', id: shareId });
     });
     return c.body(null, 204);

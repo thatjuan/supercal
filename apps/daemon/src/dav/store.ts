@@ -47,7 +47,7 @@ export async function loginByUsername(username: string): Promise<DavLogin | null
     const [device] = await tx.select({ id: davLogin.id, tenantId: davLogin.tenantId, userId: davLogin.userId, passwordHash: davLogin.passwordHash })
       .from(davLogin).where(eq(davLogin.username, username));
     if (device) return { kind: 'user', ...device };
-    const [row] = await tx.select({ id: feed.id, tenantId: feed.tenantId, passwordHash: feed.caldavPasswordHash })
+    const [row] = await tx.select({ id: feed.id, tenantId: feed.tenantId, ownerUserId: feed.ownerUserId, passwordHash: feed.caldavPasswordHash })
       .from(feed).where(eq(feed.caldavUsername, username));
     return row?.passwordHash ? { kind: 'feed', ...row, passwordHash: row.passwordHash } : null;
   });

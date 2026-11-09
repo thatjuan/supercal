@@ -8,7 +8,7 @@
  *
  * A cached login remembers the password hash it was verified against; the request handler
  * compares it with the credential row it loads anyway, so rotation or revocation takes effect
- * before a notification arrives. Device membership is rechecked separately on every request.
+ * before a notification arrives. Owner membership is rechecked separately on every request.
  */
 import type { DavLoginId, FeedId, TenantId } from '@supercal/db';
 
@@ -23,7 +23,7 @@ const SWEEP_AT = 10_000;
 
 /** What the username lookup returns: the columns `supercal_control` may read. */
 export type DavLogin =
-  | { kind: 'feed'; id: FeedId; tenantId: TenantId; passwordHash: string }
+  | { kind: 'feed'; ownerUserId: string; id: FeedId; tenantId: TenantId; passwordHash: string }
   | { kind: 'user'; id: DavLoginId; userId: string; tenantId: TenantId; passwordHash: string };
 
 export type AuthResult =

@@ -6,7 +6,7 @@ const basic = (user: string, pass: string) => `Basic ${Buffer.from(`${user}:${pa
 let login: DavLogin;
 
 beforeAll(async () => {
-  login = { kind: 'feed', id: 'feed_1' as FeedId, tenantId: 'org_1' as TenantId, passwordHash: await Bun.password.hash('secret', { algorithm: 'argon2id' }) };
+  login = { kind: 'feed', ownerUserId: 'user_1', id: 'feed_1' as FeedId, tenantId: 'org_1' as TenantId, passwordHash: await Bun.password.hash('secret', { algorithm: 'argon2id' }) };
 });
 
 function setup() {

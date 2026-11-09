@@ -5,19 +5,29 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { stubMatchMedia } from '../../test/match-media.ts';
 import { renderApp } from '../../test/render.tsx';
-import { hosted } from './fixtures.ts';
+import { hosted, me } from './fixtures.ts';
 import { LinksTab } from './links.tsx';
+
+vi.mock('../../auth.ts', () => ({
+  authClient: {
+    organization: {
+      getFullOrganization: () => Promise.resolve({
+        data: { members: [{ userId: 'user_grace', user: { id: 'user_grace', name: 'Grace' } }] }, error: null,
+      }),
+    },
+  },
+}));
 
 const TOKEN = 'secret-token';
 const URL_HTTPS = `https://cal.example.invalid/ics/l/${TOKEN}.ics`;
 
 type CalendarLink = components['schemas']['CalendarLink'];
 
-const link = (overrides: Partial<CalendarLink> = {}): CalendarLink => ({ id: 'lnk_1', name: 'Website', privacy: 'busy-only', expiresAt: null, createdAt: '2026-11-01T00:00:00Z', ...overrides });
+const link = (overrides: Partial<CalendarLink> = {}): CalendarLink => ({ id: 'lnk_1', createdBy: 'user_1', name: 'Website', privacy: 'busy-only', expiresAt: null, createdAt: '2026-11-01T00:00:00Z', ...overrides });
 const created = { ...link(), token: TOKEN, url: URL_HTTPS, webcalUrl: `webcal://cal.example.invalid/ics/l/${TOKEN}.ics`, subscribe: { google: 'https://g.example.invalid/', outlookPersonal: 'https://o.example.invalid/p', outlookWork: 'https://o.example.invalid/w' } };
 
 async function show(items: CalendarLink[], write?: (request: Request) => Response) {
-  respondWith({ '/api/v1/calendars/cal_1/links': { items } }, write);
+  respondWith({ '/api/v1/me': me, '/api/v1/calendars/cal_1/links': { items } }, write);
   return renderApp(<LinksTab loaded={{ calendar: hosted('cal_1'), etag: 'W/"1"' }} mine reload={() => Promise.resolve(undefined)} />);
 }
 
@@ -97,4 +107,10 @@ test('renaming an expired link leaves its expiry out, since the server refuses a
 
   await waitFor(() => expect(requests('PATCH')).toHaveLength(1));
   expect(await requests('PATCH')[0]?.clone().json()).toEqual({ name: 'Blog' });
+});
+
+test('each link shows its creator from the member list, including a grantee', async () => {
+  await show([link({ createdBy: 'user_grace' })]);
+  const row = within(await screen.findByRole('listitem', { name: 'Website' }));
+  await waitFor(() => row.getByText(/Created by Grace/));
 });

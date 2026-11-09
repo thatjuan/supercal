@@ -180,7 +180,11 @@ export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) 
     const host = tokenHost ?? c.req.header('Host') ?? 'localhost';
     // Buffer any body now (Hono caches it), so a slow upload holds no connection or calendar lock.
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') await c.req.text();
-    const current = login.kind === 'user' ? await membership(login.userId, login.tenantId) : null;
+    const current = await membership(login.kind === 'user' ? login.userId : login.ownerUserId, login.tenantId);
+    if (login.kind === 'feed' && !current) {
+      feedAuth.forget(login.id);
+      return unauthorized();
+    }
 
     return withTenant(login.tenantId, async (tx) => {
       let principal: Principal | null = null;

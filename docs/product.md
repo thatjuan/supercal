@@ -57,7 +57,12 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   events do not count; private events do. Readable device CalDAV collections also support
   free-busy REPORT. Free-busy-only grants use REST and receive no event-change stream.
 - Revoke a grant for the recipient's next request. Removing a tenant member deletes personal
-  grants, so re-inviting them does not restore access. Tenant-wide grants apply to current members.
+  grants, device logins and API keys, clears feed credentials, and disables connected accounts while
+  erasing their provider credentials. Their targets stop syncing; already synced events stay published
+  until an admin deletes the account. Re-inviting requires new credentials and personal grants;
+  tenant-wide grants apply to current members. A ban pauses authenticated access, feed subscriptions and syncing until it is lifted.
+- A published link created by a grantee ends when they lose manage access or leave the tenant.
+  Calendar owners' own links keep working without an account. The Links tab shows each creator.
 - Sharing stays within one tenant; people outside it use published links. Invitation emails,
   CalDAV sharing extensions and per-user names, colours and alerts are not included. Event
   alarms are shared by everyone who can edit the event. A shared calendar cannot be republished

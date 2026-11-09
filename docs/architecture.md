@@ -141,8 +141,8 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
   `accessibleCalendars` share that calculation; the listing uses one query. Grants require
   current tenant membership and never cross tenants. Owners and tenant admins have `owner`
   access; only they can grant, downgrade or revoke `manage`. Better Auth's existing
-  `afterRemoveMember` organization hook deletes the departing user's personal grants through
-  `withTenant`, then publishes auth revocation. Re-invitation does not restore old grants.
+  `afterRemoveMember` organization hook calls `endMembership` after the member row is gone;
+  see §17 for departure cleanup. Re-invitation does not restore personal grants or credentials.
 
   | Capability | free-busy | read | write | manage | owner/admin |
   | --- | --- | --- | --- | --- | --- |
@@ -609,6 +609,20 @@ colleague's name and email. Non-members return 404, sharing with the owner retur
 and duplicate grants return 409 with the existing `id`. PATCH honors `If-Match`.
 Grant changes audit `share.create`, `share.update` and `share.delete` and apply on the next
 request. Managers cannot change or remove an existing `manage` grant, including their own.
+
+`endMembership` deletes personal grants, device logins and API key bindings, clears both feed
+credential hashes, disables non-hosted accounts and erases their credentials in one tenant transaction.
+It parks account targets, deletes push leases and marks calendars stale; synced data remains published
+until an admin deletes the account. Afterwards it deletes the unbound key secrets and publishes auth
+revocation. `/organization/leave` is disabled because Better Auth skips the removal hook there.
+Bans are reversible and skip cleanup: ICS, feed CalDAV and provider jobs recheck membership before
+opening a tenant transaction, as sessions, API keys and device logins already do. There is no backfill.
+
+`pruneOrphanLinks` uses one SQL DELETE after grant removal, downgrade or member departure.
+Calendar owners retain their own bearer links; other creators need current membership and admin,
+personal manage or tenant-wide manage access. Link metadata includes `createdBy`, shown in the
+Links tab. Departed owners appear as “Former member”; admins can still list their calendars and feeds.
+API keys can only be issued from signed-in sessions; bearer keys cannot mint successors.
 
 Calendar list and get include effective `access` and `owner: { id, name }`. Free-busy grants
 receive only id, name, colour, kind, time zone, state, access and owner, with empty

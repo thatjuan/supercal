@@ -102,6 +102,7 @@ export const apiKeyRoutes = createApiApp()
   .openapi(createApiKey, async (c) => {
     const { name, expiresInDays } = c.req.valid('json');
     const principal = c.var.principal;
+    if (principal.via !== 'session') throw new Forbidden('API keys can only be issued from a signed-in session');
     // 1. Create the key. Better Auth writes through its own adapter, outside any transaction of ours.
     const created = await c.var.auth.api.createApiKey({
       body: { name, userId: principal.userId, expiresIn: expiresInDays === undefined ? null : expiresInDays * 86_400 },

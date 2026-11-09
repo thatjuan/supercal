@@ -28,6 +28,8 @@ import {
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { createDav } from '../src/dav/index.ts';
+import { departureActors, FeedCredentials, basicCredentials } from './departure-fixture.ts';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import ICAL from 'ical.js';
@@ -356,4 +358,28 @@ describe.skipIf(!testDatabaseUrl)('ICS feeds', () => {
     expect(cold.ms).toBeLessThan(400);
     expect(cached.ms).toBeLessThan(20);
   }, 120_000);
+  test('ban blocks cached feed ICS and CalDAV access, unban restores it, and removal ends it', async () => {
+    const actors = await departureActors(fixture!.auth);
+    const response = await actors.apiCall('/feeds', 'POST', { name: 'Banned feed' });
+    expect(response.status).toBe(201);
+    const saved = FeedCredentials.parse(await response.json());
+    const dav = createDav({ secrets: testSecrets, bus: idleBus });
+    const ics = createIcs({ secrets: testSecrets, cacheBytes: 1024 });
+    const read = () => ics.request(`/${saved.credentials.ics.token}/all.ics`);
+    const readDav = () => dav.request(`/dav/${saved.credentials.caldav.username}/cal/`, {
+      method: 'PROPFIND', headers: { Authorization: basicCredentials(saved.credentials.caldav) },
+    });
+    expect((await read()).status).toBe(200);
+    expect((await readDav()).status).toBe(207);
+    await actors.ban(true);
+    expect((await read()).status).toBe(404);
+    expect((await readDav()).status).toBe(401);
+    await actors.ban(false);
+    expect((await read()).status).toBe(200);
+    expect((await readDav()).status).toBe(207);
+    await actors.remove();
+    expect((await read()).status).toBe(404);
+    expect((await readDav()).status).toBe(401);
+  });
+
 });
