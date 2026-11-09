@@ -73,7 +73,24 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
   const touched = page.upserts.filter((o) => o.payload === null).map((o) => o.id);
   for (const batch of chunks(touched)) await tx.update(sourceObject).set({ seenGeneration: job.version }).where(where(batch));
 
-  for (const batch of chunks(page.upserts.filter((o) => o.payload !== null))) {
+  // Bound both bind parameters and payload bytes in each insert; one oversized object stands alone.
+  const rows = page.upserts.filter((o) => o.payload !== null).map((o) => ({ ...o, payload: typeof o.payload === 'string' ? o.payload : JSON.stringify(o.payload) }));
+  function* batches() {
+    let batch: typeof rows = [];
+    let bytes = 0;
+    for (const row of rows) {
+      const size = Buffer.byteLength(row.payload);
+      if (batch.length && (batch.length >= BATCH || bytes + size > 8 * 1024 * 1024)) {
+        yield batch;
+        batch = [];
+        bytes = 0;
+      }
+      batch.push(row);
+      bytes += size;
+    }
+    if (batch.length) yield batch;
+  }
+  for (const batch of batches()) {
     // An object that moved to another group leaves its old group to rebuild.
     const moved = await tx
       .select({ groupUid: sourceObject.groupUid })
@@ -88,7 +105,7 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
           sourceCalendarId: calendar.id,
           providerObjectId: o.id,
           format,
-          payload: typeof o.payload === 'string' ? o.payload : JSON.stringify(o.payload),
+          payload: o.payload,
           etag: o.etag,
           groupUid: o.groupUid,
           originalStart: o.originalStart ?? null,

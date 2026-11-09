@@ -12,16 +12,18 @@ export type EgressBlockReason =
   | 'credentials-in-url'
   | 'address'
   | 'mixed-dns'
+  | 'unresolved'
   | 'downgrade'
   | 'too-many-redirects'
   | 'proxy-env';
 
-/** Thrown when the guard refuses a request. Messages name hosts or addresses, never full URLs. */
+/** Thrown when the guard refuses a request. Messages name hosts, never resolved addresses or full URLs. */
 export class EgressBlockedError extends Error {
   override readonly name = 'EgressBlockedError';
   constructor(
     readonly reason: EgressBlockReason,
     message: string,
+    readonly address?: string,
   ) {
     super(message);
   }
@@ -84,11 +86,15 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<
 export async function resolveTarget(url: URL, rules: AllowRules, resolve: Resolver, signal: AbortSignal) {
   const host = url.hostname.replace(/^\[|\]$/g, '');
   const family = isIP(host);
-  const answers = family ? [{ address: host, family }] : await abortable(resolve(host), signal);
-  if (!answers.length) throw new Error(`DNS returned no addresses for ${host}`);
+  const message = `The destination ${host} is blocked or could not be resolved`;
+  const answers = family ? [{ address: host, family }] : await abortable(Promise.resolve().then(() => resolve(host)), signal).catch((error: unknown) => {
+    if (signal.aborted) throw error;
+    throw new EgressBlockedError('unresolved', message);
+  });
+  if (!answers.length) throw new EgressBlockedError('unresolved', message);
   const blocked = answers.filter((a) => !isPublicIp(a.address) && !explicitlyAllowed(url, a.address, rules));
-  if (blocked.length === answers.length) throw new EgressBlockedError('address', `Blocked address ${blocked[0]!.address} for ${host}`);
-  if (blocked.length) throw new EgressBlockedError('mixed-dns', `Mixed DNS answer for ${host} includes blocked ${blocked[0]!.address}`);
+  if (blocked.length === answers.length) throw new EgressBlockedError('address', message, blocked[0]!.address);
+  if (blocked.length) throw new EgressBlockedError('mixed-dns', message, blocked[0]!.address);
   // No dual-stack failover: only the first vetted address is dialled.
   return answers[0]!;
 }

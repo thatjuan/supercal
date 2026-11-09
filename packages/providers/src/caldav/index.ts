@@ -12,8 +12,8 @@ import { syncCollection, type CaldavCursor } from './sync.ts';
 export { UnsupportedAuthError } from './session.ts';
 export type { CaldavCursor } from './sync.ts';
 
-/** Where and as whom an account logs in. Credentials are sent only to `hosts`. */
-export type CaldavLogin = { serverUrl: string; username: string; password: string; hosts: string[] };
+/** Where and as whom an account logs in. Credentials are sent only to `origins` or trusted HTTPS `hosts`. */
+export type CaldavLogin = { serverUrl: string; username: string; password: string; hosts: string[]; origins: string[] };
 
 export const ICLOUD_SERVER_URL = 'https://caldav.icloud.com/';
 /** iCloud redirects into partition hosts (`p42-caldav.icloud.com`); credentials may follow there. */
@@ -44,13 +44,16 @@ export function createCaldavAdapter(provider: 'caldav' | 'icloud', login: (crede
 export const caldavAdapter = createCaldavAdapter('caldav', (credentials) => {
   if (credentials.provider !== 'caldav') throw new AuthFailedError('these are not CalDAV credentials');
   const { serverUrl, username, password } = credentials;
-  return { serverUrl, username, password, hosts: [new URL(serverUrl).hostname] };
+  const server = new URL(serverUrl);
+  const origins = [server.origin];
+  if (server.protocol === 'http:') origins.push(`https://${server.hostname}`);
+  return { serverUrl, username, password, hosts: [], origins };
 });
 
 /** iCloud's login for stored credentials; tests point `serverUrl` at a local server. */
 export function icloudLogin(credentials: ProviderCredentials, serverUrl = ICLOUD_SERVER_URL): CaldavLogin {
   if (credentials.provider !== 'icloud') throw new AuthFailedError('these are not iCloud credentials');
-  return { serverUrl, username: credentials.appleId, password: credentials.appSpecificPassword, hosts: ICLOUD_HOSTS };
+  return { serverUrl, username: credentials.appleId, password: credentials.appSpecificPassword, hosts: ICLOUD_HOSTS, origins: [new URL(serverUrl).origin] };
 }
 
 export const icloudAdapter = createCaldavAdapter('icloud', (credentials) => icloudLogin(credentials));

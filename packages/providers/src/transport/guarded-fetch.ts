@@ -9,8 +9,10 @@ export type GuardedRequest = {
   headers?: Record<string, string>;
   body?: string;
   credentials?: { kind: 'basic'; username: string; password: string } | { kind: 'bearer'; token: string };
-  /** Hosts that keep credentials across cross-origin redirects: exact (`caldav.icloud.com`) or `*.icloud.com` for any subdomain. */
+  /** HTTPS hosts on the default port that keep credentials across redirects: exact (`caldav.icloud.com`) or `*.icloud.com` for any subdomain. */
   credentialHosts?: string[];
+  /** Exact origins that keep credentials across redirects. */
+  credentialOrigins?: string[];
   /** Default 8 MiB, enforced on the wire and decoded body separately. */
   maxBytes?: number;
   /** Default 10 s, covering DNS, connect and body for every hop. */
@@ -26,8 +28,8 @@ export type GuardedFetch = (req: GuardedRequest) => Promise<GuardedResponse>;
 
 export type GuardedFetchOptions = {
   resolve?: Resolver;
-  /** Called once per hop with the host and status only; full URLs and bodies are never logged. */
-  log?: (entry: { host: string; status: number }) => void;
+  /** Records HTTP status or a refusal, including its resolved address for operators; never full URLs or bodies. */
+  log?: (entry: { host: string; status: number } | { host: string; reason: EgressBlockedError['reason']; address?: string }) => void;
 };
 
 const MiB = 1024 * 1024;
@@ -41,6 +43,10 @@ const isDecodable = (encoding: string): encoding is keyof typeof DECODERS => Obj
 /** Whether `host` matches an exact pattern (`caldav.icloud.com`) or a `*.icloud.com` subdomain pattern. */
 export const hostMatches = (host: string, patterns: string[]) =>
   patterns.some((pattern) => (pattern.startsWith('*.') ? host.endsWith(pattern.slice(1).toLowerCase()) : host === pattern.toLowerCase()));
+
+/** Whether credentials may reach an exact origin or a trusted host over HTTPS on port 443. */
+export const credentialTarget = (url: URL, origins: string[], patterns: string[]) =>
+  origins.includes(url.origin) || (url.protocol === 'https:' && url.port === '' && hostMatches(url.hostname, patterns));
 
 function authorization(credentials: NonNullable<GuardedRequest['credentials']>): string {
   return credentials.kind === 'basic'
@@ -62,7 +68,7 @@ export function createGuardedFetch(policy: EgressPolicy, { resolve = systemResol
     if (Object.keys(process.env).some((key) => PROXY_VARIABLES.has(key.toUpperCase()) && process.env[key])) {
       throw new EgressBlockedError('proxy-env', 'Guarded transport requires a proxy-free environment');
     }
-    const { method = 'GET', maxBytes = 8 * MiB, timeoutMs = 10_000, maxRedirects = 5, credentialHosts = [] } = req;
+    const { method = 'GET', maxBytes = 8 * MiB, timeoutMs = 10_000, maxRedirects = 5, credentialHosts = [], credentialOrigins = [] } = req;
     const timeout = AbortSignal.timeout(timeoutMs);
     const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout;
     const headers = new Headers(req.headers);
@@ -70,7 +76,10 @@ export function createGuardedFetch(policy: EgressPolicy, { resolve = systemResol
     let current = normalizeUrl(req.url);
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      const target = await resolveTarget(current, rules, resolve, signal);
+      const target = await resolveTarget(current, rules, resolve, signal).catch((error: unknown) => {
+        if (error instanceof EgressBlockedError) log?.({ host: current.host, reason: error.reason, ...(error.address && { address: error.address }) });
+        throw error;
+      });
       const hostname = current.hostname.replace(/^\[|\]$/g, '');
       const pinned = new URL(current);
       pinned.hostname = target.family === 6 ? `[${target.address}]` : target.address;
@@ -100,7 +109,7 @@ export function createGuardedFetch(policy: EgressPolicy, { resolve = systemResol
       const next = normalizeUrl(new URL(location, current).href);
       if (current.protocol === 'https:' && next.protocol !== 'https:') throw new EgressBlockedError('downgrade', `HTTPS downgrade from ${current.host}`);
       if (response.status === 303 && method !== 'GET') throw new Error(`Unexpected method-changing redirect from ${current.host}`);
-      if (next.origin !== current.origin && !hostMatches(next.hostname, credentialHosts)) {
+      if (next.origin !== current.origin && !credentialTarget(next, credentialOrigins, credentialHosts)) {
         for (const key of ORIGIN_BOUND_HEADERS) headers.delete(key);
       }
       current = next;
