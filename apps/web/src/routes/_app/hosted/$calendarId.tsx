@@ -1,11 +1,14 @@
-/** One hosted calendar: tabs from `TABS`, each shown only at or above its access level. A `free-busy` grantee has no tab, only the name and owner. */
+/** One hosted calendar: tabs from `TABS`, each shown only at or above its access level. A `free-busy` grantee has one tab, Availability. */
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { isProblem, meQuery } from '../../../api.ts';
 import { ToastProvider } from '../../../components/accounts/toast.tsx';
+import { AvailabilityTab } from '../../../components/hosted/availability.tsx';
 import { atLeast, RESTORE_NOTE, useHostedCalendar, useRestoreCalendar, type Access, type CalendarTabProps, type HostedCalendar } from '../../../components/hosted/data.ts';
+import { LinksTab } from '../../../components/hosted/links.tsx';
 import { SettingsTab } from '../../../components/hosted/settings-tab.tsx';
+import { SharingTab } from '../../../components/hosted/sharing.tsx';
 import { PageHeader } from '../../../components/page-header.tsx';
 import { Button } from '../../../components/ui/button.tsx';
 import { Panel } from '../../../components/ui/panel.tsx';
@@ -13,9 +16,19 @@ import { ProblemAlert, toProblem } from '../../../components/ui/problem-alert.ts
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs.tsx';
 
 /** The detail page's tabs, in order. To add one, add its row here and its panel to `PANELS`. */
-const TABS = [{ id: 'settings', label: 'Settings', min: 'read' }] as const satisfies readonly { id: string; label: string; min: Access }[];
+const TABS = [
+  { id: 'availability', label: 'Availability', min: 'free-busy' },
+  { id: 'sharing', label: 'Sharing', min: 'manage' },
+  { id: 'links', label: 'Links', min: 'manage' },
+  { id: 'settings', label: 'Settings', min: 'read' },
+] as const satisfies readonly { id: string; label: string; min: Access }[];
 
-const PANELS: Record<(typeof TABS)[number]['id'], (props: CalendarTabProps) => ReactNode> = { settings: SettingsTab };
+const PANELS: Record<(typeof TABS)[number]['id'], (props: CalendarTabProps) => ReactNode> = {
+  availability: AvailabilityTab,
+  sharing: SharingTab,
+  links: LinksTab,
+  settings: SettingsTab,
+};
 
 export const Route = createFileRoute('/_app/hosted/$calendarId')({
   validateSearch: (search: Record<string, unknown>): { tab?: string } => (typeof search.tab === 'string' ? { tab: search.tab } : {}),

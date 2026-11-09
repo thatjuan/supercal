@@ -30,8 +30,8 @@ export function PrivacyExample({ privacy, color }: { privacy: Privacy; color: st
   return <EventBlock color={color} title={title} meta={meta} className="w-full" />;
 }
 
-/** A radio group of the three levels, each with its explanation and preview. */
-export function PrivacyPicker({ value, onChange, color }: { value: Privacy; onChange: (privacy: Privacy) => void; color: string }) {
+/** A radio group of the three levels, each with its explanation and preview. `null` selects none, for a choice with no default. */
+export function PrivacyPicker({ value, onChange, color }: { value: Privacy | null; onChange: (privacy: Privacy) => void; color: string }) {
   return (
     <fieldset className="grid gap-2">
       <legend className="mb-1.5 text-sm font-semibold">Privacy</legend>

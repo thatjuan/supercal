@@ -38,7 +38,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 
 ### Calendar sharing and free-busy
 
-- Share a calendar with a colleague or everyone in the tenant through the API. Free-busy grants
+- Share a calendar with a colleague or everyone in the tenant from the Hosted screen or through the API. Free-busy grants
   expose busy time; read adds event details; write adds event editing; manage adds calendar
   metadata, shares and published links. Only owners and tenant admins can grant or remove
   manage access, delete a calendar or restore it. Imported calendars support free-busy and read.
@@ -50,7 +50,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   explicit read-or-higher grant for a colleague's calendar. Writable hosted shares support event creation, editing and deletion. Calendar
   apps cannot delete a shared calendar, even with manage access. Changing between read and
   write requires a client resync because object addresses and ETags change.
-- Query up to 50 calendars for a window of at most 62 days through `POST /api/v1/free-busy`.
+- See one calendar's busy time, week by week, on its Availability tab on the Hosted screen. Query up to 50 calendars for a window of at most 62 days through `POST /api/v1/free-busy`.
   Results merge busy and tentative time, with busy taking precedence. Cancelled and transparent
   events do not count; private events do. Readable device CalDAV collections also support
   free-busy REPORT. Free-busy-only grants use REST and receive no event-change stream.
@@ -59,7 +59,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - Sharing stays within one tenant; people outside it use published links. Invitation emails,
   CalDAV sharing extensions and per-user names, colours and alerts are not included. Event
   alarms are shared by everyone who can edit the event. A shared calendar cannot be republished
-  in the recipient's feed. The dashboard adds no sharing screen.
+  in the recipient's feed.
 
 ### Feeds and publications
 
@@ -77,7 +77,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - One CalDAV login carries every publication in a feed (Apple Calendar, Thunderbird, DAVx5, Fantastical, BusyCal, Evolution).
 - Apple devices get a one-tap configuration profile download.
 - Every publication also has an ICS URL, and the feed has a combined ICS that flattens all publications into one calendar.
-- Publish one hosted or imported calendar with a view-only link. Anyone holding the URL can subscribe without an account. Each calendar can have up to 20 links, each with an explicit `full`, `title-only` or `busy-only` privacy level, an optional label and expiry, and independent revocation. A client can receive full details while a personal website shows only busy time.
+- Publish one hosted or imported calendar with a view-only link, managed for hosted calendars from the Hosted screen. Anyone holding the URL can subscribe without an account. Each calendar can have up to 20 links, each with an explicit `full`, `title-only` or `busy-only` privacy level, an optional label and expiry, and independent revocation. A client can receive full details while a personal website shows only busy time.
 - Published links hide attendees, organizers, attachments, comments, alarms and custom event properties even in full mode. Events marked private or confidential show as “Busy”. Privacy is fixed at creation; create a new link to change it. The secret URL is shown once, with webcal, Google Calendar and Outlook subscription links. Deleting a calendar pauses its links; restoring it resumes them.
 - One-click subscribe links for Google Calendar and Outlook, plus a QR code for phones.
 - **Sinks**: for Google and Outlook users who need fast updates, Supercal mirrors chosen publications into calendars it creates in the user's own Google or Microsoft account. Sinks never send invitations and are never ingested back as sources. (Pending spike R10.)
