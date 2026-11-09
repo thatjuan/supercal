@@ -260,8 +260,8 @@ Change notifications, like Google push, need an HTTPS `SUPERCAL_PUBLIC_URL`; Mic
 Create a separate login for each device under **Settings → Calendar apps**: choose **New device**,
 name it, and copy the server URL, username and password. The password is shown only then. In Apple
 Calendar, Thunderbird or DAVx5, add a CalDAV account using those three values. Discovery finds your
-active hosted calendars. You can create calendars and create, edit and delete events from the app;
-Supercal has no event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
+active hosted calendars. You can create calendars and create, edit and delete events from the app,
+as you can in the dashboard's event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
 `/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
 MKCALENDAR, PROPPATCH, PUT and DELETE.
 

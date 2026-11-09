@@ -32,7 +32,9 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   Create, edit and delete events from calendar apps through read-write CalDAV; create and rename
   calendars there too. Each device gets its own named DAV login with a password shown once and
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
-  The REST API also supports JSCalendar event reads and writes; the dashboard adds no event editor.
+  The dashboard also shows each hosted calendar's events and creates, edits and deletes them,
+  including one occurrence or this and following. The REST API supports JSCalendar event reads and
+  writes, and calendar apps stay fully supported.
 - Keep at most 100 retained hosted calendars per user, with up to 50,000 objects per calendar and
   1 MiB per object. Attendees are stored as data; Supercal sends no invitations.
 
@@ -113,7 +115,7 @@ Screens, in the order a new user meets them:
 2. Onboarding: connect the first account, watch calendars appear, get the subscribe step.
 3. Accounts: list with health badges, add, reconnect, remove.
 4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy.
-5. Hosted: create, edit, reorder, delete and restore hosted calendars; import and export `.ics` files; calendars shared with you.
+5. Hosted: create, edit, reorder, delete and restore hosted calendars; a week and agenda view of each calendar's events, with create, edit and delete; import and export `.ics` files; calendars shared with you.
 6. Virtual calendars: create by picking calendars; see the merged result.
 7. Preview: week/agenda view of exactly what the feed publishes, updating live.
 8. Subscribe: per-client instructions, CalDAV credentials, ICS links, QR code, Apple profile, Google/Outlook buttons, sinks.
