@@ -6,7 +6,7 @@
 import { apiKeyTenant, closeDb, connectDb, member, migrate } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { createApi } from '../src/api/index.ts';
 import { idleBus } from '../src/bus.ts';
@@ -67,6 +67,20 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
     await Promise.all(fixtures.map((fixture) => fixture.close()));
     await closeDb();
     await scratch?.drop();
+  });
+
+  test('an oversized sign-in body is rejected before Better Auth sees it', async () => {
+    const fixture = fixtures[0];
+    if (!fixture) throw new Error('auth fixture missing');
+    const handler = spyOn(fixture.auth, 'handler');
+    try {
+      const res = await call('open', '/api/auth/sign-in/email', { body: { email: 'user@example.test', password: 'x'.repeat(1024 * 1024) } });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ message: 'Request body too large' });
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      handler.mockRestore();
+    }
   });
 
   describe('invite mode', () => {

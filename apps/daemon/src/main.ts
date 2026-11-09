@@ -79,6 +79,8 @@ const webDir = config.SUPERCAL_WEB_DIR ?? defaultWebDir();
 let schedulerTickedAt: number | null = null;
 const server = Bun.serve({
   port: config.PORT,
+  maxRequestBodySize: 9 * 1024 * 1024,
+  idleTimeout: 10,
   fetch: createApp(roles, {
     auth,
     secrets,

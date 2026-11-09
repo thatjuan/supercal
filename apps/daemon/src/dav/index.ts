@@ -8,6 +8,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import { sourceCalendar, sourceObject, resourcesIn, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
 import { Hono, type Context } from 'hono';
 import { getConnInfo } from 'hono/bun';
+import { bodyLimit } from 'hono/body-limit';
 import { and, eq } from 'drizzle-orm';
 import { audit, ProblemError } from '../api/kit/index.ts';
 import { requireAccess, atLeast } from '../hosted/access.ts';
@@ -35,6 +36,9 @@ const READ_METHODS = ['OPTIONS', 'PROPFIND', 'REPORT', 'GET', 'HEAD'];
 const WRITE_METHODS = ['PUT', 'DELETE', 'POST', 'PROPPATCH', 'MKCALENDAR', 'MKCOL', 'MOVE', 'COPY', 'LOCK', 'UNLOCK'];
 /** sync-collection without `<d:limit>` still answers in one page; this only bounds a runaway. */
 const SYNC_PAGE_MAX = 1_000_000;
+const MAX_DAV_BODY = 2 * 1024 * 1024;
+const MAX_MULTIGET_HREFS = 1000;
+const MAX_MULTIGET_BYTES = 32 * 1024 * 1024;
 
 type Node =
   | { kind: 'root'; path: string }
@@ -176,8 +180,9 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
       return result.status === 429 ? c.body('too many failed logins', 429, { 'Retry-After': String(result.retryAfter ?? 300) }) : unauthorized();
     const { login } = result;
     const host = tokenHost ?? c.req.header('Host') ?? 'localhost';
-    // Buffer a device's write body now (Hono caches it), so a slow upload holds no connection or calendar lock.
-    if (login.kind === 'user' && WRITE_METHODS.includes(c.req.method)) await c.req.text();
+    // Buffer any body now (Hono caches it), so a slow upload holds no connection or calendar lock.
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') await c.req.text();
+    const current = login.kind === 'user' ? await membership(login.userId, login.tenantId) : null;
 
     return withTenant(login.tenantId, async (tx) => {
       let principal: Principal | null = null;
@@ -196,7 +201,6 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
         displayName = account.feed.name;
         email = account.ownerEmail;
       } else {
-        const current = await membership(login.userId, login.tenantId);
         principal = current ? { kind: 'user', via: 'davLogin', userId: login.userId, tenantId: login.tenantId, ...current } : null;
         const account = principal && await loadUserAccount(tx, login.id, host, principal);
         if (!account || account.login.passwordHash !== login.passwordHash || account.login.userId !== login.userId) {
@@ -317,22 +321,31 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     }
 
     if (is(body, NS.CALDAV, 'calendar-multiget')) {
-      const requested = children(body, NS.DAV, 'href').map((h) => {
+      const hrefs = children(body, NS.DAV, 'href');
+      if (hrefs.length > MAX_MULTIGET_HREFS) return davError(403, 'd:number-of-matches-within-limits');
+      const seen = new Set<string>();
+      const requested = hrefs.map((h) => {
         const pathname = URL.parse(h.text, 'http://x')?.pathname ?? '';
         let name = '';
         try { name = pathname.startsWith(path) ? decodeURIComponent(pathname.slice(path.length)) : ''; } catch {}
         return { href: h.text, entry: index?.byHref.get(name) };
+      }).filter(({ href, entry }) => {
+        const key = entry?.uid ?? href;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
       const rendered = await view.objects(tx, requested.flatMap((q) => (q.entry ? [q.entry.uid] : [])));
-      return multistatus(
-        w,
-        requested
-          .map(({ href, entry }) => {
-            const o = entry && rendered.get(entry.uid);
-            return o ? object(entry.uid, o.ics) : statusResponse(href, '404 Not Found');
-          })
-          .join(''),
-      );
+      const parts: string[] = [];
+      let bytes = 0;
+      for (const { href, entry } of requested) {
+        const o = entry && rendered.get(entry.uid);
+        const part = o ? object(entry.uid, o.ics) : statusResponse(href, '404 Not Found');
+        bytes += Buffer.byteLength(part);
+        if (bytes > MAX_MULTIGET_BYTES) return davError(403, 'd:number-of-matches-within-limits');
+        parts.push(part);
+      }
+      return multistatus(w, parts.join(''));
     }
 
     if (is(body, NS.DAV, 'sync-collection')) {
@@ -452,6 +465,9 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
   }
 
   const app = new Hono();
+  const davBody = bodyLimit({ maxSize: MAX_DAV_BODY, onError: (c) => c.body('request body too large', 413) });
+  app.use('/dav/*', davBody);
+  app.use('/', davBody);
   app.all('/.well-known/caldav', (c) => c.redirect('/dav/', 301));
   app.on('OPTIONS', ['/dav', '/dav/*'], (c) => {
     if (!c.req.header('Authorization')) return c.body(null, 200, { DAV: DAV_HEADER, Allow: READ_METHODS.join(', ') });

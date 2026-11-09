@@ -15,6 +15,7 @@
 import { pushLease, sourceCalendar, syncTarget, withControl, withTenant, type PushLease } from '@supercal/db';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { accountTargets } from '../sync/context.ts';
@@ -22,7 +23,7 @@ import { secretHash } from '../sync/push.ts';
 import { wakeTargets } from '../sync/scheduler.ts';
 
 const Notifications = z.object({
-  value: z.array(z.object({ subscriptionId: z.string(), clientState: z.string().nullish(), lifecycleEvent: z.string().nullish() })),
+  value: z.array(z.object({ subscriptionId: z.string(), clientState: z.string().nullish(), lifecycleEvent: z.string().nullish() })).max(1000),
 });
 type Notification = z.infer<typeof Notifications>['value'][number];
 type Lease = Pick<PushLease, 'providerChannelId' | 'tenantId' | 'accountId' | 'targetId'>;
@@ -83,6 +84,7 @@ async function lifecycle(event: string, lease: Lease) {
 }
 
 export const microsoftHooks = new Hono()
+  .use('/hooks/microsoft/*', bodyLimit({ maxSize: 256 * 1024 }))
   .post('/hooks/microsoft', async (c) => {
     const echo = validation(c);
     if (echo) return echo;
