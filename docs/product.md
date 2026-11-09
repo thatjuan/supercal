@@ -23,8 +23,8 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 ### Hosted calendars
 
 - Create calendars whose events live in Supercal, alongside calendars imported from providers.
-- Manage their name, colour, description, time zone and order through the API. Hosted calendars
-  start unpublished; enable their publications to include them in feeds, ICS, read-only CalDAV,
+- Manage their name, colour, description, time zone and order from the dashboard or the API. Hosted
+  calendars start unpublished; enable their publications to include them in feeds, ICS, read-only CalDAV,
   virtual calendars and sinks.
 - Delete a hosted calendar reversibly for 30 days. Restore retains its events; publications stay
   disabled and removed virtual memberships must be added again. After 30 days, deletion is permanent.
@@ -32,13 +32,15 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   Create, edit and delete events from calendar apps through read-write CalDAV; create and rename
   calendars there too. Each device gets its own named DAV login with a password shown once and
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
-  The REST API also supports JSCalendar event reads and writes; the dashboard adds no event editor.
+  The dashboard also shows each hosted calendar's events and creates, edits and deletes them,
+  including one occurrence or this and following. The REST API supports JSCalendar event reads and
+  writes, and calendar apps stay fully supported.
 - Keep at most 100 retained hosted calendars per user, with up to 50,000 objects per calendar and
   1 MiB per object. Attendees are stored as data; Supercal sends no invitations.
 
 ### Calendar sharing and free-busy
 
-- Share a calendar with a colleague or everyone in the tenant through the API. Free-busy grants
+- Share a calendar with a colleague or everyone in the tenant from the Hosted screen or through the API. Free-busy grants
   expose busy time; read adds event details; write adds event editing; manage adds calendar
   metadata, shares and published links. Only owners and tenant admins can grant or remove
   manage access, delete a calendar or restore it. Imported calendars support free-busy and read.
@@ -50,7 +52,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   explicit read-or-higher grant for a colleague's calendar. Writable hosted shares support event creation, editing and deletion. Calendar
   apps cannot delete a shared calendar, even with manage access. Changing between read and
   write requires a client resync because object addresses and ETags change.
-- Query up to 50 calendars for a window of at most 62 days through `POST /api/v1/free-busy`.
+- See one calendar's busy time, week by week, on its Availability tab on the Hosted screen. Query up to 50 calendars for a window of at most 62 days through `POST /api/v1/free-busy`.
   Results merge busy and tentative time, with busy taking precedence. Cancelled and transparent
   events do not count; private events do. Readable device CalDAV collections also support
   free-busy REPORT. Free-busy-only grants use REST and receive no event-change stream.
@@ -59,7 +61,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - Sharing stays within one tenant; people outside it use published links. Invitation emails,
   CalDAV sharing extensions and per-user names, colours and alerts are not included. Event
   alarms are shared by everyone who can edit the event. A shared calendar cannot be republished
-  in the recipient's feed. The dashboard adds no sharing screen.
+  in the recipient's feed.
 
 ### Feeds and publications
 
@@ -77,7 +79,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - One CalDAV login carries every publication in a feed (Apple Calendar, Thunderbird, DAVx5, Fantastical, BusyCal, Evolution).
 - Apple devices get a one-tap configuration profile download.
 - Every publication also has an ICS URL, and the feed has a combined ICS that flattens all publications into one calendar.
-- Publish one hosted or imported calendar with a view-only link. Anyone holding the URL can subscribe without an account. Each calendar can have up to 20 links, each with an explicit `full`, `title-only` or `busy-only` privacy level, an optional label and expiry, and independent revocation. A client can receive full details while a personal website shows only busy time.
+- Publish one hosted or imported calendar with a view-only link, managed for hosted calendars from the Hosted screen. Anyone holding the URL can subscribe without an account. Each calendar can have up to 20 links, each with an explicit `full`, `title-only` or `busy-only` privacy level, an optional label and expiry, and independent revocation. A client can receive full details while a personal website shows only busy time.
 - Published links hide attendees, organizers, attachments, comments, alarms and custom event properties even in full mode. Events marked private or confidential show as “Busy”. Privacy is fixed at creation; create a new link to change it. The secret URL is shown once, with webcal, Google Calendar and Outlook subscription links. Deleting a calendar pauses its links; restoring it resumes them.
 - One-click subscribe links for Google Calendar and Outlook, plus a QR code for phones.
 - **Sinks**: for Google and Outlook users who need fast updates, Supercal mirrors chosen publications into calendars it creates in the user's own Google or Microsoft account. Sinks never send invitations and are never ingested back as sources. (Pending spike R10.)
@@ -112,12 +114,13 @@ Screens, in the order a new user meets them:
 1. Sign up / sign in (email + password; magic link when an email provider is configured).
 2. Onboarding: connect the first account, watch calendars appear, get the subscribe step.
 3. Accounts: list with health badges, add, reconnect, remove.
-4. Calendars: every source calendar grouped by account; publish toggle, rename, colour, privacy.
-5. Virtual calendars: create by picking calendars; see the merged result.
-6. Preview: week/agenda view of exactly what the feed publishes, updating live.
-7. Subscribe: per-client instructions, CalDAV credentials, ICS links, QR code, Apple profile, Google/Outlook buttons, sinks.
-8. Settings: profile, API keys, feed credential rotation, extra feeds.
-9. Tenant admin: members and invitations, roles, audit log. Operator: tenants.
+4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy.
+5. Hosted: create, edit, reorder, delete and restore hosted calendars; a week and agenda view of each calendar's events, with create, edit and delete; import and export `.ics` files; calendars shared with you.
+6. Virtual calendars: create by picking calendars; see the merged result.
+7. Preview: week/agenda view of exactly what the feed publishes, updating live.
+8. Subscribe: per-client instructions, CalDAV credentials, ICS links, QR code, Apple profile, Google/Outlook buttons, sinks.
+9. Settings: profile, calendar apps (a CalDAV login per device), API keys, feed credential rotation, extra feeds.
+10. Tenant admin: members and invitations, roles, audit log. Operator: tenants.
 
 ## Out of scope for v1
 

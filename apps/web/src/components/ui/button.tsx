@@ -12,18 +12,16 @@ const SIZES = { sm: 'h-7 px-2.5 text-[13px]', md: 'h-9 px-4 text-[15px]' } as co
 
 export type ButtonProps = ComponentProps<'button'> & { variant?: keyof typeof VARIANTS; size?: keyof typeof SIZES };
 
-/** The one button. `variant` defaults to `secondary`; `type` defaults to `button`, so forms opt in to `submit`. */
-export function Button({ variant = 'secondary', size = 'md', className, type = 'button', ...props }: ButtonProps) {
-  return (
-    <button
-      type={type}
-      className={cx(
-        'inline-flex items-center justify-center gap-1.5 rounded-[9px] font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50',
-        VARIANTS[variant],
-        SIZES[size],
-        className,
-      )}
-      {...props}
-    />
+/** A button's classes, for a link that should look like one. */
+export const buttonClass = ({ variant = 'secondary', size = 'md', className }: { variant?: keyof typeof VARIANTS | undefined; size?: keyof typeof SIZES | undefined; className?: string | undefined } = {}) =>
+  cx(
+    'inline-flex items-center justify-center gap-1.5 rounded-[9px] font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50',
+    VARIANTS[variant],
+    SIZES[size],
+    className,
   );
+
+/** The one button. `variant` defaults to `secondary`; `type` defaults to `button`, so forms opt in to `submit`. */
+export function Button({ variant, size, className, type = 'button', ...props }: ButtonProps) {
+  return <button type={type} className={buttonClass({ variant, size, className })} {...props} />;
 }

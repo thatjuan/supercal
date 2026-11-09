@@ -23,6 +23,12 @@ const PATHS = {
       <path d="M7 2v5m10-5v5M3 9h18" />
     </>
   ),
+  'calendar-plus': (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M7 2v5m10-5v5M3 9h18M12 12v7m-3.5-3.5h7" />
+    </>
+  ),
   layers: <path d="m3 8 9-5 9 5-9 5-9-5Zm0 4 9 5 9-5M3 16l9 5 9-5" />,
   home: <path d="m3 10 9-8 9 8v11h-7v-7h-4v7H3Z" />,
   users: <path d="M2 20v-3c0-5 14-5 14 0v3M9 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7-6c5-1 6 7 1 7m2 4c3 0 3 3 3 6" />,

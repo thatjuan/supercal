@@ -1,22 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { stubMatchMedia } from '../../test/match-media.ts';
-import type { Account, AccountGroup, Calendar } from './data.ts';
+import type { AccountGroup, Calendar } from './data.ts';
 import { NEEDS_TWO, VirtualBuilder } from './virtual-builder.tsx';
 
-const account = (id: string, displayName: string): Account => ({
-  id,
-  provider: 'ics',
-  ownerUserId: 'user_1',
-  displayName,
-  email: null,
-  serverUrl: null,
-  status: 'active',
-  statusDetail: null,
-  autoPublish: true,
-});
-
-const calendar = (id: string, accountId: string, name: string): Calendar => ({
+const calendar = (id: string, accountId: string, name: string): Extract<Calendar, { kind: 'connected' }> => ({
   id,
   kind: 'connected',
   access: 'owner',
@@ -37,8 +25,8 @@ const calendar = (id: string, accountId: string, name: string): Calendar => ({
 
 const row = (c: Calendar) => ({ calendar: c, passthrough: undefined, virtuals: [] });
 const groups: AccountGroup[] = [
-  { account: account('acc_1', 'Work account'), rows: [row(calendar('cal_work', 'acc_1', 'Work')), row(calendar('cal_team', 'acc_1', 'Team'))] },
-  { account: account('acc_2', 'Home account'), rows: [row(calendar('cal_home', 'acc_2', 'Home'))] },
+  { id: 'acc_1', title: 'Work account', subtitle: 'ICS link', rows: [row(calendar('cal_work', 'acc_1', 'Work')), row(calendar('cal_team', 'acc_1', 'Team'))] },
+  { id: 'acc_2', title: 'Home account', subtitle: 'ICS link', rows: [row(calendar('cal_home', 'acc_2', 'Home'))] },
 ];
 
 beforeEach(stubMatchMedia);

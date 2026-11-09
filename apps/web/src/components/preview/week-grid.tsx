@@ -1,20 +1,36 @@
-/** The preview's week view: an all-day lane on top, then 24 hour rows with timed events side by side. */
+/**
+ * The week view of Preview and of a hosted calendar's Events tab: an all-day lane on top, then 24
+ * hour rows with timed events side by side. With `onSelect`, each block is a button.
+ */
 import { Temporal } from '@js-temporal/polyfill';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { EventBlock } from '../ui/calendar-color.tsx';
 import { cx } from '../ui/cx.ts';
-import { clockTime, layoutWeek, type Occurrence } from './layout.ts';
+import { clockTime, layoutWeek, type GridItem } from './layout.ts';
 
 const HOUR_PX = 44;
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const SCROLL_TO_HOUR = 7;
 
-type Props = { days: Temporal.PlainDate[]; occurrences: Occurrence[]; zone: string; colorOf: (o: Occurrence) => string };
+type Props<T extends GridItem> = { days: Temporal.PlainDate[]; items: T[]; zone: string; colorOf: (item: T) => string; onSelect?: ((item: T) => void) | undefined };
 
 const dayLabel = (day: Temporal.PlainDate) => day.toLocaleString('en', { weekday: 'short' });
 
-export function WeekGrid({ days, occurrences, zone, colorOf }: Props) {
-  const { timed, allDay, allDayRows } = layoutWeek(occurrences, days, zone);
+/** A struck-through title for a cancelled event. */
+const titleOf = (item: GridItem): ReactNode => (item.cancelled ? <span className="line-through">{item.title}</span> : item.title);
+
+/** `block` as a keyboard-reachable button when the view is selectable. */
+const selectable = (block: ReactNode, select: (() => void) | undefined) =>
+  select ? (
+    <button type="button" onClick={select} className="block size-full rounded-md text-left focus-visible:outline-2 focus-visible:outline-accent">
+      {block}
+    </button>
+  ) : (
+    block
+  );
+
+export function WeekGrid<T extends GridItem>({ days, items, zone, colorOf, onSelect }: Props<T>) {
+  const { timed, allDay, allDayRows } = layoutWeek(items, days, zone);
   const today = Temporal.Now.plainDateISO(zone);
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -51,11 +67,11 @@ export function WeekGrid({ days, occurrences, zone, colorOf }: Props) {
           >
             {allDay.map(({ occurrence, firstDay, lastDay, row }) => (
               <div
-                key={`${occurrence.publicationId}/${occurrence.outputUid}/${occurrence.recurrenceId}`}
+                key={occurrence.key}
                 className="px-0.5"
                 style={{ gridColumn: `${firstDay + 1} / ${lastDay + 2}`, gridRow: row + 1 }}
               >
-                <EventBlock color={colorOf(occurrence)} title={occurrence.summary} className="py-0.5" />
+                {selectable(<EventBlock color={colorOf(occurrence)} title={titleOf(occurrence)} className="py-0.5" />, onSelect && (() => onSelect(occurrence)))}
               </div>
             ))}
           </div>
@@ -79,9 +95,9 @@ export function WeekGrid({ days, occurrences, zone, colorOf }: Props) {
               .filter((block) => block.day === index)
               .map(({ occurrence, startMinute, endMinute, column, columns: count }) => (
                 <div
-                  key={`${occurrence.publicationId}/${occurrence.outputUid}/${occurrence.recurrenceId}`}
+                  key={occurrence.key}
                   data-testid="timed-event"
-                  title={`${occurrence.summary}\n${clockTime(occurrence.start, zone)}–${clockTime(occurrence.end, zone)}${occurrence.location ? `\n${occurrence.location}` : ''}`}
+                  title={`${occurrence.title}\n${clockTime(occurrence.start, zone)}–${clockTime(occurrence.end, zone)}${occurrence.location ? `\n${occurrence.location}` : ''}`}
                   className="absolute px-px"
                   style={{
                     top: (startMinute / 60) * HOUR_PX,
@@ -90,12 +106,15 @@ export function WeekGrid({ days, occurrences, zone, colorOf }: Props) {
                     width: `${100 / count}%`,
                   }}
                 >
-                  <EventBlock
-                    color={colorOf(occurrence)}
-                    title={occurrence.summary}
-                    meta={endMinute - startMinute >= 45 ? [clockTime(occurrence.start, zone), occurrence.location].filter(Boolean).join(' · ') : undefined}
-                    className="h-full overflow-hidden"
-                  />
+                  {selectable(
+                    <EventBlock
+                      color={colorOf(occurrence)}
+                      title={titleOf(occurrence)}
+                      meta={endMinute - startMinute >= 45 ? [clockTime(occurrence.start, zone), occurrence.location].filter(Boolean).join(' · ') : undefined}
+                      className="h-full overflow-hidden"
+                    />,
+                    onSelect && (() => onSelect(occurrence)),
+                  )}
                 </div>
               ))}
           </div>

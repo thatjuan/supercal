@@ -414,7 +414,7 @@ Draft states were read from the IETF datatracker on 2026-11-08.
 | --- | --- | --- |
 | iCalendar: RFC 5545, RFC 7986 | Published | Stored format and interchange format. Already used. |
 | jCal: RFC 7265 | Published | Internal form in `resource.data`. Already used. |
-| CalDAV: RFC 4791, with WebDAV RFC 4918, RFC 6578 (sync), RFC 3744 (privileges), RFC 5397 (principal) | Published | Implemented read-write for hosted calendars (#26). Supercal adds no calendar UI, so calendar apps are how people edit, and CalDAV is what those apps speak. |
+| CalDAV: RFC 4791, with WebDAV RFC 4918, RFC 6578 (sync), RFC 3744 (privileges), RFC 5397 (principal) | Published | Implemented read-write for hosted calendars (#26). The dashboard has an event editor for hosted calendars, built on the REST API; calendar apps remain a first-class way to edit, and CalDAV is what those apps speak. |
 | JSCalendar 2.0: `draft-ietf-calext-jscalendarbis-22`, obsoletes RFC 8984 | IETF Last Call | JSON event format of the REST API (#25), pinned to this revision. |
 | JSCalendar and iCalendar mapping: `draft-ietf-calext-jscalendar-icalendar-29` | IETF Last Call | The conversion rules for #25, including `JSPROP` for properties with no iCalendar equivalent. |
 | JMAP Calendars: `draft-ietf-jmap-calendars-33` | RFC Editor queue, blocked | Not implemented now. Stalwart and Cyrus implement it on the server, client work is limited to early projects, and we found no shipping support in Apple Calendar or Thunderbird. JSCalendar events and share levels that map onto JMAP rights (#28) keep a later JMAP facade small. |
@@ -512,7 +512,8 @@ nullable `accountId` (null for hosted), description, sort order, update time and
 Hosted freshness is `{ lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false }`.
 The hosted account is absent from account listings, and every account-by-id route returns 404
 for it. The public Account provider union remains the five connected providers. The dashboard
-continues grouping by visible accounts and adds no hosted calendar screen.
+groups connected calendars by visible account, lists hosted calendars in a group of their own, and
+manages them on the Hosted screen.
 
 ### Maintenance
 
