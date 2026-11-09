@@ -87,6 +87,22 @@ describe.skipIf(!testDatabaseUrl)('tenant isolation', () => {
     expect(await sqlState(withControl((tx) => tx.select({ provider: calendarAccount.provider }).from(calendarAccount)))).toBe('42501');
   });
 
+  test('supercal_control reads live resource metadata but cannot read event columns or delete live rows', async () => {
+    const calendarId = newId('cal');
+    const { maxSeq } = await withTenant(tenantA, async (tx) => {
+      await tx.insert(sourceCalendar).values({ id: calendarId, tenantId: tenantA, accountId: accountA, providerCalendarId: 'control-metadata', name: 'C' });
+      return recordChanges(tx, [{ op: 'upsert', sourceCalendarId: calendarId, uid: 'control-live', resource: { uid: 'control-live', master: null, overrides: [], timezones: {} }, revision: 'secret', sequence: null, lastModified: null, organizer: null, span: { start: new Date('2026-11-09T09:00:00Z'), end: new Date('2026-11-09T10:00:00Z') }, completeness: 'complete' }]);
+    });
+    const rows = await withControl((tx) => tx.select({ calendarId: resource.sourceCalendarId, seq: resource.seq, changedAt: resource.changedAt, deleted: resource.deleted }).from(resource).where(eq(resource.sourceCalendarId, calendarId)));
+    expect(rows).toEqual([{ calendarId, seq: maxSeq!, changedAt: expect.any(Date), deleted: false }]);
+    for (const column of [resource.data, resource.uid, resource.revision, resource.tenantId])
+      expect(await sqlState(withControl((tx) => tx.select({ denied: column }).from(resource)))).toBe('42501');
+    // Attempt a live-row deletion without the purge's own deleted predicate, exercising RLS itself.
+    const deleted = await withControl((tx) => tx.execute(sql`delete from ${resource} where ${resource.sourceCalendarId} = ${calendarId} returning ${resource.seq}`));
+    expect(deleted).toHaveLength(0);
+    expect(await withTenant(tenantA, (tx) => resourcesIn(tx, [calendarId]))).toHaveLength(1);
+  });
+
   test('supercal_control can delete a tenant, cascading through its RLS tables', async () => {
     await withControl((tx) => tx.delete(organization).where(eq(organization.id, tenantB)));
     expect(await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.tenantId, tenantB))).toEqual([]);

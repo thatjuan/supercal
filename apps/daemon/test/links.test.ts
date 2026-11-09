@@ -1,5 +1,5 @@
 /** Published-link management, tenant isolation, secret handling and ICS lifecycle over real Postgres. */
-import { parseCalendar, summary } from '@supercal/core';
+import { parseCalendar, RENDER_VERSION, summary } from '@supercal/core';
 import { auditLog, calendarAccount, calendarLink, closeDb, connectDb, member, migrate, organization, recordChanges, sourceCalendar, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
 import { scratchDatabase, sqlState, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
@@ -74,7 +74,7 @@ describe.skipIf(!testDatabaseUrl)('published calendar links', () => {
     const first = await get(link.token);
     expect(first.status).toBe(200);
     const etag = first.headers.get('etag') ?? '';
-    expect(etag).toMatch(new RegExp(`^"lnk\\.${link.id}\\.0\\.\\d+\\.\\d+\\.1"$`));
+    expect(etag).toMatch(new RegExp(`^"lnk\\.${link.id}\\.0\\.\\d+\\.\\d+\\.${RENDER_VERSION}"$`));
     const body = await first.text();
     expect(body).toContain('SUMMARY:Busy');
     expect(body).toContain('X-WR-CALNAME:Published calendar');

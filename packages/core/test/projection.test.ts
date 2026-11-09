@@ -426,3 +426,64 @@ describe("projectCombined", () => {
     expect(out).toEqual([]);
   });
 });
+
+
+describe("effective classification", () => {
+  const recurring = (overrideClass?: string) => parse(calendar(
+    ["UID:private-series@example.com", "DTSTART:20261102T090000Z", "DURATION:PT1H", "RRULE:FREQ=WEEKLY;COUNT=2", "CLASS:PRIVATE", "SUMMARY:Secret series"],
+    ["UID:private-series@example.com", "RECURRENCE-ID:20261109T090000Z", "DTSTART:20261109T110000Z", "DURATION:PT1H", "SUMMARY:Moved title", ...(overrideClass ? [`CLASS:${overrideClass}`] : [])],
+  ));
+
+  for (const audience of ["member", "public"] as const) for (const privacy of ["full", "title-only"] as const) {
+    test(`${audience} ${privacy} restricts unknown CLASS and inherits the master's class`, async () => {
+      const unknown = parse(calendar(["UID:unknown@example.com", "DTSTART:20261102T090000Z", "DURATION:PT1H", "CLASS:X-PERSONAL", "SUMMARY:Unknown secret"]));
+      const out = await projectText(spec({ audience, privacy }), source(unknown));
+      expect(out).toContain("SUMMARY:Busy");
+      expect(out).not.toContain("Unknown secret");
+      const [inherited] = await project(spec({ audience, privacy }), source(recurring()));
+      expect(inherited?.resource.master && summary(inherited.resource.master)).toBe("Busy");
+      expect(inherited?.resource.overrides.map(summary)).toEqual(["Busy"]);
+      const [explicit] = await project(spec({ audience, privacy }), source(recurring("PUBLIC")));
+      expect(explicit?.resource.overrides.map(summary)).toEqual(["Moved title"]);
+    });
+  }
+
+  test("owner full preserves unknown and inherited classes byte-for-byte", async () => {
+    for (const resources of [recurring(), recurring("PUBLIC"), parse(calendar(["UID:unknown", "DTSTART:20261102T090000Z", "CLASS:X-PERSONAL", "SUMMARY:Secret"]))])
+      expect(await projectText(spec(), source(resources))).toBe(render(resources));
+  });
+
+  test("virtual title-only keeps the strictest copy whichever wins and in either input order", async () => {
+    for (const privateWins of [false, true]) {
+      const copy = (restricted: boolean) => parse(calendar([
+        "UID:merged@example.com", "DTSTART:20261102T090000Z", "DURATION:PT1H",
+        `SEQUENCE:${restricted === privateWins ? 2 : 1}`, `CLASS:${restricted ? "PRIVATE" : "PUBLIC"}`, `SUMMARY:${restricted ? "Private" : "Public"} title`,
+      ]));
+      const privateCopy = source(copy(true), { sourceCalendarId: "private" });
+      const publicCopy = source(copy(false), { sourceCalendarId: "public" });
+      for (const inputs of [[...privateCopy, ...publicCopy], [...publicCopy, ...privateCopy]]) {
+        const out = await projectText(spec({ kind: "virtual", privacy: "title-only" }), inputs);
+        expect(out).toContain("SUMMARY:Busy");
+        expect(out).not.toContain("title");
+        const owner = spec({ kind: "virtual" });
+        expect(await projectText(owner, inputs)).toBe(await projectText(owner, privateWins ? privateCopy : publicCopy));
+      }
+    }
+  });
+
+  test("full public links key restricted object UIDs while public events retain their source UID", async () => {
+    const link = spec({ id: "lnk_test", audience: "public" });
+    const resources = parse(calendar(
+      ["UID:private@provider.example", "DTSTART:20261102T090000Z", "CLASS:PRIVATE", "SUMMARY:Secret"],
+      ["UID:public@provider.example", "DTSTART:20261102T100000Z", "CLASS:PUBLIC", "SUMMARY:Public"],
+    ));
+    const objects = await project(link, source(resources));
+    const restricted = objects.find((o) => o.sourceUid === "private@provider.example");
+    expect(restricted?.outputUid).toMatch(/^[\w-]{26}@supercal$/);
+    const out = render(objects.map((o) => o.resource));
+    expect(out).not.toContain("private@provider.example");
+    expect(out).toContain("UID:public@provider.example");
+    const [member] = await project(spec({ audience: "member" }), source(resources.slice(0, 1)));
+    expect(member?.outputUid).toBe("private@provider.example");
+  });
+});

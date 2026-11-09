@@ -129,6 +129,20 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
       expect({ tenant, level, statuses }).toEqual({ tenant, level, statuses: [busyStatus, readStatus, writeStatus, metadataStatus, shareStatus, deleteStatus] });
       if (tenant) await withTenant(owner.tenantId, (tx) => tx.delete(calendarShare).where(eq(calendarShare.calendarId, cal.id)));
     }
+  }, 20_000);
+
+  test('deleted calendars hide every event read from grantees while owners and tenant admins can read', async () => {
+    const cal = await calendar(); await share(cal, 'read');
+    expect((await call(owner, `/calendars/${cal.id}`, 'DELETE')).status).toBe(204);
+    const admin: Principal = { ...colleague, role: 'admin' };
+    for (const suffix of ['/events', '/events/private', '/occurrences?from=2026-11-09T00:00:00Z&to=2026-11-10T00:00:00Z', '/changes', '/export.ics']) {
+      expect((await call(colleague, `/calendars/${cal.id}${suffix}`)).status).toBe(404);
+      for (const who of [owner, admin]) {
+        const response = await call(who, `/calendars/${cal.id}${suffix}`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain('Secret');
+      }
+    }
   });
 
   test('highest grant wins; free-busy listing omits metadata and owner publication ids', async () => {

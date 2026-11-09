@@ -6,7 +6,7 @@
  */
 import type { Completeness, EventResource } from '@supercal/core';
 import { and, asc, eq, gt, inArray, max, sql, type SQL } from 'drizzle-orm';
-import type { PgColumn } from 'drizzle-orm/pg-core';
+import { alias, type PgColumn } from 'drizzle-orm/pg-core';
 import type { SourceCalendarId } from './ids.ts';
 import { resource, systemSetting, type Resource } from './schema/index.ts';
 import type { ControlTx, TenantTx } from './tx.ts';
@@ -226,7 +226,8 @@ export async function tombstoneFloor(tx: TenantTx | ControlTx): Promise<bigint> 
 /**
  * Deletes tombstones last changed before `olderThan` (default 30 days ago), across tenants. First
  * raises `system_setting.tombstone_floor` to the newest such tombstone's seq (never lowering it),
- * then deletes every tombstone at or below the floor; sync tokens below the floor are rejected.
+ * then deletes tombstones at or below the floor, keeping each calendar's newest row so max(seq)
+ * never regresses. Sync tokens below the floor are rejected.
  * Allocates no seq, so it takes no tenant lock. Returns the floor and how many rows were purged.
  */
 export async function purgeTombstones(
@@ -246,9 +247,14 @@ export async function purgeTombstones(
   if (!setting) throw new Error(`system_setting ${TOMBSTONE_FLOOR} is missing`);
 
   const floor = BigInt(setting.floor);
+  const newer = alias(resource, 'newer');
   const purged = await control
     .delete(resource)
-    .where(and(eq(resource.deleted, true), sql`${resource.seq} <= ${floor.toString()}::bigint`))
+    .where(and(
+      eq(resource.deleted, true),
+      sql`${resource.seq} <= ${floor.toString()}::bigint`,
+      sql`exists (select 1 from ${resource} as ${sql.identifier('newer')} where ${newer.sourceCalendarId} = ${resource.sourceCalendarId} and ${newer.seq} > ${resource.seq})`,
+    ))
     .returning({ seq: resource.seq });
   return { floor, purged: purged.length };
 }
