@@ -53,14 +53,17 @@ function CreateTenant() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
+    await createTenant(event.currentTarget);
+  }
+
+  async function createTenant(form: HTMLFormElement, allowUnverifiedOwner = false) {
     const data = new FormData(form);
     const text = (key: string) => String(data.get(key)).trim();
     setProblem(null);
     setCreated(null);
     try {
       const result = await create.mutateAsync({
-        body: { name: text('name'), ...(text('slug') && { slug: text('slug') }), ...(text('ownerEmail') && { ownerEmail: text('ownerEmail') }) },
+        body: { allowUnverifiedOwner, name: text('name'), ...(text('slug') && { slug: text('slug') }), ...(text('ownerEmail') && { ownerEmail: text('ownerEmail') }) },
       });
       form.reset();
       setCreated({ name: result.tenant.name, owner: result.owner?.email ?? null, resetUrl: result.passwordResetUrl });
@@ -80,6 +83,14 @@ function CreateTenant() {
           <Field label="Slug" name="slug" hint="Optional; made from the name." pattern="[a-z0-9]+(-[a-z0-9]+)*" minLength={2} maxLength={64} error={errors.slug} />
         </div>
         <Field label="Owner email" name="ownerEmail" type="email" hint="Optional." error={errors.ownerEmail} />
+        {problem?.detail === 'An unverified account holds that email' && (
+          <Button disabled={create.isPending} onClick={(event) => {
+            const form = event.currentTarget.form;
+            if (form && window.confirm('Assign this unverified account as owner?')) {
+              void createTenant(form, true);
+            }
+          }}>Assign anyway</Button>
+        )}
         <div>
           <Button type="submit" variant="primary" disabled={create.isPending}>
             Create tenant

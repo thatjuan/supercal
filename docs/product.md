@@ -116,7 +116,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 
 Screens, in the order a new user meets them:
 
-1. Sign up / sign in (email + password; magic link when an email provider is configured).
+1. Sign up / sign in (email + password). With email configured, confirm your address, then sign in. If the link opens on another device, reset the password to finish setting up access. Password reset signs out existing sessions and revokes API keys and device logins; automation and calendar apps need new credentials. Read-only feed credentials stay valid so subscribers keep working.
 2. Onboarding: connect the first account, watch calendars appear, get the subscribe step.
 3. Accounts: list with health badges, add, reconnect, remove.
 4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy.

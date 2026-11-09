@@ -1,8 +1,10 @@
 /**
  * Transactional mail: the Resend request, and Better Auth sending verification, invitation,
- * magic-link and reset mail through a mailer (a scratch database, mail captured in memory).
+ * and reset mail through a mailer (a scratch database, mail captured in memory).
  */
-import { closeDb, connectDb, migrate } from '@supercal/db';
+import { closeDb, connectDb, davLogin, feed, migrate } from '@supercal/db';
+import { unsafeDb } from '@supercal/db/unsafe-db';
+import { eq } from 'drizzle-orm';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createApi } from '../src/api/index.ts';
@@ -77,17 +79,26 @@ describe.skipIf(!testDatabaseUrl)('auth mail', () => {
     await scratch.drop();
   });
 
-  test('sign-up mails a verification link; signing in waits for it, and the link verifies and signs in', async () => {
+  test('same-browser verification keeps the password and sets no session cookie', async () => {
     const email = 'owner@example.invalid';
-    expect((await call('/api/auth/sign-up/email', { email, password: 'correct-horse-battery', name: 'Owner' })).status).toBe(200);
+    const registered = await call('/api/auth/sign-up/email', { email, password: 'correct-horse-battery', name: 'Owner' });
+    expect(registered.status).toBe(200);
+    const proof = registered.headers.getSetCookie().find((line) => line.startsWith('supercal_signup='));
+    expect(proof).toContain('HttpOnly');
+    expect(proof).toContain('SameSite=Lax');
+    expect(proof).toContain('Path=/api/auth');
+    expect(proof).toContain('Max-Age=86400');
     const { mail, url } = linkTo(email);
     expect(mail.subject).toBe('Confirm your email for Supercal');
     expect(url.pathname).toBe('/api/auth/verify-email');
 
     expect((await call('/api/auth/sign-in/email', { email, password: 'correct-horse-battery' })).status).toBe(403);
-    const verified = await api.request(`${url.pathname}${url.search}`, { headers: { origin: TEST_ORIGIN } });
+    const verified = await api.request(`${url.pathname}${url.search}`, { headers: { origin: TEST_ORIGIN, cookie: cookieOf(registered) } });
     expect(verified.status).toBe(302);
-    const me = await call('/api/v1/me', undefined, cookieOf(verified));
+    expect(verified.headers.getSetCookie()).toEqual([]);
+    const signedIn = await call('/api/auth/sign-in/email', { email, password: 'correct-horse-battery' });
+    expect(signedIn.status).toBe(200);
+    const me = await call('/api/v1/me', undefined, cookieOf(signedIn));
     expect(me.status).toBe(200);
   });
 
@@ -101,14 +112,76 @@ describe.skipIf(!testDatabaseUrl)('auth mail', () => {
     expect(url.href).toBe(`${TEST_ORIGIN}/invite/${id}`);
   });
 
-  test('magic links and password resets are mailed; without a mailer magic links are off', async () => {
-    expect((await call('/api/auth/sign-in/magic-link', { email: 'owner@example.invalid' })).status).toBe(200);
-    expect(linkTo('owner@example.invalid')).toMatchObject({ mail: { subject: 'Sign in to Supercal' }, url: { pathname: '/api/auth/magic-link/verify' } });
+  test('the removed magic-link endpoint answers 404 with or without mail', async () => {
+    for (const app of [api, apiWithoutMail]) {
+      expect((await call('/api/auth/sign-in/magic-link', { email: 'owner@example.invalid' }, undefined, app)).status).toBe(404);
+    }
+  });
 
-    expect((await call('/api/auth/request-password-reset', { email: 'owner@example.invalid', redirectTo: '/' })).status).toBe(200);
-    expect(linkTo('owner@example.invalid').mail.subject).toBe('Reset your Supercal password');
+  test('another browser discards the unproven password and sessions; recovery creates a password', async () => {
+    const email = 'cross-browser@example.invalid';
+    const registered = await call('/api/auth/sign-up/email', { email, password: 'registrant-password', name: 'Mailbox holder' });
+    expect(registered.status).toBe(200);
+    const { url } = linkTo(email);
+    const duplicate = await call('/api/auth/sign-up/email', { email, password: 'second-password', name: 'Second registrant' });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.headers.getSetCookie().some((line) => line.startsWith('supercal_signup='))).toBe(false);
+    const attacker = await call('/api/auth/sign-in/email', { email, password: 'registrant-password' }, undefined, apiWithoutMail);
+    expect(attacker.status).toBe(200);
+    const verified = await api.request(`${url.pathname}${url.search}`, { headers: { 'sec-fetch-site': 'cross-site', referer: 'https://attacker.invalid/' } });
+    expect(verified.status).toBe(302);
+    expect(verified.headers.getSetCookie()).toEqual([]);
+    expect((await call('/api/v1/me', undefined, cookieOf(attacker))).status).toBe(401);
+    expect((await call('/api/auth/sign-in/email', { email, password: 'registrant-password' })).status).toBe(401);
+    const reset = new URL(await mailed.auth.passwordResetLink(email));
+    expect((await call('/api/auth/reset-password', { token: reset.pathname.split('/').at(-1), newPassword: 'mailbox-holder-password' })).status).toBe(200);
+    expect((await call('/api/auth/sign-in/email', { email, password: 'mailbox-holder-password' })).status).toBe(200);
+  });
 
-    expect((await call('/api/auth/sign-in/magic-link', { email: 'owner@example.invalid' }, undefined, apiWithoutMail)).status).toBe(404);
+  test('password recovery revokes sessions, API keys, device logins and sibling tokens, preserving feeds', async () => {
+    const email = 'owner@example.invalid';
+    const signedIn = await call('/api/auth/sign-in/email', { email, password: 'correct-horse-battery' });
+    const cookie = cookieOf(signedIn);
+    const me = await (await call('/api/v1/me', undefined, cookie)).json() as { user: { id: string } };
+    const keyResponse = await call('/api/v1/api-keys', { name: 'Recovery test' }, cookie);
+    expect(keyResponse.status).toBe(201);
+    const key = await keyResponse.json() as { key: string };
+    expect((await api.request('/api/v1/me', { headers: { authorization: `Bearer ${key.key}` } })).status).toBe(200);
+    const device = await call('/api/v1/dav-logins', { name: 'Phone' }, cookie);
+    expect(device.status).toBe(201);
+    const createdFeed = await call('/api/v1/feeds', { name: 'Read-only recovery feed' }, cookie);
+    expect(createdFeed.status).toBe(201);
+    const feedsBefore = await unsafeDb().select().from(feed);
+    const sibling = new URL(await mailed.auth.passwordResetLink(email));
+    expect((await call('/api/auth/request-password-reset', { email, redirectTo: '/' })).status).toBe(200);
+    const { mail, url } = linkTo(email);
+    expect(mail.subject).toBe('Reset your Supercal password');
+    expect((await call('/api/auth/reset-password', { token: url.pathname.split('/').at(-1), newPassword: 'recovered-password' })).status).toBe(200);
+    expect((await call('/api/v1/me', undefined, cookie)).status).toBe(401);
+    expect((await api.request('/api/v1/me', { headers: { authorization: `Bearer ${key.key}` } })).status).toBe(401);
+    expect(await unsafeDb().select().from(davLogin).where(eq(davLogin.userId, me.user.id))).toHaveLength(0);
+    expect(await unsafeDb().select().from(feed)).toEqual(feedsBefore);
+    expect((await call('/api/auth/reset-password', { token: sibling.pathname.split('/').at(-1), newPassword: 'stolen-password' })).status).toBe(400);
+    expect((await call('/api/auth/sign-in/email', { email, password: 'recovered-password' })).status).toBe(200);
+  });
+
+  test('reset requests do not wait for mail delivery; handed-out links remain synchronous', async () => {
+    const deliveries: Promise<void>[] = [];
+    const slow = testAuth('open', scratch.url, { send: async () => {
+      const delivery = Bun.sleep(300);
+      deliveries.push(delivery);
+      await delivery;
+    } });
+    try {
+      const app = createApi({ auth: slow.auth, secrets: testSecrets, bus: idleBus });
+      const start = performance.now();
+      expect((await call('/api/auth/request-password-reset', { email: 'owner@example.invalid' }, undefined, app)).status).toBe(200);
+      expect(performance.now() - start).toBeLessThan(100);
+      expect(new URL(await slow.auth.passwordResetLink('owner@example.invalid')).pathname).toStartWith('/api/auth/reset-password/');
+    } finally {
+      await Promise.all(deliveries);
+      await slow.close();
+    }
   });
 
   test('an operator’s reset link is handed back, not mailed', async () => {

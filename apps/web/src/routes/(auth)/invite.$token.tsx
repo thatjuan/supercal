@@ -2,7 +2,7 @@
  * An invitation link (`/invite/<invitation id>`). Signed in, it accepts the invitation and switches
  * to that tenant; signed out, it offers sign-up with the invitation (which `invite` mode requires)
  * or sign-in, which returns here. Where addresses need confirming, sign-up ends in a notice and the
- * mailed link returns here, signed in, to accept.
+ * mailed link returns here; sign in to accept.
  */
 import type { Problem } from '@supercal/api-client';
 import { useQueryClient } from '@tanstack/react-query';
