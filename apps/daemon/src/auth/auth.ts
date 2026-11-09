@@ -17,8 +17,6 @@
 import { apiKey } from '@better-auth/api-key';
 import {
   account,
-  calendarShare,
-  withTenant,
   apikey,
   invitation,
   member,
@@ -40,6 +38,7 @@ import { publishAuthRevoked } from '../bus.ts';
 import type { Config } from '../config.ts';
 import type { Mailer } from '../mail/index.ts';
 import * as templates from '../mail/templates.ts';
+import { endMembership } from './departure.ts';
 
 export type AuthConfig = Pick<
   Config,
@@ -133,8 +132,8 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
       },
     },
     // Keys are issued only by `POST /api/v1/api-keys`, which binds them to a tenant. The server API stays available.
-    // Magic links need mail.
-    disabledPaths: ['/api-key/create', ...(mailer ? [] : ['/sign-in/magic-link'])],
+    // Self-service leave skips the removal hook; the dashboard uses remove-member. Magic links need mail.
+    disabledPaths: ['/api-key/create', '/organization/leave', ...(mailer ? [] : ['/sign-in/magic-link'])],
     databaseHooks: {
       user: {
         create: {
@@ -189,8 +188,7 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
         },
         organizationHooks: {
           afterRemoveMember: async ({ user, organization }) => {
-            await withTenant(organization.id as TenantId, (tx) => tx.delete(calendarShare).where(eq(calendarShare.granteeUserId, user.id)));
-            await publishAuthRevoked(db, user.id);
+            await endMembership(db, organization.id as TenantId, user.id);
           },
         },
       }),

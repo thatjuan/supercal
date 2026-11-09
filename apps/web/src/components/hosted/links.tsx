@@ -7,9 +7,10 @@ import { Temporal } from '@js-temporal/polyfill';
 import type { components, Problem } from '@supercal/api-client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { $api, client } from '../../api.ts';
+import { $api, client, meQuery } from '../../api.ts';
 import { formatDate } from '../../lib/format.ts';
 import { browserZone } from '../../lib/zones.ts';
+import { organizationQuery } from '../admin/members.tsx';
 import { PrivacyBadge, PrivacyPicker } from '../calendars/privacy.tsx';
 import type { Privacy } from '../calendars/data.ts';
 import { FALLBACK_COLOR } from '../calendars/settings-fields.tsx';
@@ -42,6 +43,9 @@ export function LinksTab({ loaded: { calendar } }: CalendarTabProps) {
   const queryClient = useQueryClient();
   const linksQuery = $api.queryOptions('get', LINKS, { params: { path: { id: calendar.id } } });
   const links = useQuery(linksQuery);
+  const me = useQuery(meQuery);
+  const organization = useQuery({ ...organizationQuery(me.data?.tenant.id ?? ''), enabled: !!me.data?.tenant.id });
+  const members = organization.data?.members ?? [];
   const refresh = () => queryClient.invalidateQueries({ queryKey: linksQuery.queryKey });
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedLink | null>(null);
@@ -63,7 +67,11 @@ export function LinksTab({ loaded: { calendar } }: CalendarTabProps) {
         ) : (
           <ul aria-label="Published links" className="-my-2 divide-y divide-line">
             {links.data.items.map((link) => (
-              <LinkRow key={link.id} link={link} calendarId={calendar.id} onChanged={refresh} />
+              <LinkRow
+                key={link.id} link={link} calendarId={calendar.id} onChanged={refresh}
+                creator={members.find((member) => member.userId === link.createdBy)?.user.name
+                  ?? (link.createdBy === calendar.owner.id ? calendar.owner.name : 'Former member')}
+              />
             ))}
           </ul>
         ))}
@@ -108,7 +116,7 @@ export function LinksTab({ loaded: { calendar } }: CalendarTabProps) {
   );
 }
 
-function LinkRow({ link, calendarId, onChanged }: { link: CalendarLink; calendarId: string; onChanged: () => Promise<unknown> }) {
+function LinkRow({ link, creator, calendarId, onChanged }: { link: CalendarLink; creator: string; calendarId: string; onChanged: () => Promise<unknown> }) {
   const remove = $api.useMutation('delete', LINK);
   const [editing, setEditing] = useState(false);
   const [revoking, setRevoking] = useState(false);
@@ -135,7 +143,7 @@ function LinkRow({ link, calendarId, onChanged }: { link: CalendarLink; calendar
           <PrivacyBadge privacy={link.privacy} />
         </p>
         <p className="mt-0.5 text-[13px] text-ink-3">
-          Created {formatDate(link.createdAt)} · {expired ? <span className="font-medium text-danger">Expired</span> : link.expiresAt ? `Expires ${formatDate(link.expiresAt)}` : 'No expiry'}
+          Created by {creator} · {formatDate(link.createdAt)} · {expired ? <span className="font-medium text-danger">Expired</span> : link.expiresAt ? `Expires ${formatDate(link.expiresAt)}` : 'No expiry'}
         </p>
       </div>
       <div className="flex items-center gap-1">

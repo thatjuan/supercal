@@ -19,6 +19,7 @@ import { createCalendar, deleteCalendar, restoreCalendar } from '../src/hosted/c
 import { writeObject } from '../src/hosted/objects.ts';
 import { createIcs } from '../src/ics/index.ts';
 import { upsertOf } from '../src/sync/changes.ts';
+import { departureActors } from './departure-fixture.ts';
 import { testAuth, testSecrets } from './auth-fixture.ts';
 import { eventIcs } from './dav/fixture.ts';
 
@@ -211,4 +212,50 @@ describe.skipIf(!testDatabaseUrl)('published calendar links', () => {
     const [total] = await unsafeDb().select({ count: sql<number>`count(*)::int` }).from(calendarLink).where(eq(calendarLink.calendarId, calendar.id));
     expect(total?.count).toBe(20);
   });
+  test('links follow manage grants and membership; owners retain theirs and tenant-wide manage still applies', async () => {
+    const actors = await departureActors(fixture!.auth);
+    const response = await actors.apiCall('/calendars', 'POST', { name: 'Grant links' }, actors.ownerCookie);
+    expect(response.status).toBe(201);
+    const cal = z.object({ id: z.string() }).parse(await response.json());
+    const path = `/calendars/${cal.id}`;
+    const publish = async (cookie: string) => {
+      const response = await actors.apiCall(`${path}/links`, 'POST', { privacy: 'full' }, cookie);
+      expect(response.status).toBe(201);
+      const link = CreatedCalendarLink.parse(await response.json());
+      expect(link.createdBy).toBe(cookie === actors.ownerCookie ? actors.owner.id : actors.departing.id);
+      return link;
+    };
+    const ownerLink = await publish(actors.ownerCookie);
+    const grant = async (tenant = false) => {
+      const response = await actors.apiCall(`${path}/shares`, 'POST', {
+        grantee: tenant ? { type: 'tenant' } : { type: 'user', userId: actors.departing.id }, access: 'manage',
+      }, actors.ownerCookie);
+      expect(response.status).toBe(201);
+      return z.object({ id: z.string() }).parse(await response.json());
+    };
+    const removeGrant = async (id: string) => expect((await actors.apiCall(`${path}/shares/${id}`, 'DELETE', undefined, actors.ownerCookie)).status).toBe(204);
+    const direct = await grant();
+    const revoked = await publish(actors.cookie);
+    await removeGrant(direct.id);
+    expect((await get(revoked.token)).status).toBe(404);
+    expect((await get(ownerLink.token)).status).toBe(200);
+    const second = await grant();
+    const downgraded = await publish(actors.cookie);
+    expect((await actors.apiCall(`${path}/shares/${second.id}`, 'PATCH', { access: 'write' }, actors.ownerCookie)).status).toBe(200);
+    expect((await get(downgraded.token)).status).toBe(404);
+    expect((await get(ownerLink.token)).status).toBe(200);
+    await removeGrant(second.id);
+    const third = await grant();
+    const tenant = await grant(true);
+    const retained = await publish(actors.cookie);
+    await removeGrant(third.id);
+    expect((await get(retained.token)).status).toBe(200);
+    await actors.remove();
+    expect((await get(retained.token)).status).toBe(404); // Tenant grant alone requires current membership.
+    expect((await get(ownerLink.token)).status).toBe(200);
+    await actors.rejoin();
+    expect((await get(retained.token)).status).toBe(404);
+    await removeGrant(tenant.id);
+  });
+
 });

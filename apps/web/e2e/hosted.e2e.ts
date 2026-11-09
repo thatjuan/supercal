@@ -174,6 +174,7 @@ test('a busy-only link publishes busy time without attendees, until it is revoke
 
   const row = page.getByRole('listitem', { name: 'Website' });
   await expect(row).toContainText('No expiry');
+  await expect(row).toContainText('Created by Grace Hopper');
   await row.getByRole('button', { name: 'Revoke' }).click();
   await expect(page.getByRole('dialog')).toContainText('lose access at once');
   await page.getByRole('dialog').getByRole('button', { name: 'Revoke link' }).click();

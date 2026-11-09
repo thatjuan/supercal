@@ -1,5 +1,5 @@
 /** Calendar authorization, shared by REST, streams and device CalDAV logins. */
-import { calendarAccess, calendarAccount, calendarShare, member, sourceCalendar, type SourceCalendarId, type TenantTx } from '@supercal/db';
+import { calendarAccess, calendarAccount, calendarLink, calendarShare, member, sourceCalendar, type SourceCalendarId, type TenantTx } from '@supercal/db';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { Forbidden, NotFound } from '../api/kit/problem.ts';
@@ -64,4 +64,28 @@ export async function accessibleCalendars(tx: TenantTx, principal: Principal, mi
 export async function deviceHomeCalendars(tx: TenantTx, principal: Principal) {
   return (await calendarsWithAccess(tx, principal)).flatMap(({ calendar, access, owned, grant }) =>
     (owned || atLeast(grant, 'read')) && atLeast(access, 'read') ? [{ calendar, access }] : []);
+}
+
+/**
+ * Deletes published links whose creator can no longer manage the calendar: not its owner, and not a
+ * current member who is a tenant owner or admin or holds a personal or tenant-wide manage grant.
+ */
+export async function pruneOrphanLinks(tx: TenantTx, calendarId?: SourceCalendarId): Promise<void> {
+  await tx.execute(sql`delete from ${calendarLink}
+    using ${sourceCalendar}, ${calendarAccount}
+    where ${calendarLink.calendarId} = ${sourceCalendar.id}
+      and ${sourceCalendar.accountId} = ${calendarAccount.id}
+      ${calendarId === undefined ? sql`` : sql`and ${sourceCalendar.id} = ${calendarId}`}
+      and ${calendarLink.createdBy} <> ${calendarAccount.ownerUserId}
+      and not exists (
+        select 1 from ${member}
+        where ${member.organizationId} = ${calendarLink.tenantId}
+          and ${member.userId} = ${calendarLink.createdBy}
+          and (${member.role} in ('owner', 'admin') or exists (
+            select 1 from ${calendarShare}
+            where ${calendarShare.calendarId} = ${calendarLink.calendarId}
+              and (${calendarShare.granteeUserId} = ${calendarLink.createdBy} or ${calendarShare.granteeUserId} is null)
+              and ${calendarShare.access} = 'manage'
+          ))
+      )`);
 }

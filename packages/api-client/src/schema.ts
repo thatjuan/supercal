@@ -1063,6 +1063,7 @@ export interface components {
             expiresAt: string | null;
             /** Format: date-time */
             createdAt: string;
+            createdBy: string;
         };
         CreatedCalendarLink: components["schemas"]["CalendarLink"] & {
             token: string;

@@ -25,6 +25,10 @@ import {
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { z } from 'zod';
+import { createDav } from '../src/dav/index.ts';
+import { createIcs } from '../src/ics/index.ts';
+import { departureActors, FeedCredentials, basicCredentials } from './departure-fixture.ts';
 import { eq } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { createApi } from '../src/api/index.ts';
@@ -290,4 +294,39 @@ describe.skipIf(!testDatabaseUrl)('feeds and publications', () => {
     expect(busy.body.items[0]?.outputUid).not.toBe('standup@example.com');
     expect((await call(`/api/v1/feeds/${feedId}/occurrences?from=2026-01-01T00:00:00Z&to=2026-03-15T00:00:00Z`)).status).toBe(400);
   });
+  test('removal clears feed credentials permanently; re-invitation requires rotation and admins can list retained feeds', async () => {
+    const actors = await departureActors(fixture!.auth);
+    const created = await actors.apiCall('/feeds', 'POST', { name: 'Departure feed' });
+    expect(created.status).toBe(201);
+    const saved = FeedCredentials.parse(await created.json());
+    const dav = createDav({ secrets: testSecrets, bus: idleBus });
+    const ics = createIcs({ secrets: testSecrets, cacheBytes: 1024 });
+    const readIcs = (token = saved.credentials.ics.token) => ics.request(`/${token}/all.ics`);
+    const readDav = (credentials = saved.credentials.caldav) => dav.request(`/dav/${credentials.username}/cal/`, {
+      method: 'PROPFIND', headers: { Authorization: basicCredentials(credentials) },
+    });
+    expect((await readIcs()).status).toBe(200);
+    expect((await readDav()).status).toBe(207); // Warm the password cache before removing membership.
+    await actors.remove();
+    expect((await readIcs()).status).toBe(404);
+    expect((await readDav()).status).toBe(401);
+    const adminFeeds = await actors.apiCall(`/feeds?ownerUserId=${actors.departing.id}`, 'GET', undefined, actors.ownerCookie);
+    expect(adminFeeds.status).toBe(200);
+    expect(await adminFeeds.json()).toMatchObject({ items: [{ id: saved.feed.id }] });
+    const stored = await unsafeDb().select().from(feed).where(eq(feed.ownerUserId, actors.departing.id));
+    expect(stored).toHaveLength(1); // Listing a departed owner must not create a default feed.
+    expect(stored[0]).toMatchObject({ caldavPasswordHash: null, icsTokenHash: null });
+    await actors.rejoin();
+    expect((await readIcs()).status).toBe(404);
+    expect((await readDav()).status).toBe(401);
+    const rotatedIcs = await actors.apiCall(`/feeds/${saved.feed.id}/credentials/ics/rotate`, 'POST');
+    expect(rotatedIcs.status).toBe(200);
+    const nextIcs = z.object({ token: z.string() }).parse(await rotatedIcs.json());
+    const rotatedDav = await actors.apiCall(`/feeds/${saved.feed.id}/credentials/caldav/rotate`, 'POST');
+    expect(rotatedDav.status).toBe(200);
+    const nextDav = z.object({ username: z.string(), password: z.string() }).parse(await rotatedDav.json());
+    expect((await readIcs(nextIcs.token)).status).toBe(200);
+    expect((await readDav(nextDav)).status).toBe(207);
+  });
+
 });

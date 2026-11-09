@@ -316,13 +316,14 @@ export function createFeedService(secrets: SecretBox) {
     }
   }
 
-  /** The feeds of `ownerUserId` (default: the principal), creating their default feed on first access. */
+  /** The owner's retained feeds; creates a default feed on first access only for a current member. */
   async function listFeeds(tx: TenantTx, principal: Principal, ownerUserId = principal.userId): Promise<Feed[]> {
     if (!canManageOwned(principal, ownerUserId)) throw new Forbidden('You can only list your own feeds');
     const [membership] = await tx.select({ userId: member.userId }).from(member).where(eq(member.userId, ownerUserId));
-    if (!membership) throw new NotFound('No such user in this tenant');
-    await getOrCreateDefaultFeed(tx, ownerUserId);
-    return tx.select().from(feed).where(eq(feed.ownerUserId, ownerUserId)).orderBy(asc(feed.id));
+    if (membership) await getOrCreateDefaultFeed(tx, ownerUserId);
+    const existing = await tx.select().from(feed).where(eq(feed.ownerUserId, ownerUserId)).orderBy(asc(feed.id));
+    if (!membership && existing.length === 0) throw new NotFound('No such user in this tenant');
+    return existing;
   }
 
   /** Creates an extra feed for the principal; its credentials are returned only here. */

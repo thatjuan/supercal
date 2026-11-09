@@ -14,6 +14,7 @@ export const CalendarLinkInfo = z.object({
   privacy: z.enum(privacy.enumValues),
   expiresAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  createdBy: z.string(),
 }).openapi('CalendarLink');
 export const CreatedCalendarLink = CalendarLinkInfo.extend({
   token: z.string(),
@@ -52,7 +53,7 @@ const deleteLink = createRoute({
 });
 
 function toInfo(row: CalendarLink): z.infer<typeof CalendarLinkInfo> {
-  return { id: row.id, name: row.name, privacy: row.privacy, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString() };
+  return { id: row.id, createdBy: row.createdBy, name: row.name, privacy: row.privacy, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString() };
 }
 
 /** Locks the calendar so concurrent link creations cannot exceed its quota. RLS hides other tenants. */

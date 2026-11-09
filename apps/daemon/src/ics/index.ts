@@ -13,6 +13,7 @@ import { calendarLink, feed, publicationState, resource, sourceCalendar, withCon
 import { and, eq, max } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { brotliCompressSync, constants } from 'node:zlib';
+import { membership } from '../auth/principal.ts';
 import { icsTokenHash } from '../feeds/credentials.ts';
 import { createLogger, redact } from '../log.ts';
 import { metrics } from '../ops/metrics.ts';
@@ -126,9 +127,9 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
     const combined = slug === COMBINED;
 
     const [owner] = await withControl((tx) =>
-      tx.select({ id: feed.id, tenantId: feed.tenantId }).from(feed).where(eq(feed.icsTokenHash, icsTokenHash(c.req.param('token')))),
+      tx.select({ id: feed.id, tenantId: feed.tenantId, ownerUserId: feed.ownerUserId }).from(feed).where(eq(feed.icsTokenHash, icsTokenHash(c.req.param('token')))),
     );
-    if (!owner) return c.body(null, 404);
+    if (!owner || !await membership(owner.ownerUserId, owner.tenantId)) return c.body(null, 404);
 
     return withTenant(owner.tenantId, async (tx) => {
       const [target] = await tx.select().from(feed).where(eq(feed.id, owner.id));

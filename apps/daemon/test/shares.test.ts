@@ -302,8 +302,10 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
 
   test('member removal hook deletes personal grants before re-invitation', async () => {
     const cal = await calendar(); await share(cal, 'read');
+    expect((await authCall('/organization/leave', colleagueCookie, { organizationId: owner.tenantId })).status).toBe(404);
     expect((await authCall('/organization/remove-member', ownerCookie, { memberIdOrEmail: 'colleague@sharing.test', organizationId: owner.tenantId })).status).toBe(200);
     const remaining = await unsafeDb().select().from(calendarShare).where(eq(calendarShare.granteeUserId, colleague.userId)); expect(remaining).toEqual([]);
+    expect(await unsafeDb().select().from(davLogin).where(eq(davLogin.userId, colleague.userId))).toEqual([]);
     const invite = await authCall('/organization/invite-member', ownerCookie, { email: 'colleague@sharing.test', role: 'member', organizationId: owner.tenantId }); expect(invite.status).toBe(200);
     const invitation = z.object({ id: z.string() }).parse(await json(invite));
     expect((await authCall('/organization/accept-invitation', colleagueCookie, { invitationId: invitation.id })).status).toBe(200);

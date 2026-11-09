@@ -3,18 +3,24 @@
  * the `ics` variant: connecting (and rejected credentials), visibility by role, PATCH with
  * If-Match, replacing credentials, the manual-sync rate limit, and disconnecting.
  */
-import { auditLog, calendarAccount, closeDb, connectDb, member, migrate, organization, publication, sourceCalendar, syncTarget, user, type AccountId, type PublicationId, type TenantId } from '@supercal/db';
+import { auditLog, calendarAccount, closeDb, connectDb, member, migrate, organization, publication, pushLease, sourceCalendar, syncTarget, user, withTenant, type AccountId, type PublicationId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { AuthFailedError, caldavAdapter, icloudAdapter } from '@supercal/providers';
+import { AuthFailedError, caldavAdapter, createGuardedFetch, icloudAdapter } from '@supercal/providers';
 import { DavFixture } from '@supercal/providers/test/dav-fixture';
 import { createFakeAdapter, fakeEvent } from '@supercal/providers/test/fake';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { createApi } from '../src/api/index.ts';
 import type { ApiEnv, Principal, TenantRole } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
+import { departureActors } from './departure-fixture.ts';
+import { createLogger } from '../src/log.ts';
+import { connectAccount } from '../src/sync/accounts.ts';
+import { withAccount, accountTargets } from '../src/sync/context.ts';
+import { createSyncDeps, syncHandlers } from '../src/sync/index.ts';
+import { claim, complete, StopTargetError } from '../src/sync/scheduler.ts';
 import { testAuth, testSecrets } from './auth-fixture.ts';
 
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
@@ -208,4 +214,56 @@ describe.skipIf(!testDatabaseUrl)('accounts and calendars API', () => {
     expect(rejected.body.type).toBe('https://supercal.dev/problems/invalid-credentials');
     expect(rejected.body.detail).toContain('https://support.apple.com/en-us/102654');
   });
+  test('departed owners stop syncing and lose credentials while admins retain calendar data and recovery views', async () => {
+    const actors = await departureActors(fixture!.auth);
+    const fake = createFakeAdapter();
+    fake.calendar('retained').put('retained', fakeEvent('retained@departure'));
+    const deps = createSyncDeps({ secrets: testSecrets, fetch: createGuardedFetch({ allow: [] }),
+      log: createLogger({}, () => {}), adapters: { ics: fake.adapter } });
+    const connected = await connectAccount(deps, {
+      kind: 'user', userId: actors.departing.id, tenantId: actors.tenantId, role: 'member', via: 'session', isOperator: false,
+    }, { credentials: { provider: 'ics', url: ICS_URL }, displayName: 'Retained account' });
+    const calendar = connected.calendars[0]!;
+    const [target] = await unsafeDb().select().from(syncTarget).where(and(eq(syncTarget.targetId, calendar.id), eq(syncTarget.kind, 'events')));
+    if (!target) throw new Error('No events target');
+    const [job] = await claim('departure-test', { leaseMs: 60_000, limit: 1, ids: [target.id] });
+    if (!job) throw new Error('No claimed job');
+    const handlers = syncHandlers(deps), signal = new AbortController().signal;
+    const result = await handlers.events(job, signal);
+    await complete(job, { ok: true, nextRunInMs: result.nextRunInMs });
+    let providerCalls = 0, slots = 0;
+    const guardedDeps = { ...deps, accountSlot: async <T,>(_accountId: string, fn: () => Promise<T>) => { slots++; return fn(); } };
+    const runSnapshot = () => withAccount(guardedDeps, { ...job, tenantId: actors.tenantId }, connected.account, signal,
+      async (adapter, ctx) => { providerCalls++; return adapter.listCalendars(ctx); });
+    await actors.ban(true);
+    await expect(runSnapshot()).rejects.toThrow('the account owner is no longer a member');
+    expect([providerCalls, slots]).toEqual([0, 0]);
+    await actors.ban(false);
+    await runSnapshot();
+    expect([providerCalls, slots]).toEqual([1, 1]);
+    await unsafeDb().insert(pushLease).values({ providerChannelId: crypto.randomUUID(), tenantId: actors.tenantId,
+      accountId: connected.account.id, target: 'calendar', targetId: calendar.id,
+      expiresAt: new Date(Date.now() + 3600_000), secretHash: 'test-hash' });
+    await actors.remove();
+    await expect(runSnapshot()).rejects.toThrow('the account owner is no longer a member');
+    await expect(handlers.events(job, signal)).rejects.toBeInstanceOf(StopTargetError);
+    expect([providerCalls, slots]).toEqual([1, 1]);
+    const [stored] = await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, connected.account.id));
+    expect(stored).toMatchObject({ status: 'disabled', credentials: null, statusDetail: 'The account owner left this tenant' });
+    const targets = await withTenant(actors.tenantId, (tx) => tx.select({ parked: sql<boolean>`${syncTarget.nextRunAt} = 'infinity'::timestamptz` })
+      .from(syncTarget).where(accountTargets(connected.account)));
+    expect(targets.length).toBeGreaterThan(0);
+    expect(targets.every((target) => target.parked)).toBe(true);
+    expect(await unsafeDb().select().from(pushLease).where(eq(pushLease.accountId, connected.account.id))).toEqual([]);
+    const listed = await actors.apiCall('/calendars', 'GET', undefined, actors.ownerCookie);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({ items: [expect.objectContaining({ id: calendar.id, owner: { id: actors.departing.id, name: 'Former member' } })] });
+    const detail = await actors.apiCall(`/calendars/${calendar.id}`, 'GET', undefined, actors.ownerCookie);
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ freshness: { stale: true } });
+    const events = await actors.apiCall(`/calendars/${calendar.id}/events`, 'GET', undefined, actors.ownerCookie);
+    expect(events.status).toBe(200);
+    expect(await events.text()).toContain('retained@departure');
+  });
+
 });
