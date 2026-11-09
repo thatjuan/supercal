@@ -3,7 +3,7 @@
  * admin plugin's global `user.role = 'admin'` as the Supercal operator, user API keys, and its own
  * OpenAPI reference. `createApi` mounts `auth.handler` at `/api/auth/*`.
  *
- * Sign-up modes (`SUPERCAL_SIGNUP`), enforced in `databaseHooks.user.create.before`:
+ * Sign-up modes (`SUPERCAL_SIGNUP`), checked before the endpoint and at user creation:
  * - `open`: anyone signs up and gets a personal tenant (owner, set active).
  * - `invite`: sign-up needs `invitationId`, a pending invitation for the same email.
  * - `disabled`: nobody signs up; operators create users and tenants (`POST /api/v1/tenants`).
@@ -11,9 +11,10 @@
  * personal tenant. Server-side calls (no HTTP request) are trusted and skip the mode check.
  *
  * With a mailer (`RESEND_API_KEY` + `MAIL_FROM`), sign-up requires a verified email, and
- * verification, password-reset, magic-link and invitation mail go out. Without one, magic links
- * are disabled and the dashboard hands out invitation and reset links to copy.
+ * verification, password-reset and invitation mail go out. Without one, the dashboard hands
+ * out invitation and reset links to copy.
  */
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { apiKey } from '@better-auth/api-key';
 import {
   account,
@@ -29,17 +30,19 @@ import {
   type TenantId,
 } from '@supercal/db';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { APIError } from 'better-auth/api';
+import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { parseCookies } from 'better-auth/cookies';
 import { betterAuth } from 'better-auth/minimal';
-import { admin, magicLink, openAPI, organization } from 'better-auth/plugins';
+import { admin, openAPI, organization } from 'better-auth/plugins';
 import { and, asc, count, eq, gt, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { publishAuthRevoked } from '../bus.ts';
 import type { Config } from '../config.ts';
 import { CLIENT_IP_HEADER } from '../client-ip.ts';
+import { createLogger } from '../log.ts';
 import type { Mailer } from '../mail/index.ts';
 import * as templates from '../mail/templates.ts';
-import { endMembership } from './departure.ts';
+import { endMembership, revokeLongLivedCredentials } from './departure.ts';
 
 export type AuthConfig = Pick<
   Config,
@@ -48,6 +51,9 @@ export type AuthConfig = Pick<
 
 /** The admin plugin's role for the Supercal operator. */
 export const OPERATOR_ROLE = 'admin';
+
+const log = createLogger({ component: 'auth' });
+const signupRefusal = (mode: AuthConfig['SUPERCAL_SIGNUP']) => mode === 'invite' ? 'Sign-up requires a pending invitation' : 'Sign-up is disabled';
 
 /** The extra sign-up body field `invite` mode reads. */
 const SignUpInvitation = z.object({ invitationId: z.string().min(1) });
@@ -82,6 +88,8 @@ export async function insertTenant(tx: Pick<ControlTx, 'insert'>, tenant: { name
  * clients reach the daemon at.
  */
 export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mailer | null = null) {
+  const secret = config.BETTER_AUTH_SECRET ?? crypto.randomUUID() + crypto.randomUUID();
+  const signupProof = (userId: string) => createHmac('sha256', secret).update(userId).digest('hex');
   const baseURL = config.SUPERCAL_PUBLIC_URL ?? `http://localhost:${config.PORT}`;
   const pendingResetLinks = new Map<string, (url: string) => unknown>();
 
@@ -107,7 +115,7 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
 
   const auth = betterAuth({
     baseURL,
-    secret: config.BETTER_AUTH_SECRET ?? crypto.randomUUID() + crypto.randomUUID(),
+    secret,
     trustedOrigins: [baseURL, ...(config.WEB_ORIGIN ? [config.WEB_ORIGIN] : [])],
     rateLimit: { enabled: !config.SUPERCAL_INSECURE_DEV },
     advanced: { useSecureCookies: !config.SUPERCAL_INSECURE_DEV, ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
@@ -119,23 +127,45 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
       enabled: true,
       // Without mail, nothing could verify.
       requireEmailVerification: mailer !== null,
+      revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }) => {
+        await revokeLongLivedCredentials(db, user.id);
+        await publishAuthRevoked(db, user.id);
+      },
       // A reset link an operator asked for (`passwordResetLink`) is handed back, never mailed.
       sendResetPassword: async ({ user, url }) => {
         const handOut = pendingResetLinks.get(user.email);
-        if (handOut) handOut(url);
-        else await mailer?.send({ to: user.email, ...templates.resetPassword({ url }) });
+        if (handOut) return void handOut(url);
+        void mailer?.send({ to: user.email, ...templates.resetPassword({ url }) }).catch((error: unknown) => log.error('password reset mail failed', { error }));
       },
     },
     emailVerification: {
       sendOnSignUp: mailer !== null,
-      autoSignInAfterVerification: true,
+      autoSignInAfterVerification: false,
+      beforeEmailVerification: async (user, request) => {
+        const proof = parseCookies(request?.headers.get('cookie') ?? '').get('supercal_signup');
+        const expected = signupProof(user.id);
+        if (proof && /^[a-f0-9]{64}$/.test(proof) && timingSafeEqual(Buffer.from(proof), Buffer.from(expected))) return;
+        // The mailbox holder did not register in this browser: discard the registrant's access.
+        await db.delete(account).where(and(eq(account.userId, user.id), eq(account.providerId, 'credential')));
+        await db.delete(session).where(eq(session.userId, user.id));
+      },
       sendVerificationEmail: async ({ user, url }) => {
         await mailer?.send({ to: user.email, ...templates.verifyEmail({ url }) });
       },
     },
     // Keys are issued only by `POST /api/v1/api-keys`, which binds them to a tenant. The server API stays available.
-    // Self-service leave skips the removal hook; the dashboard uses remove-member. Magic links need mail.
-    disabledPaths: ['/api-key/create', '/organization/leave', ...(mailer ? [] : ['/sign-in/magic-link'])],
+    // Self-service leave skips the removal hook; the dashboard uses remove-member.
+    disabledPaths: ['/api-key/create', '/organization/leave'],
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (!ctx.request || ctx.path !== '/sign-up/email' || config.SUPERCAL_SIGNUP === 'open' || (await isEmptyInstall())) return;
+        const invited = SignUpInvitation.safeParse(ctx.body);
+        const email = String(ctx.body?.email ?? '');
+        if (config.SUPERCAL_SIGNUP === 'invite' && invited.success && (await hasPendingInvitation(invited.data.invitationId, email))) return;
+        throw new APIError('FORBIDDEN', { message: signupRefusal(config.SUPERCAL_SIGNUP), code: 'SIGN_UP_NOT_ALLOWED' });
+      }),
+    },
     databaseHooks: {
       user: {
         create: {
@@ -145,11 +175,16 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
             const invited = SignUpInvitation.safeParse(ctx.body);
             if (config.SUPERCAL_SIGNUP === 'invite' && invited.success && (await hasPendingInvitation(invited.data.invitationId, user.email))) return;
             throw new APIError('FORBIDDEN', {
-              message: config.SUPERCAL_SIGNUP === 'invite' ? 'Sign-up requires a pending invitation' : 'Sign-up is disabled',
+              message: signupRefusal(config.SUPERCAL_SIGNUP),
               code: 'SIGN_UP_NOT_ALLOWED',
             });
           },
           after: async (user, ctx) => {
+            if (mailer && ctx?.request) {
+              ctx.setCookie('supercal_signup', signupProof(user.id), {
+                httpOnly: true, sameSite: 'lax', secure: !config.SUPERCAL_INSECURE_DEV, path: '/api/auth', maxAge: 24 * 60 * 60,
+              });
+            }
             const isOperator = 'role' in user && user.role === OPERATOR_ROLE;
             if (!isOperator && !(ctx?.request && config.SUPERCAL_SIGNUP === 'open')) return;
             // Sign-up runs this hook after it has created the session, so point that session at the tenant too.
@@ -196,13 +231,6 @@ export function createAuth(config: AuthConfig, db: ControlDatabase, mailer: Mail
       }),
       admin({ adminRoles: [OPERATOR_ROLE] }),
       apiKey({ defaultPrefix: 'sc_', enableMetadata: true, rateLimit: { enabled: false } }),
-      // Existing users only: accounts are created by sign-up, where the sign-up mode applies.
-      magicLink({
-        disableSignUp: true,
-        sendMagicLink: async ({ email, url }) => {
-          await mailer?.send({ to: email, ...templates.magicLink({ url }) });
-        },
-      }),
       openAPI(),
     ],
   });

@@ -27,8 +27,5 @@ export const verifyEmail = ({ url }: { url: string }) =>
 export const resetPassword = ({ url }: { url: string }) =>
   message('Reset your Supercal password', ['Someone asked to reset the password of your Supercal account. The link works once and expires in an hour.'], 'Choose a new password', url, IGNORE);
 
-export const magicLink = ({ url }: { url: string }) =>
-  message('Sign in to Supercal', ['Use this link to sign in to Supercal. It works once and expires in 5 minutes.'], 'Sign in', url, IGNORE);
-
 export const invitation = ({ url, inviter, tenant }: { url: string; inviter: string; tenant: string }) =>
   message(`${inviter} invited you to ${tenant} on Supercal`, [`${inviter} invited you to join ${tenant} on Supercal, where you can combine your calendars into feeds.`], 'Accept invitation', url, 'The invitation expires in 48 hours. If you were not expecting it, you can ignore this email.');

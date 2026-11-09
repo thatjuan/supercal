@@ -1,8 +1,8 @@
 import {
   apikey, apiKeyTenant, calendarAccount, calendarShare, davLogin, feed, NO_FRESHNESS,
-  pushLease, sourceCalendar, syncTarget, withTenant, type ControlDatabase, type TenantId,
+  pushLease, sourceCalendar, syncTarget, verification, withTenant, type ControlDatabase, type TenantId,
 } from '@supercal/db';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, like, ne, sql } from 'drizzle-orm';
 import { notifyDavLoginRevoked, notifyFeedCredentialsRotated, publishAuthRevoked } from '../bus.ts';
 import { pruneOrphanLinks } from '../hosted/access.ts';
 import { accountTargets } from '../sync/context.ts';
@@ -35,4 +35,18 @@ export async function endMembership(db: ControlDatabase, tenantId: TenantId, use
   // Unbound keys are already unusable; delete their secrets after the tenant transaction commits.
   if (keys.length) await db.delete(apikey).where(inArray(apikey.id, keys));
   await publishAuthRevoked(db, userId);
+}
+
+/** Ends reusable access after account recovery; read-only feed credentials remain valid. */
+export async function revokeLongLivedCredentials(db: ControlDatabase, userId: string): Promise<void> {
+  await db.delete(verification).where(and(like(verification.identifier, 'reset-password:%'), eq(verification.value, userId)));
+  await db.delete(apikey).where(eq(apikey.referenceId, userId));
+  // The control role may read device logins, but only the tenant role may delete them.
+  const logins = await db.select({ id: davLogin.id, tenantId: davLogin.tenantId }).from(davLogin).where(eq(davLogin.userId, userId));
+  for (const login of logins) {
+    await withTenant(login.tenantId, async (tx) => {
+      await tx.delete(davLogin).where(eq(davLogin.id, login.id));
+      await notifyDavLoginRevoked(tx, login.id);
+    });
+  }
 }

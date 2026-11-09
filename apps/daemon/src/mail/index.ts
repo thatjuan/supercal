@@ -1,7 +1,7 @@
 /**
  * Transactional email through Resend's HTTP API, enabled by `RESEND_API_KEY` and `MAIL_FROM`.
- * `createAuth` sends verification, password-reset, magic-link and invitation mail through it;
- * without a mailer those flows hand out copyable links instead.
+ * `createAuth` sends verification, password-reset and invitation mail through it;
+ * without a mailer, operators hand out invitation and password-reset links.
  *
  *   const mailer = createMailer(config);            // null unless both variables are set
  *   await mailer?.send({ to, ...templates.verifyEmail({ url }) });

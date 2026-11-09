@@ -2314,6 +2314,8 @@ export interface operations {
                 "application/json": {
                     name: string;
                     slug?: string;
+                    /** @description Assign an existing unverified owner account after explicit operator confirmation */
+                    allowUnverifiedOwner?: boolean;
                     /**
                      * Format: email
                      * @description Initial owner; created with a password-reset link if no such user exists

@@ -211,7 +211,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 | `SUPERCAL_ICS_CACHE_MB` |  | `64` | Memory bound, in MiB, of the cache of rendered ICS feeds. |
 | `SUPERCAL_SYNC_CONCURRENCY` |  | `8` | Sync jobs a worker process runs at once (at most 2 per account). |
 | `SUPERCAL_METRICS_TOKEN` |  |  | When set, `/metrics` requires `Authorization: Bearer <token>`. |
-| `RESEND_API_KEY` |  |  | Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email. |
+| `RESEND_API_KEY` |  |  | Resend API key. With `MAIL_FROM`, enables verification, password-reset and invitation email. |
 | `MAIL_FROM` |  |  | Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend. |
 | `WEB_ORIGIN` |  |  | Extra trusted origin for the Vite dev server, such as `http://localhost:5173`. Development only. |
 | `SUPERCAL_WEB_DIR` |  |  | Directory of the built dashboard. Defaults to `web/` next to the binary; the image sets `/app/web`. |
@@ -221,7 +221,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 
 Supercal sends email through [Resend](https://resend.com) when both `RESEND_API_KEY` and `MAIL_FROM` are set. Add and verify your sending domain in Resend, create an API key with sending access, and set `MAIL_FROM` to an address on that domain, such as `Supercal <cal@example.com>`.
 
-With email on, new accounts must confirm their address before they can sign in, and Supercal mails invitation, password-reset and magic-link sign-in messages. Without it, nobody needs to confirm an address, magic-link sign-in is off, and admins copy invitation and password-reset links from the dashboard to send themselves.
+With email on, new accounts must confirm their address before they can sign in, and Supercal mails invitation and password-reset messages. Without it, nobody needs to confirm an address, and admins copy invitation and password-reset links from the dashboard to send themselves.
 
 ## Google
 

@@ -3,7 +3,7 @@
  * (sessions and tenant-bound API keys), role policy and the operator's tenant endpoint. Ports the
  * scenarios of `spikes/platform/src/auth-evidence.ts`.
  */
-import { apiKeyTenant, closeDb, connectDb, createControlDatabase, member, migrate } from '@supercal/db';
+import { apiKeyTenant, closeDb, connectDb, createControlDatabase, member, migrate, user } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
@@ -243,6 +243,48 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
     });
   });
 
+  test('closed sign-up gives byte-identical responses for existing and unknown addresses, with and without mail', async () => {
+    if (!scratch) throw new Error('auth database missing');
+    for (const mode of ['invite', 'disabled'] as const) {
+      for (const mailer of [null, { send: async () => {} }]) {
+        const fixture = testAuth(mode, scratch.url, mailer);
+        try {
+          const app = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus });
+          const signup = (email: string, invitationId?: string) => app.request('/api/auth/sign-up/email', {
+            method: 'POST', headers: { origin: TEST_ORIGIN, 'content-type': 'application/json' },
+            body: JSON.stringify({ email, password: 'correct-horse-battery', name: 'Closed signup', invitationId }),
+          });
+          const registered = await signup(operator.me.user.email);
+          const unknown = await signup(`unknown-${crypto.randomUUID()}@example.invalid`);
+          expect(registered.status).toBe(403);
+          expect(unknown.status).toBe(registered.status);
+          expect(await registered.text()).toBe(await unknown.text());
+          if (mode === 'invite') {
+            const email = `invited-${crypto.randomUUID()}@example.invalid`;
+            const invitation = await call('invite', '/api/auth/organization/invite-member', { cookie: operator.cookie, body: { email, role: 'member' } });
+            expect(invitation.status).toBe(200);
+            const { id } = await invitation.json() as { id: string };
+            expect((await signup(email, id)).status).toBe(200);
+          }
+        } finally {
+          await fixture.close();
+        }
+      }
+    }
+  });
+
+  test('tenant ownership requires a verified email unless the operator confirms the override', async () => {
+    const registered = await signUp('open');
+    expect(registered.res.status).toBe(200);
+    const body = { name: 'Verified owner required', ownerEmail: registered.email };
+    const refused = await call('disabled', '/api/v1/tenants', { cookie: operator.cookie, body });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ detail: 'An unverified account holds that email' });
+    expect((await call('disabled', '/api/v1/tenants', { cookie: operator.cookie, body: { ...body, allowUnverifiedOwner: true } })).status).toBe(201);
+    await unsafeDb().update(user).set({ emailVerified: true }).where(eq(user.email, registered.email));
+    expect((await call('disabled', '/api/v1/tenants', { cookie: operator.cookie, body })).status).toBe(201);
+  });
+
   describe('current tenant', () => {
     test('an owner renames it and the change is audited', async () => {
       const res = await call('open', '/api/v1/tenant', { cookie: operator.cookie, method: 'PATCH', body: { name: 'Operations' } });
@@ -252,4 +294,35 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
       expect(entries.items.map((entry) => entry.action)).toContain('tenant.update');
     });
   });
+});
+
+// Separate installs exercise the lock through the HTTP wrapper and the real Better Auth pool.
+describe.skipIf(!testDatabaseUrl)('bootstrap sign-up serialization', () => {
+  for (const mode of ['open', 'invite', 'disabled'] as const) {
+    for (const withMail of [false, true]) {
+      test(`${mode}, mail ${withMail}: one operator across concurrent sign-ups`, async () => {
+        for (let round = 0; round < 5; round++) {
+          const scratch = await scratchDatabase('bootstrap44');
+          await migrate(scratch.url);
+          connectDb(scratch.url);
+          const fixture = testAuth(mode, scratch.url, withMail ? { send: async () => {} } : null);
+          try {
+            const app = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus });
+            const responses = await Promise.all(Array.from({ length: 4 }, (_, index) => app.request('/api/auth/sign-up/email', {
+              method: 'POST', headers: { origin: TEST_ORIGIN, 'content-type': 'application/json' },
+              body: JSON.stringify({ email: `first-${index}@example.invalid`, password: 'correct-horse-battery', name: `First ${index}` }),
+            })));
+            expect(responses.filter((res) => res.status === 200)).toHaveLength(mode === 'open' ? 4 : 1);
+            if (mode !== 'open') expect(responses.filter((res) => res.status === 403)).toHaveLength(3);
+            const users = await unsafeDb().select({ role: user.role }).from(user);
+            expect(users.filter((row) => row.role === 'admin')).toHaveLength(1);
+          } finally {
+            await fixture.close();
+            await closeDb();
+            await scratch.drop();
+          }
+        }
+      }, 60_000);
+    }
+  }
 });

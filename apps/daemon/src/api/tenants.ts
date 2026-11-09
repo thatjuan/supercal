@@ -86,6 +86,7 @@ const createTenant = createRoute({
           schema: z.object({
             name: z.string().min(1).max(100),
             slug: Slug.optional(),
+            allowUnverifiedOwner: z.boolean().optional().openapi({ description: 'Assign an existing unverified owner account after explicit operator confirmation' }),
             ownerEmail: z.email().optional().openapi({ description: 'Initial owner; created with a password-reset link if no such user exists' }),
           }),
         },
@@ -121,7 +122,7 @@ export const tenantRoutes = createApiApp()
     return c.json({ items }, 200);
   })
   .openapi(createTenant, async (c) => {
-    const { name, slug = slugFor(name), ownerEmail } = c.req.valid('json');
+    const { name, slug = slugFor(name), ownerEmail, allowUnverifiedOwner } = c.req.valid('json');
     const taken = await withControl((tx) => tx.select({ id: organization.id }).from(organization).where(eq(organization.slug, slug)));
     if (taken.length > 0) throw new Conflict('That slug is taken');
 
@@ -129,7 +130,9 @@ export const tenantRoutes = createApiApp()
     let passwordResetUrl: string | null = null;
     if (ownerEmail !== undefined) {
       const email = ownerEmail.toLowerCase();
-      [owner = null] = await withControl((tx) => tx.select({ id: user.id, email: user.email }).from(user).where(eq(user.email, email)));
+      const [existing] = await withControl((tx) => tx.select({ id: user.id, email: user.email, verified: user.emailVerified }).from(user).where(eq(user.email, email)));
+      if (existing && !existing.verified && !allowUnverifiedOwner) throw new Conflict('An unverified account holds that email');
+      owner = existing ? { id: existing.id, email: existing.email } : null;
       if (!owner) {
         // Better Auth's user creation cannot join our transaction; an owner left without a tenant can still sign in.
         const created = await c.var.auth.api.createUser({ body: { email, name: email.split('@')[0] ?? email, password: crypto.randomUUID() } });

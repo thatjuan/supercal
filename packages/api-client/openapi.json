@@ -4592,6 +4592,10 @@
                     "maxLength": 64,
                     "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                   },
+                  "allowUnverifiedOwner": {
+                    "type": "boolean",
+                    "description": "Assign an existing unverified owner account after explicit operator confirmation"
+                  },
                   "ownerEmail": {
                     "type": "string",
                     "format": "email",

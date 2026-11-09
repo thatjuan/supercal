@@ -5,7 +5,8 @@
  * the live stream; `idleBus` builds the API where nothing streams (OpenAPI generation, tests).
  */
 import { apiReference } from '@scalar/hono-api-reference';
-import type { SecretBox } from '@supercal/db';
+import { withControl, type SecretBox } from '@supercal/db';
+import { sql } from 'drizzle-orm';
 import { createGuardedFetch, type AdapterRegistry, type GoogleClientOptions, type GuardedFetch } from '@supercal/providers';
 import type { Context, MiddlewareHandler } from 'hono';
 import { clientIp, CLIENT_IP_HEADER } from '../client-ip.ts';
@@ -38,6 +39,8 @@ import { sinkRoutes } from './sinks.ts';
 import { subscribeRoutes } from './subscribe.ts';
 import { streamRoutes, type StreamOptions } from './stream.ts';
 import { tenantRoutes } from './tenants.ts';
+
+const BOOTSTRAP_LOCK = 44001;
 
 /** Settings for `getOpenAPI31Document` / `doc31`, shared by the served document and `bun run api:spec`. */
 export const openApiConfig = {
@@ -97,14 +100,24 @@ export function createApi(
   };
   const app = createApiApp();
   app.use('/api/auth/*', bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ message: 'Request body too large' }, 413) }));
-  function toAuth(c: Context) {
-    const request = new Request(c.req.raw);
+  function toAuth(c: Context, raw = c.req.raw) {
+    const request = new Request(raw);
     const ip = clientIp(c, clientIpHeader);
     if (ip) request.headers.set(CLIENT_IP_HEADER, ip);
     else request.headers.delete(CLIENT_IP_HEADER);
     return auth.handler(request);
   }
-  app.on(['GET', 'POST'], '/api/auth/*', toAuth);
+  app.post('/api/auth/sign-up/email', async (c) => {
+    if (!(await auth.isEmptyInstall())) return toAuth(c);
+    const request = new Request(c.req.url, { method: 'POST', headers: c.req.raw.headers, body: await c.req.raw.arrayBuffer() });
+    // A narrow exception to tx.ts: hold the main-pool lock across Better Auth's separate-pool
+    // queries only during bootstrap. Waiters never occupy the pool the winner needs to insert.
+    return withControl(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${BOOTSTRAP_LOCK})`);
+      return toAuth(c, request);
+    });
+  });
+  app.on(['GET', 'POST'], '/api/auth/*', (c) => toAuth(c));
   app.openAPIRegistry.registerComponent('securitySchemes', 'session', { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' });
   app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {
     type: 'http',

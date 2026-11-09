@@ -361,7 +361,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 | `SUPERCAL_EGRESS_ALLOW` | no | Operator LAN allowlist: `origin=cidr,…`. |
 | `SUPERCAL_ICS_CACHE_MB` | no | Bound on the in-process cache of rendered ICS bodies (default 64). |
 | `SUPERCAL_SYNC_CONCURRENCY` | no | Sync jobs at once per worker process (default 8; at most 2 per account). |
-| `RESEND_API_KEY`, `MAIL_FROM` | no | Enables magic links, invites, verification mail. |
+| `RESEND_API_KEY`, `MAIL_FROM` | no | Enables password-reset, invitation and verification mail. |
 | `WEB_ORIGIN` | dev | Extra trusted origin for the Vite dev server. |
 
 Google OAuth apps left in **Testing** publishing status issue refresh tokens that expire after 7 days. The self-hosting guide must walk operators through publishing the app (and through the personal-use / <100-user verification exceptions), and the dashboard shows `reauth_required` clearly when this happens *(ingest)*.
