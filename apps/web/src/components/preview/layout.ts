@@ -8,6 +8,11 @@ import type { components } from '@supercal/api-client';
 
 export type Occurrence = components['schemas']['Occurrence'];
 
+/** What the grid needs from an occurrence, whichever API it came from. */
+export type GridItem = { key: string; title: string; start: string; end: string; allDay: boolean; location?: string; cancelled?: boolean };
+/** The part of a `GridItem` that decides where it goes. */
+type Timing = Pick<GridItem, 'start' | 'end' | 'allDay'>;
+
 const MINUTES_PER_DAY = 24 * 60;
 
 /** The Monday-to-Sunday week containing `date`. */
@@ -32,7 +37,7 @@ export function windowOf(days: readonly Temporal.PlainDate[], zone: string): { f
  * instants of midnight in the source calendar's zone, which it does not name; rounding to the
  * nearest UTC midnight recovers the date for every zone within ±12 hours of UTC.
  */
-export function allDayDates(occurrence: Pick<Occurrence, 'start' | 'end'>): { start: Temporal.PlainDate; end: Temporal.PlainDate } {
+export function allDayDates(occurrence: Pick<GridItem, 'start' | 'end'>): { start: Temporal.PlainDate; end: Temporal.PlainDate } {
   const date = (iso: string) => Temporal.Instant.from(iso).add({ hours: 12 }).toZonedDateTimeISO('UTC').toPlainDate();
   const start = date(occurrence.start);
   const end = date(occurrence.end);
@@ -40,13 +45,13 @@ export function allDayDates(occurrence: Pick<Occurrence, 'start' | 'end'>): { st
 }
 
 /** A timed occurrence's piece on one day: minutes from midnight, and its column among overlapping pieces. */
-export type TimedBlock = { occurrence: Occurrence; day: number; startMinute: number; endMinute: number; column: number; columns: number };
+export type TimedBlock<T> = { occurrence: T; day: number; startMinute: number; endMinute: number; column: number; columns: number };
 /** An all-day occurrence in the top lane: the day indexes it spans and its row. */
-export type AllDayBlock = { occurrence: Occurrence; firstDay: number; lastDay: number; row: number };
+export type AllDayBlock<T> = { occurrence: T; firstDay: number; lastDay: number; row: number };
 
 /** Places `occurrences` on the grid of `days`, as seen in `zone`. */
-export function layoutWeek(occurrences: readonly Occurrence[], days: readonly Temporal.PlainDate[], zone: string) {
-  const timed: TimedBlock[] = [];
+export function layoutWeek<T extends Timing>(occurrences: readonly T[], days: readonly Temporal.PlainDate[], zone: string) {
+  const timed: TimedBlock<T>[] = [];
   days.forEach((day, index) => {
     const dayStart = day.toZonedDateTime(zone).toInstant();
     const dayEnd = day.add({ days: 1 }).toZonedDateTime(zone).toInstant();
@@ -68,7 +73,7 @@ export function layoutWeek(occurrences: readonly Occurrence[], days: readonly Te
     timed.push(...placeSideBySide(pieces));
   });
 
-  const allDay: AllDayBlock[] = [];
+  const allDay: AllDayBlock<T>[] = [];
   const rowEnds: number[] = [];
   const first = days[0];
   for (const occurrence of occurrences.filter((o) => o.allDay)) {
@@ -85,13 +90,13 @@ export function layoutWeek(occurrences: readonly Occurrence[], days: readonly Te
   return { timed, allDay, allDayRows: rowEnds.length };
 }
 
-type Piece = Omit<TimedBlock, 'column' | 'columns'>;
+type Piece<T> = Omit<TimedBlock<T>, 'column' | 'columns'>;
 
 /** Gives each piece of one day a column: pieces that overlap, directly or through others, share a column count. */
-function placeSideBySide(pieces: Piece[]): TimedBlock[] {
+function placeSideBySide<T>(pieces: Piece<T>[]): TimedBlock<T>[] {
   const sorted = [...pieces].sort((a, b) => a.startMinute - b.startMinute || b.endMinute - a.endMinute);
-  const placed: TimedBlock[] = [];
-  let cluster: TimedBlock[] = [];
+  const placed: TimedBlock<T>[] = [];
+  let cluster: TimedBlock<T>[] = [];
   let columnEnds: number[] = [];
   let clusterEnd = -1;
 
@@ -117,7 +122,7 @@ function placeSideBySide(pieces: Piece[]): TimedBlock[] {
 }
 
 /** The local date an occurrence is listed under in the agenda. */
-export function agendaDate(occurrence: Occurrence, zone: string): Temporal.PlainDate {
+export function agendaDate(occurrence: Timing, zone: string): Temporal.PlainDate {
   return occurrence.allDay ? allDayDates(occurrence).start : Temporal.Instant.from(occurrence.start).toZonedDateTimeISO(zone).toPlainDate();
 }
 
