@@ -12,7 +12,7 @@ import { requireAccess, type Access } from '../hosted/access.ts';
 import { readResources } from '../hosted/read.ts';
 import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import { expandCalendarResources, Occurrence, occurrenceWindow } from './occurrences.ts';
-import { audit, BadRequest, createApiApp, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
+import { audit, BadRequest, createApiApp, Forbidden, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
 
 const Event = JSEvent.clone().openapi('JSEvent', { description: 'JSCalendar 2.0 Event per draft-ietf-calext-jscalendarbis-22; unknown properties are preserved.' });
 const ReadEvent = JSCalendar.clone().openapi('JSCalendar', { description: 'JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Several detached recurrence instances read as a Group per mapping draft-ietf-calext-jscalendar-icalendar-29 §2.1.2.' });
@@ -268,6 +268,8 @@ eventRoutes
     return c.json(result, 200);
   })
   .openapi(exportCalendar, async (c) => {
+    if (!c.req.header('Authorization') && c.req.header('Sec-Fetch-Site') === 'cross-site')
+      throw new Forbidden('Cross-site downloads are not allowed', 'cross-origin');
     const rows = await withTenant(c.var.principal.tenantId, async (tx) => { const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id); return (await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id]))).rows; });
     c.header('Content-Type', 'text/calendar; charset=utf-8');
     return stream(c, async (output) => {

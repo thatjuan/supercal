@@ -8,7 +8,7 @@ import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { eq, sql } from 'drizzle-orm';
 import postgres from 'postgres';
-import { startBus, type Bus } from '../src/bus.ts';
+import { idleBus, startBus, type Bus } from '../src/bus.ts';
 import { createApp } from '../src/http.ts';
 import { createLogger } from '../src/log.ts';
 import { testAuth, testSecrets } from './auth-fixture.ts';
@@ -20,6 +20,21 @@ const eventually = async (check: () => Promise<boolean>, timeoutMs = 10_000) => 
     await Bun.sleep(25);
   }
 };
+
+test('/metrics is closed without a token except in insecure development', async () => {
+  const fixture = testAuth('open');
+  try {
+    const deps = { auth: fixture.auth, secrets: testSecrets, bus: idleBus, icsCacheBytes: 0 };
+    expect((await createApp(new Set(), deps).request('/metrics')).status).toBe(404);
+    const dev = createApp(new Set(), { ...deps, ops: { insecureDev: true } });
+    expect((await dev.request('/metrics')).status).toBe(200);
+    const token = createApp(new Set(), { ...deps, ops: { metricsToken: 'secret' } });
+    expect((await token.request('/metrics')).status).toBe(401);
+    expect((await token.request('/metrics', { headers: { authorization: 'Bearer secret' } })).status).toBe(200);
+  } finally {
+    await fixture.close();
+  }
+});
 
 describe.skipIf(!testDatabaseUrl)('ops endpoints', () => {
   let scratch: Awaited<ReturnType<typeof scratchDatabase>>;

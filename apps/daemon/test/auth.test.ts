@@ -176,6 +176,33 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
       expect(list.items.map((item) => item.id)).toEqual([key.id]);
     });
 
+    test('cookie mutations check origins and fetch metadata while bearer clients may cross origins', async () => {
+      const app = apps.get('open');
+      if (!app) throw new Error('open app missing');
+      const feeds = await call('open', '/api/v1/feeds', { cookie: user.cookie });
+      const { items } = await feeds.json() as { items: { id: string }[] };
+      const feed = items[0];
+      if (!feed) throw new Error('default feed missing');
+      const path = `/api/v1/feeds/${feed.id}/credentials/ics/rotate`;
+      for (const origin of ['http://sibling.localhost:4316', 'https://foreign.example']) {
+        const res = await app.request(path, { method: 'POST', headers: { cookie: user.cookie, origin } });
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ type: 'https://supercal.dev/problems/cross-origin' });
+      }
+      expect((await app.request(path, { method: 'POST', headers: { cookie: user.cookie, origin: TEST_ORIGIN } })).status).toBe(200);
+      expect((await app.request(path, { method: 'POST', headers: { authorization: `Bearer ${key.key}`, origin: 'https://foreign.example' } })).status).toBe(200);
+      for (const site of ['same-site', 'cross-site'])
+        expect((await app.request(path, { method: 'POST', headers: { cookie: user.cookie, 'Sec-Fetch-Site': site } })).status).toBe(403);
+      for (const site of ['same-origin', 'none'])
+        expect((await app.request(path, { method: 'POST', headers: { cookie: user.cookie, 'Sec-Fetch-Site': site } })).status).toBe(200);
+      expect((await app.request(path, { method: 'POST', headers: { cookie: user.cookie } })).status).toBe(200);
+
+      const profile = `/api/v1/feeds/${feed.id}/mobileconfig`;
+      expect((await app.request(profile, { headers: { cookie: user.cookie, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(403);
+      expect((await app.request(profile, { headers: { cookie: user.cookie, 'Sec-Fetch-Site': 'same-origin' } })).status).toBe(200);
+      expect((await app.request(profile, { headers: { authorization: `Bearer ${key.key}`, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(200);
+    });
+
     test('editing key metadata through Better Auth does not move the key to another tenant', async () => {
       const update = await call('open', '/api/auth/api-key/update', { cookie: user.cookie, body: { keyId: key.id, metadata: { tenantId: operator.me.tenant.id } } });
       expect(update.status).toBe(200);

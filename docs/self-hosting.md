@@ -58,6 +58,7 @@ SUPERCAL_OWNER_PASSWORD=    # openssl rand -hex 24
 SUPERCAL_RUNTIME_PASSWORD=  # openssl rand -hex 24
 SUPERCAL_KEYS=v1:           # v1: followed by the output of openssl rand -base64 32
 BETTER_AUTH_SECRET=         # openssl rand -hex 32
+SUPERCAL_METRICS_TOKEN=     # openssl rand -hex 32
 ```
 
 `initdb/supercal.sh` creates the database and its logins the first time Postgres starts (the database setup section explains them):
@@ -110,6 +111,7 @@ services:
       SUPERCAL_CLIENT_IP_HEADER: X-Forwarded-For
       SUPERCAL_KEYS: ${SUPERCAL_KEYS}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      SUPERCAL_METRICS_TOKEN: ${SUPERCAL_METRICS_TOKEN}
     restart: unless-stopped
 
   caddy:
@@ -145,7 +147,7 @@ Keep these in mind on Kubernetes, Nomad or plain `docker run`:
 
 - **Probes.** The image has no shell, so it has no `HEALTHCHECK`. Point your orchestrator at `GET /healthz` for liveness (the process is up) and `GET /readyz` for readiness. `/readyz` answers 200 only when the database answers `select 1` within one second, the database's newest migration is the one this binary ships, the notification listener is connected, and, in a process with the `worker` role, the scheduler has ticked in the last 30 seconds. Otherwise it answers 503 with the failing checks, such as `{"status":"not ready","failing":["bus"]}`.
 - **Read-only root filesystem.** Supported, but `/tmp` must stay writable: migrations are written to a temporary directory before they are applied. Mount a tmpfs there (`--read-only --tmpfs /tmp` with `docker run`).
-- **Metrics.** `GET /metrics` serves Prometheus text: sync duration and errors per provider, lost leases, recorded changes, notification lag, feed requests by kind and status, ICS cache hits and misses, push subscriptions by provider and state, and sink writes. Set `SUPERCAL_METRICS_TOKEN` to require `Authorization: Bearer <token>`, or keep the path off your public proxy.
+- **Metrics.** `GET /metrics` serves Prometheus text: sync duration and errors per provider, lost leases, recorded changes, notification lag, feed requests by kind and status, ICS cache hits and misses, push subscriptions by provider and state, and sink writes. Set `SUPERCAL_METRICS_TOKEN` and send `Authorization: Bearer <token>` to scrape it. Without a token, the endpoint returns 404 unless `SUPERCAL_INSECURE_DEV=1`.
 - **Client addresses.** Set `SUPERCAL_CLIENT_IP_HEADER` only when a proxy you run overwrites or appends that header; otherwise clients can forge it. When unset, login throttles and auth rate limits use the socket peer.
 - **Shutdown.** On SIGTERM, Supercal stops accepting requests, hands back its sync leases and exits within ten seconds.
 
@@ -210,7 +212,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 | `SUPERCAL_EGRESS_ALLOW` |  |  | LAN servers accounts may reach, as `https://host[:port]=cidr` entries separated by commas. |
 | `SUPERCAL_ICS_CACHE_MB` |  | `64` | Memory bound, in MiB, of the cache of rendered ICS feeds. |
 | `SUPERCAL_SYNC_CONCURRENCY` |  | `8` | Sync jobs a worker process runs at once (at most 2 per account). |
-| `SUPERCAL_METRICS_TOKEN` |  |  | When set, `/metrics` requires `Authorization: Bearer <token>`. |
+| `SUPERCAL_METRICS_TOKEN` |  |  | Required to enable `/metrics` unless `SUPERCAL_INSECURE_DEV=1`; when set, requires `Authorization: Bearer <token>`. |
 | `RESEND_API_KEY` |  |  | Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email. |
 | `MAIL_FROM` |  |  | Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend. |
 | `WEB_ORIGIN` |  |  | Extra trusted origin for the Vite dev server, such as `http://localhost:5173`. Development only. |
