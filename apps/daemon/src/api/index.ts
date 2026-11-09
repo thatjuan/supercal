@@ -7,7 +7,8 @@
 import { apiReference } from '@scalar/hono-api-reference';
 import type { SecretBox } from '@supercal/db';
 import { createGuardedFetch, type AdapterRegistry, type GoogleClientOptions, type GuardedFetch } from '@supercal/providers';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { clientIp, CLIENT_IP_HEADER } from '../client-ip.ts';
 import { bodyLimit } from 'hono/body-limit';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Auth } from '../auth/auth.ts';
@@ -59,6 +60,7 @@ export const openApiConfig = {
  */
 export type ApiDeps = {
   auth: Auth;
+  clientIpHeader?: string | undefined;
   secrets: SecretBox;
   bus: Bus;
   stream?: StreamOptions;
@@ -74,7 +76,7 @@ export type OAuthConfig = { webOrigin?: string | undefined; stateSecret: string;
 
 /** Builds the API. The docs and `/api/v1/instance` are mounted before authentication, so they are public. */
 export function createApi(
-  { auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig, googleApi, signup = 'invite' }: ApiDeps,
+  { auth, secrets, bus, stream, fetch, adapters, oauth: oauthConfig, googleApi, signup = 'invite', clientIpHeader }: ApiDeps,
   authenticate: MiddlewareHandler<ApiEnv> = requirePrincipal(auth),
 ) {
   const feeds = createFeedService(secrets);
@@ -95,7 +97,14 @@ export function createApi(
   };
   const app = createApiApp();
   app.use('/api/auth/*', bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ message: 'Request body too large' }, 413) }));
-  app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
+  function toAuth(c: Context) {
+    const request = new Request(c.req.raw);
+    const ip = clientIp(c, clientIpHeader);
+    if (ip) request.headers.set(CLIENT_IP_HEADER, ip);
+    else request.headers.delete(CLIENT_IP_HEADER);
+    return auth.handler(request);
+  }
+  app.on(['GET', 'POST'], '/api/auth/*', toAuth);
   app.openAPIRegistry.registerComponent('securitySchemes', 'session', { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' });
   app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {
     type: 'http',

@@ -107,6 +107,7 @@ services:
       DATABASE_URL: postgres://supercal_runtime:${SUPERCAL_RUNTIME_PASSWORD}@postgres:5432/supercal
       DATABASE_MIGRATION_URL: postgres://supercal_owner:${SUPERCAL_OWNER_PASSWORD}@postgres:5432/supercal
       SUPERCAL_PUBLIC_URL: https://${SUPERCAL_DOMAIN}
+      SUPERCAL_CLIENT_IP_HEADER: X-Forwarded-For
       SUPERCAL_KEYS: ${SUPERCAL_KEYS}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
     restart: unless-stopped
@@ -126,6 +127,8 @@ volumes:
   caddy:
 ```
 
+Caddy replaces client-sent `X-Forwarded-For` by default, so Supercal can trust that header for login throttles and auth rate limits.
+
 Make the init script executable and start the stack:
 
 ```sh
@@ -143,6 +146,7 @@ Keep these in mind on Kubernetes, Nomad or plain `docker run`:
 - **Probes.** The image has no shell, so it has no `HEALTHCHECK`. Point your orchestrator at `GET /healthz` for liveness (the process is up) and `GET /readyz` for readiness. `/readyz` answers 200 only when the database answers `select 1` within one second, the database's newest migration is the one this binary ships, the notification listener is connected, and, in a process with the `worker` role, the scheduler has ticked in the last 30 seconds. Otherwise it answers 503 with the failing checks, such as `{"status":"not ready","failing":["bus"]}`.
 - **Read-only root filesystem.** Supported, but `/tmp` must stay writable: migrations are written to a temporary directory before they are applied. Mount a tmpfs there (`--read-only --tmpfs /tmp` with `docker run`).
 - **Metrics.** `GET /metrics` serves Prometheus text: sync duration and errors per provider, lost leases, recorded changes, notification lag, feed requests by kind and status, ICS cache hits and misses, push subscriptions by provider and state, and sink writes. Set `SUPERCAL_METRICS_TOKEN` to require `Authorization: Bearer <token>`, or keep the path off your public proxy.
+- **Client addresses.** Set `SUPERCAL_CLIENT_IP_HEADER` only when a proxy you run overwrites or appends that header; otherwise clients can forge it. When unset, login throttles and auth rate limits use the socket peer.
 - **Shutdown.** On SIGTERM, Supercal stops accepting requests, hands back its sync leases and exits within ten seconds.
 
 ## Database setup
@@ -192,6 +196,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 | `DATABASE_URL` | yes |  | Postgres connection URL the daemon runs on. Recommended: a login that is a member of `supercal_app` and `supercal_control` and owns nothing. |
 | `DATABASE_MIGRATION_URL` |  |  | Postgres URL of the schema owner, used only to apply migrations. Defaults to `DATABASE_URL` (single-URL mode). |
 | `SUPERCAL_PUBLIC_URL` | production |  | Public https base URL, used in feed links, OAuth redirect URIs and push webhooks. Required unless `SUPERCAL_INSECURE_DEV=1`. |
+| `SUPERCAL_CLIENT_IP_HEADER` |  |  | Header holding the client address, set by a reverse proxy you run. When unset, the socket peer is used. |
 | `SUPERCAL_KEYS` | production |  | Master keys for secrets at rest, `v2:<base64 32 bytes>,v1:…`; the first one encrypts. Required unless `SUPERCAL_INSECURE_DEV=1`. |
 | `BETTER_AUTH_SECRET` | production |  | Secret that signs sessions and OAuth state; at least 32 random characters. Required unless `SUPERCAL_INSECURE_DEV=1`. |
 | `SUPERCAL_ROLES` |  | `api,dav,worker` | Comma list of roles this process runs: `api` (API and dashboard), `dav` (CalDAV and ICS feeds), `worker` (sync). |
@@ -319,6 +324,8 @@ Every process runs the roles listed in `SUPERCAL_ROLES`, and every role is safe 
 - `api` serves the management API, the dashboard, sign-in and the provider push webhooks.
 - `dav` serves the CalDAV and ICS feeds that calendar apps subscribe to.
 - `worker` syncs accounts. Replicas share the work through leases in Postgres, and each runs up to `SUPERCAL_SYNC_CONCURRENCY` jobs at once (default 8, at most 2 per account).
+
+Better Auth rate limits and CalDAV login failure budgets are in memory, separately on each replica. Adding replicas increases the total number of attempts an address can make.
 
 A single process with all three roles comfortably serves a household or a small team. To grow, run separate deployments, for example two `api,dav` replicas behind the load balancer and one or more `worker` replicas that receive no traffic.
 

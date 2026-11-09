@@ -3,14 +3,14 @@
  * (sessions and tenant-bound API keys), role policy and the operator's tenant endpoint. Ports the
  * scenarios of `spikes/platform/src/auth-evidence.ts`.
  */
-import { apiKeyTenant, closeDb, connectDb, member, migrate } from '@supercal/db';
+import { apiKeyTenant, closeDb, connectDb, createControlDatabase, member, migrate } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { createApi } from '../src/api/index.ts';
 import { idleBus } from '../src/bus.ts';
-import type { AuthConfig } from '../src/auth/auth.ts';
+import { createAuth, type AuthConfig } from '../src/auth/auth.ts';
 import { TEST_ORIGIN, testAuth, testSecrets } from './auth-fixture.ts';
 
 type Mode = AuthConfig['SUPERCAL_SIGNUP'];
@@ -67,6 +67,40 @@ describe.skipIf(!testDatabaseUrl)('authentication', () => {
     await Promise.all(fixtures.map((fixture) => fixture.close()));
     await closeDb();
     await scratch?.drop();
+  });
+
+  test('secure-mode sign-in limits use the configured client IP with NODE_ENV unset and ignore forged private headers', async () => {
+    if (!scratch) throw new Error('auth database missing');
+    const previousNodeEnv = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    const db = createControlDatabase(scratch.url, 2);
+    try {
+      const origin = 'https://cal.example.test';
+      const auth = createAuth({
+        PORT: 4316,
+        SUPERCAL_PUBLIC_URL: origin,
+        SUPERCAL_SIGNUP: 'invite',
+        SUPERCAL_INSECURE_DEV: false,
+        BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret-0123',
+        WEB_ORIGIN: undefined,
+      }, db);
+      const app = createApi({ auth, secrets: testSecrets, bus: idleBus, clientIpHeader: 'X-Forwarded-For' });
+      const signIn = (ip: string, forged: string) => app.request(`${origin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', 'X-Forwarded-For': `198.51.100.1, ${ip}`, 'x-supercal-client-ip': forged },
+        body: JSON.stringify({ email: 'missing@example.invalid', password: 'wrong-password' }),
+      });
+      for (let i = 0; i < 3; i++) expect((await signIn('192.0.2.1', `203.0.113.${i + 1}`)).status).toBe(401);
+      const limited = await signIn('192.0.2.1', '203.0.113.99');
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get('X-Retry-After'))).toBeGreaterThan(0);
+      // Sharing the forged address does not put a different resolved client into the blocked bucket.
+      expect((await signIn('192.0.2.2', '203.0.113.99')).status).toBe(401);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      await db.$client.end();
+    }
   });
 
   test('an oversized sign-in body is rejected before Better Auth sees it', async () => {

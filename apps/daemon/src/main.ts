@@ -90,6 +90,7 @@ const server = Bun.serve({
     oauth: { webOrigin: config.WEB_ORIGIN, stateSecret: config.BETTER_AUTH_SECRET ?? crypto.randomUUID(), google, microsoft },
     stream: { signal: stopAbort.signal },
     publicUrl: config.SUPERCAL_PUBLIC_URL,
+    clientIpHeader: config.SUPERCAL_CLIENT_IP_HEADER,
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,
     signup: config.SUPERCAL_SIGNUP,
     webDir,
