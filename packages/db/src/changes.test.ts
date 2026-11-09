@@ -191,6 +191,22 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     expect(left.rows.map((row) => row.uid).sort()).toEqual(['live', 'recent']);
   });
 
+  test('purging keeps the newest tombstone until a newer calendar row arrives', async () => {
+    const cal = calendars[2] as SourceCalendarId, inThird = inTenant(tenants[2] as TenantId);
+    await inThird((tx) => recordChanges(tx, [upsert(cal, 'purge-anchor')]));
+    const { maxSeq: deleted } = await inThird((tx) => recordChanges(tx, [remove(cal, 'purge-anchor')]));
+    const cutoff = new Date(Date.now() + 60_000);
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const retained = await inThird((tx) => changesSince(tx, [cal], 0n, 1000));
+    expect(retained.rows.find((row) => row.uid === 'purge-anchor')).toMatchObject({ deleted: true, seq: deleted });
+    expect((await inThird((tx) => publicationState(tx, [cal]))).maxSeq).toBe(deleted!);
+    const { maxSeq: newer } = await inThird((tx) => recordChanges(tx, [upsert(cal, 'newer-than-anchor')]));
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const removed = await inThird((tx) => changesSince(tx, [cal], 0n, 1000));
+    expect(removed.rows.some((row) => row.uid === 'purge-anchor')).toBe(false);
+    expect((await inThird((tx) => publicationState(tx, [cal]))).maxSeq).toBe(newer!);
+  });
+
   test('NOTIFY reaches another connection only after commit, and never on rollback', async () => {
     const listener = postgres(testDatabaseUrl ?? '', { max: 1, onnotice: () => {} });
     const received: unknown[] = [];

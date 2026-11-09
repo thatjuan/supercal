@@ -37,7 +37,7 @@ import type { EventResource, JCalComponent, JCalParams, JCalProperty } from "./m
  * serialisation). It is part of every object and ICS ETag, so bumping it makes clients
  * re-download; forgetting to bump leaves them holding stale bodies under unchanged ETags.
  */
-export const RENDER_VERSION = 1;
+export const RENDER_VERSION = 2;
 
 export type Privacy = "full" | "title-only" | "busy-only";
 
@@ -101,12 +101,18 @@ const precedence = (a: Candidate, b: Candidate): number =>
   b.from.priority - a.from.priority ||
   compareStrings(b.from.sourceCalendarId, a.from.sourceCalendarId);
 
-/** One resource from every copy of a UID: a winner per component, overrides unioned. */
-function merge(uid: string, copies: SourceResource[]): EventResource {
+// RFC 5545 3.8.1.3: an unrecognised class is private. An override with no CLASS takes its master's.
+const isRestricted = (c: JCalComponent, master: JCalComponent | null): boolean =>
+  (textValue(c, "class")?.trim().toUpperCase() ?? (master && c !== master ? classification(master).trim().toUpperCase() : "PUBLIC")) !== "PUBLIC";
+
+/** One resource from every copy of a UID, preserving restrictions independently of the winners. */
+function merge(uid: string, copies: SourceResource[]) {
+  const restrictedKeys = new Set<string | null>();
   const winners = new Map<string | null, Candidate>();
   for (const from of copies)
     for (const component of componentsOf(from.resource)) {
       const key = recurrenceId(component);
+      if (isRestricted(component, from.resource.master)) restrictedKeys.add(key);
       const current = winners.get(key);
       const candidate = { component, from };
       if (!current || precedence(candidate, current) > 0) winners.set(key, candidate);
@@ -123,14 +129,17 @@ function merge(uid: string, copies: SourceResource[]): EventResource {
       const tz = from.resource.timezones[tzid];
       if (tz) timezones[tzid] ??= tz;
     }
-  return { uid, master: master?.component ?? null, overrides: overrides.map((w) => w.component), timezones };
+  return { resource: { uid, master: master?.component ?? null, overrides: overrides.map((w) => w.component), timezones }, restrictedKeys };
 }
 
 // 2–3. Filters and privacy
 
-const PRIVATE_CLASSES = new Set(["PRIVATE", "CONFIDENTIAL"]);
-const effectivePrivacy = (privacy: Privacy, audience: PublicationSpec["audience"], c: JCalComponent): Privacy =>
-  (privacy === "title-only" || audience !== "owner") && PRIVATE_CLASSES.has(classification(c)) ? "busy-only" : privacy;
+/** A component is restricted when any copy was, or when it has no CLASS and any master copy was. */
+const restrictedIn = (keys: ReadonlySet<string | null>, c: JCalComponent) =>
+  keys.has(recurrenceId(c)) || (!textValue(c, "class") && keys.has(null));
+
+const effectivePrivacy = (privacy: Privacy, audience: PublicationSpec["audience"], restricted: boolean): Privacy =>
+  (privacy === "title-only" || audience !== "owner") && restricted ? "busy-only" : privacy;
 
 function declinedByOwner(spec: PublicationSpec, c: JCalComponent): boolean {
   const owners = new Set(spec.ownerAddresses.map(bareAddress));
@@ -146,13 +155,13 @@ const isAllDay = (c: JCalComponent) => {
 };
 
 /** Hidden by a filter, or free time (TRANSP:TRANSPARENT) in busy-only output. */
-function isHidden(spec: PublicationSpec, c: JCalComponent): boolean {
+function isHidden(spec: PublicationSpec, c: JCalComponent, restrictedKeys: ReadonlySet<string | null>): boolean {
   const { hideCancelled, hideDeclined, hideAllDay } = spec.filters;
   return (
     (hideCancelled && status(c) === "CANCELLED") ||
     (hideDeclined && declinedByOwner(spec, c)) ||
     (hideAllDay && isAllDay(c)) ||
-    (effectivePrivacy(spec.privacy, spec.audience, c) === "busy-only" && transp(c) === "TRANSPARENT")
+    (effectivePrivacy(spec.privacy, spec.audience, restrictedIn(restrictedKeys, c)) === "busy-only" && transp(c) === "TRANSPARENT")
   );
 }
 
@@ -187,8 +196,8 @@ function allowedParams(p: JCalProperty): JCalProperty {
  * never by deleting from a copy. Owner/member full keeps everything (VALARM only with
  * `keepAlarms`); public full uses its own allowlist and never retains subcomponents.
  */
-function applyPrivacy(spec: PublicationSpec, c: JCalComponent): JCalComponent {
-  const mode = effectivePrivacy(spec.privacy, spec.audience, c);
+function applyPrivacy(spec: PublicationSpec, c: JCalComponent, restrictedKeys: ReadonlySet<string | null>): JCalComponent {
+  const mode = effectivePrivacy(spec.privacy, spec.audience, restrictedIn(restrictedKeys, c));
   if (mode === "full" && spec.audience !== "public") {
     const subs = subcomponents(c).filter((s) => spec.keepAlarms || componentName(s) !== "valarm");
     return structuredClone([componentName(c), properties(c), subs]);
@@ -201,17 +210,17 @@ function applyPrivacy(spec: PublicationSpec, c: JCalComponent): JCalComponent {
 }
 
 /** Filters and privacy for one merged resource; null when nothing of it is visible. */
-function visible(spec: PublicationSpec, merged: EventResource): EventResource | null {
+function visible(spec: PublicationSpec, merged: EventResource, restrictedKeys: ReadonlySet<string | null>): EventResource | null {
   const { master } = merged;
-  if (master && isHidden(spec, master)) return null;
-  const overrides = merged.overrides.filter((o) => !isHidden(spec, o));
+  if (master && isHidden(spec, master, restrictedKeys)) return null;
+  const overrides = merged.overrides.filter((o) => !isHidden(spec, o, restrictedKeys));
   if (!master && !overrides.length) return null;
-  const exdates = merged.overrides.filter((o) => isHidden(spec, o)).flatMap(exdateFor);
+  const exdates = merged.overrides.filter((o) => isHidden(spec, o, restrictedKeys)).flatMap(exdateFor);
   const withExdates: JCalComponent | null =
     master && exdates.length ? [componentName(master), [...properties(master), ...exdates], subcomponents(master)] : master;
   const projected = {
-    master: withExdates && applyPrivacy(spec, withExdates),
-    overrides: overrides.map((o) => applyPrivacy(spec, o)),
+    master: withExdates && applyPrivacy(spec, withExdates, restrictedKeys),
+    overrides: overrides.map((o) => applyPrivacy(spec, o, restrictedKeys)),
   };
   const used = new Set([projected.master, ...projected.overrides].flatMap((c) => (c ? [...tzidsOf(c)] : [])));
   const timezones = Object.fromEntries(
@@ -267,9 +276,11 @@ export async function project(spec: PublicationSpec, inputs: SourceResource[]): 
     [...groups]
       .sort(([a], [b]) => compareStrings(a, b))
       .map(async ([sourceUid, copies]): Promise<ProjectedObject | null> => {
-        const resource = visible(spec, merge(sourceUid, copies));
+        const { resource: merged, restrictedKeys } = merge(sourceUid, copies);
+        const resource = visible(spec, merged, restrictedKeys);
         if (!resource) return null;
-        const outputUid = await outputUidFor(spec, sourceUid);
+        const keyed = spec.audience === "public" && restrictedKeys.size > 0;
+        const outputUid = await outputUidFor(keyed ? { ...spec, privacy: "busy-only" } : spec, sourceUid);
         return {
           outputUid,
           href: await hrefOf(outputUid),

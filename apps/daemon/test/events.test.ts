@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { JSEvent, JSCalendar, parseCalendar, serializeCalendar } from '@supercal/core';
-import { auditLog, calendarAccount, changesSince, closeDb, connectDb, member, migrate, organization, recordChanges, resource, sourceCalendar, sourceObject, systemSetting, user, withTenant, type TenantId, type SourceCalendarId } from '@supercal/db';
+import { auditLog, calendarAccount, calendarShare, changesSince, closeDb, connectDb, member, migrate, organization, recordChanges, resource, sourceCalendar, sourceObject, systemSetting, user, withTenant, type TenantId, type SourceCalendarId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { and, eq } from 'drizzle-orm';
@@ -70,6 +70,30 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     expect(ics).toContain('RECURRENCE-ID;TZID=Europe/Madrid:20261119T090000'); expect(ics).toContain('EXDATE;TZID=Europe/Madrid:20261126T090000');
     const read = await call(path); expect(read.headers.get('etag')).toBe(patched.headers.get('etag'));
     expect((await call(path, 'GET', undefined, { 'if-none-match': `W/${patched.headers.get('etag')}` })).status).toBe(304);
+  });
+  test('read ETags differ from owner ETags across get, list and changes, with no-store on get', async () => {
+    const id = await calendar(), uid = 'private-etag', base = `/calendars/${id}`;
+    const created = await call(`${base}/events/${uid}`, 'PUT', { ...example, privacy: 'private' });
+    expect(created.status).toBe(201);
+    const ownerTag = created.headers.get('etag')!;
+    const reader: Principal = { ...principal, userId: `reader_${crypto.randomUUID()}` };
+    const now = new Date();
+    await unsafeDb().insert(user).values({ id: reader.userId, name: 'Reader', email: `${reader.userId}@example.test`, updatedAt: now });
+    await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: tenantId, userId: reader.userId, role: 'member', createdAt: now });
+    await unsafeDb().insert(calendarShare).values({ tenantId, calendarId: id, granteeUserId: reader.userId, access: 'read', createdBy: principal.userId });
+    const readerApp = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus }, createMiddleware<ApiEnv>(async (c, next) => { c.set('principal', reader); await next(); }));
+    const read = (suffix: string, etag?: string) => readerApp.request(`/api/v1${base}${suffix}`, { headers: etag ? { 'if-none-match': etag } : {} });
+    const response = await read(`/events/${uid}`, ownerTag);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(JSEvent.parse(await response.json()).title).toBe('Busy');
+    const redactedTag = response.headers.get('etag')!;
+    expect(redactedTag).toBe(ownerTag.replace(/"$/, '.redacted"'));
+    const cached = await read(`/events/${uid}`, redactedTag);
+    expect(cached.status).toBe(304);
+    expect(cached.headers.get('cache-control')).toBe('no-store');
+    expect(EventList.parse(await (await read('/events')).json()).items[0]?.etag).toBe(redactedTag);
+    expect(ChangeList.parse(await (await read('/changes')).json()).changes[0]?.etag).toBe(redactedTag);
   });
   test('rejections identify the 2.0 replacement and invalid version and zone', async () => {
     const id = await calendar();

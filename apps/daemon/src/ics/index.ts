@@ -139,7 +139,8 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
 
       const states = await Promise.all(publications.map((p) => publicationState(tx, p.sources.map((s) => s.sourceCalendarId))));
       const segments = publications.map((p, i) => [p.id, p.epoch, states[i]?.maxSeq ?? 0n, p.configVersion, RENDER_VERSION].join('.'));
-      const etag = `"${segments.join('~') || `empty.${RENDER_VERSION}`}"`;
+      const scope = combined ? `all.${target.id}.${target.updatedAt.getTime()}.` : '';
+      const etag = `"${scope}${segments.join('~') || `empty.${RENDER_VERSION}`}"`;
       // Edits to names and order change no `changed_at`, so the rows' own update times count too.
       const times = [...states.map((s) => s.lastChangedAt), ...publications.map((p) => p.updatedAt), ...(combined ? [target.updatedAt] : [])];
       const lastModified = times.reduce<Date | null>((latest, t) => (t && (!latest || t > latest) ? t : latest), null);
