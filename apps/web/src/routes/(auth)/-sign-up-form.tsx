@@ -41,7 +41,7 @@ export function SignUpForm({
       name: String(form.get('name')),
       email,
       password: String(form.get('password')),
-      ...(callbackURL && { callbackURL }),
+      callbackURL: callbackURL ?? '/sign-in?verified=1',
       // Better Auth merges `fetchOptions.body` into the request body; its typed input has no room for extra fields.
       ...(invitationId && { fetchOptions: { body: { invitationId } } }),
     });

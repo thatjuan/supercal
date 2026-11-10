@@ -25,6 +25,7 @@ import {
 } from '@supercal/db';
 import { AuthFailedError, ProviderCredentials, type AdapterContext, type AdapterRegistry, type GuardedFetch, type ProviderAdapter } from '@supercal/providers';
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
+import { membership } from '../auth/principal.ts';
 import { notifyEvent } from '../bus.ts';
 import type { FeedService } from '../feeds/service.ts';
 import type { WriteBudget } from '../sinks/budget.ts';
@@ -40,7 +41,7 @@ export type SyncDeps = {
   log: Logger;
   /** The public https URL push notifications are sent to (`/hooks/<provider>` on it); null disables push. */
   pushBaseUrl: string | null;
-  /** Runs `fn` within the account's concurrency limit (`createSlots`). */
+  /** Runs `fn` in an account slot, refusing busy accounts with `AccountBusyError`. */
   accountSlot: <T>(accountId: string, fn: () => Promise<T>) => Promise<T>;
   /** Google sink calls; null when Google is not configured. */
   googleSinks: GoogleSinkClient | null;
@@ -150,6 +151,8 @@ export async function withAccount<T>(
   fn: (adapter: ProviderAdapter<unknown>, ctx: AdapterContext) => Promise<T>,
 ): Promise<T> {
   if (account.status === 'reauth_required' || account.status === 'disabled') throw new StopTargetError(`account is ${account.status}`);
+  if (account.provider !== 'hosted' && !await membership(account.ownerUserId, account.tenantId))
+    throw new StopTargetError('the account owner is no longer a member');
   return deps.accountSlot(account.id, async () => {
     let result: T;
     try {

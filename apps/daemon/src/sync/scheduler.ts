@@ -41,6 +41,17 @@ export class StopTargetError extends Error {
   override readonly name = 'StopTargetError';
 }
 
+/** The account has no free concurrency slot; the job must defer without an attempt. */
+export class AccountBusyError extends Error {
+  override readonly name = 'AccountBusyError';
+}
+
+/** The overall job deadline elapsed, even if individual requests kept making progress. */
+export class JobDeadlineError extends Error {
+  override readonly name = 'JobDeadlineError';
+}
+
+const ACCOUNT_BUSY_RETRY_MS = 5_000;
 const MINUTE = 60_000;
 const BACKOFF_CAP_MS = 60 * MINUTE;
 const ERROR_CHARS = 1000;
@@ -49,17 +60,28 @@ const after = (ms: number) => (ms === Infinity ? sql`'infinity'::timestamptz` : 
 
 /**
  * Claims up to `limit` due targets whose lease is free (only `ids`, when given) for `owner`,
- * bumping `lease_version` and `attempts`. One statement, so concurrent workers never claim the same row.
+ * bumping `lease_version` and `attempts`. Each tenant holds at most `tenantCap` leases for this owner;
+ * maintenance is exempt. One statement, so concurrent workers never claim the same row.
  */
-export async function claim(owner: string, { leaseMs, limit, ids }: { leaseMs: number; limit: number; ids?: readonly SyncTargetId[] }): Promise<Job[]> {
+export async function claim(owner: string, { leaseMs, limit, ids, tenantCap = 4 }: { leaseMs: number; limit: number; ids?: readonly SyncTargetId[]; tenantCap?: number }): Promise<Job[]> {
   if (limit <= 0 || ids?.length === 0) return [];
   const only = ids ? sql`and id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : sql``;
   const rows = await withControl((tx) =>
     tx.execute<{ id: SyncTargetId; tenant_id: TenantId | null; kind: SyncKind; target_id: string; lease_version: string; wake_generation: string; attempts: number }>(sql`
-      with due as (
-        select id from sync_target
-        where next_run_at <= clock_timestamp() and (lease_until is null or lease_until < clock_timestamp()) ${only}
-        order by next_run_at, id limit ${limit} for update skip locked)
+      with busy as (
+        select tenant_id, count(*) as n from sync_target
+        where lease_owner = ${owner} and lease_until >= clock_timestamp() and tenant_id is not null
+        group by tenant_id),
+      ranked as (
+        select t.id, t.tenant_id, t.next_run_at,
+          row_number() over (partition by t.tenant_id order by t.next_run_at, t.id) as rn
+        from sync_target t
+        where t.next_run_at <= clock_timestamp() and (t.lease_until is null or t.lease_until < clock_timestamp()) ${only}),
+      allowed as (
+        select r.id, r.next_run_at from ranked r left join busy b using (tenant_id)
+        where r.tenant_id is null or r.rn + coalesce(b.n, 0) <= ${tenantCap}
+        order by r.next_run_at, r.id limit ${limit}),
+      due as (select id from sync_target where id in (select id from allowed) for update skip locked)
       update sync_target t set lease_owner = ${owner}, lease_until = ${after(leaseMs)},
         lease_version = t.lease_version + 1, attempts = t.attempts + 1
       from due where t.id = due.id
@@ -132,6 +154,13 @@ export async function release(job: Job): Promise<void> {
   );
 }
 
+/** Frees a busy account's lease without recording a run or spending an attempt. */
+export async function defer(job: Job, ms: number): Promise<void> {
+  await withControl((tx) => tx.update(syncTarget)
+    .set({ leaseOwner: null, leaseUntil: null, nextRunAt: after(ms), attempts: sql`greatest(${syncTarget.attempts} - 1, 0)` })
+    .where(held(job)));
+}
+
 /**
  * Makes `ids` due now and bumps their `wake_generation` (so a run in progress runs again at once),
  * then NOTIFYs workers on commit. What a webhook, a manual sync or a new calendar does.
@@ -169,22 +198,19 @@ export function nextPollMs({ provider, pushActive, hintMs, sinceChangeMs }: { pr
   return Math.min(maxMs, Math.max(minMs, wanted));
 }
 
-/** Per-key concurrency limit: at most `limit` runs of one key (an account) at a time. */
+/** Per-account concurrency limit; busy accounts refuse immediately instead of queuing jobs. */
 export function createSlots(limit: number) {
-  const active = new Map<string, { count: number; waiting: (() => void)[] }>();
+  const active = new Map<string, number>();
   return async function run<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    let slot = active.get(key);
-    if (!slot) active.set(key, (slot = { count: 0, waiting: [] }));
-    const entry = slot;
-    if (entry.count >= limit) await new Promise<void>((resolve) => entry.waiting.push(resolve));
-    entry.count++;
+    const count = active.get(key) ?? 0;
+    if (count >= limit) throw new AccountBusyError('the account is busy');
+    active.set(key, count + 1);
     try {
       return await fn();
     } finally {
-      entry.count--;
-      const next = entry.waiting.shift();
-      if (next) next();
-      else if (entry.count === 0) active.delete(key);
+      const remaining = (active.get(key) ?? 1) - 1;
+      if (remaining === 0) active.delete(key);
+      else active.set(key, remaining);
     }
   };
 }
@@ -198,6 +224,10 @@ export type SchedulerOptions = {
   owner?: string;
   /** Jobs at once in this process (`SUPERCAL_SYNC_CONCURRENCY`). */
   concurrency?: number;
+  /** Concurrent jobs per tenant in this process; maintenance is exempt. */
+  tenantCap?: number;
+  /** Overall job deadline, including all provider requests (default 30 minutes). */
+  jobDeadlineMs?: number;
   leaseMs?: number;
   pollMs?: number;
   /** Called after every loop pass whose claims reached the database; `/readyz` watches it. */
@@ -209,7 +239,7 @@ export type SchedulerOptions = {
  * leases released) before resolving. Claims every `pollMs`, at once on a bus `wake`, and whenever
  * a job finishes.
  */
-export async function startScheduler({ handlers, log, signal, bus, owner = crypto.randomUUID(), concurrency = 8, leaseMs = 60_000, pollMs = 5_000, onTick }: SchedulerOptions): Promise<void> {
+export async function startScheduler({ handlers, log, signal, bus, owner = crypto.randomUUID(), concurrency = 8, tenantCap = Math.max(1, Math.ceil(concurrency / 2)), jobDeadlineMs = 30 * MINUTE, leaseMs = 60_000, pollMs = 5_000, onTick }: SchedulerOptions): Promise<void> {
   const running = new Set<Promise<void>>();
   const woken = new Set<SyncTargetId>();
   let kicked = false;
@@ -236,23 +266,26 @@ export async function startScheduler({ handlers, log, signal, bus, owner = crypt
         .then((ok) => ok || controller.abort(new LeaseLostError('lease lost')))
         .catch((error) => jobLog.warn('lease renewal failed', { error }));
     }, leaseMs / 3);
+    const deadline = setTimeout(() => controller.abort(new JobDeadlineError('the job ran past its deadline')), jobDeadlineMs);
     try {
       const { nextRunInMs } = await handlers[job.kind](job, controller.signal);
+      if (controller.signal.reason instanceof JobDeadlineError) throw controller.signal.reason;
       if (!(await complete(job, { ok: true, nextRunInMs }))) {
         metrics.leaseLost.inc({});
         jobLog.warn('completion rejected: lease lost');
       }
     } catch (error) {
-      if (error instanceof LeaseLostError || controller.signal.reason instanceof LeaseLostError) {
+      if (error instanceof AccountBusyError) await defer(job, ACCOUNT_BUSY_RETRY_MS);
+      else if (error instanceof LeaseLostError || controller.signal.reason instanceof LeaseLostError) {
         metrics.leaseLost.inc({});
         jobLog.warn('job stopped: lease lost');
-      }
-      else if (signal.aborted) await release(job);
+      } else if (signal.aborted) await release(job);
       else {
         jobLog.warn('job failed', { error, attempts: job.attempts });
-        await complete(job, { ok: false, error });
+        await complete(job, { ok: false, error: controller.signal.reason instanceof JobDeadlineError ? controller.signal.reason : error });
       }
     } finally {
+      clearTimeout(deadline);
       clearInterval(renewal);
       signal.removeEventListener('abort', stop);
     }
@@ -291,12 +324,12 @@ export async function startScheduler({ handlers, log, signal, bus, owner = crypt
       if (free > 0 && woken.size > 0) {
         const ids = [...woken];
         woken.clear();
-        const jobs = await claim(owner, { leaseMs, limit: free, ids });
+        const jobs = await claim(owner, { leaseMs, limit: free, ids, tenantCap });
         jobs.forEach(start);
         free -= jobs.length;
       }
       if (free > 0) {
-        const jobs = await claim(owner, { leaseMs, limit: free });
+        const jobs = await claim(owner, { leaseMs, limit: free, tenantCap });
         jobs.forEach(start);
         claimed = jobs.length;
       }

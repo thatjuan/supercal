@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Temporal } from "@js-temporal/polyfill";
 import ICAL from "ical.js";
-import { UnknownTimeZoneError, getProp, propValues, subcomponents, vtimezoneFor } from "../src/index.ts";
+import { UnknownTimeZoneError, getProp, propValues, subcomponents, vtimezoneFor, timezoneRange, addMissingTimezones, parseCalendar } from "../src/index.ts";
 
 const ZONES = [
   "America/New_York",
@@ -82,4 +82,31 @@ describe("vtimezoneFor", () => {
     const range = { from: Temporal.Instant.from("2026-01-01T00:00:00Z"), to: Temporal.Instant.from("2027-01-01T00:00:00Z") };
     expect(() => vtimezoneFor("Mars/Olympus", range)).toThrow(UnknownTimeZoneError);
   });
+});
+
+
+describe("timezoneRange", () => {
+  for (const [start, end, from, to] of [
+    ["10260101", "10260102", "2006-11-09T00:00:00Z", "2028-11-09T00:00:00Z"],
+    ["20260101", "30260101", "2025-12-31T05:00:00Z", "2036-11-09T00:00:00Z"],
+  ])
+    test(`bounds VTIMEZONE generation for ${start}–${end}`, () => {
+      const [resource] = parseCalendar(['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:centuries', `DTSTART;TZID=America/New_York:${start}T000000`, `DTEND;TZID=America/New_York:${end}T000000`, 'END:VEVENT', 'END:VCALENDAR'].join('\r\n')).resources;
+      expect(resource).toBeDefined();
+      const now = Temporal.Instant.from('2026-11-09T00:00:00Z');
+      const started = performance.now();
+      const range = timezoneRange(resource!, now);
+      expect([range.from.toString(), range.to.toString()]).toEqual([from!, to!]);
+      const generated = addMissingTimezones(resource!, now).timezones['America/New_York']!;
+      const observances = subcomponents(generated);
+      expect(observances.length).toBeLessThan(65);
+      for (const observance of observances) {
+        const local = String(propValues(getProp(observance, 'dtstart')!)[0]);
+        const offset = String(propValues(getProp(observance, 'tzoffsetfrom')!)[0]);
+        const at = Temporal.Instant.from(`${local}${offset}`);
+        expect(Temporal.Instant.compare(at, range.from)).toBeGreaterThanOrEqual(0);
+        expect(Temporal.Instant.compare(at, range.to)).toBeLessThanOrEqual(0);
+      }
+      expect(performance.now() - started).toBeLessThan(2000);
+    }, 2000);
 });

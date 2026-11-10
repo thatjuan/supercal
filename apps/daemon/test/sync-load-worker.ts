@@ -38,7 +38,8 @@ const counted: JobHandler = async (job, signal) => {
 const owner = crypto.randomUUID();
 const stop = new AbortController();
 setTimeout(() => stop.abort(), durationMs);
-await startScheduler({ handlers: { ...all, events: counted }, log, signal: stop.signal, bus, owner, concurrency: 6, leaseMs: 1000, pollMs: 200 });
+// Twelve worker slots retain six active jobs for this single tenant under the default share.
+await startScheduler({ handlers: { ...all, events: counted }, log, signal: stop.signal, bus, owner, concurrency: 12, leaseMs: 1000, pollMs: 200 });
 await bus.close();
 await closeDb();
 console.log(JSON.stringify({ owner, runs }));

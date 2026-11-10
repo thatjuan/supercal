@@ -1,6 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { Temporal } from '@js-temporal/polyfill';
-import { freeBusy } from '@supercal/core';
+import { freeBusy, freeBusyWindowProblem } from '@supercal/core';
 import { resourcesIn, withTenant } from '@supercal/db';
 import { accessibleCalendars } from '../hosted/access.ts';
 import { BadRequest, createApiApp, problemResponses, typeId } from './kit/index.ts';
@@ -15,7 +15,8 @@ const route = createRoute({ method: 'post', path: '/api/v1/free-busy', operation
 });
 export const freeBusyRoutes = createApiApp().openapi(route, async (c) => {
   const input = c.req.valid('json'), from = Temporal.Instant.from(input.from), to = Temporal.Instant.from(input.to);
-  if (Temporal.Instant.compare(from, to) >= 0 || to.epochMilliseconds - from.epochMilliseconds > 62 * 86400_000) throw new BadRequest([{ path: 'to', message: 'Window must be positive and at most 62 days' }]);
+  const problem = freeBusyWindowProblem({ from, to });
+  if (problem) throw new BadRequest([{ path: 'to', message: problem }]);
   const calendars = await withTenant(c.var.principal.tenantId, async (tx) => {
     const visible = new Map((await accessibleCalendars(tx, c.var.principal, 'free-busy')).map(({ calendar }) => [calendar.id, calendar]));
     const results: Record<string, z.infer<typeof Result>> = {};
@@ -24,6 +25,7 @@ export const freeBusyRoutes = createApiApp().openapi(route, async (c) => {
       if (!calendar || calendar.state !== 'active') { results[id] = { error: 'not-accessible' }; continue; }
       const rows = await resourcesIn(tx, [id], { from: new Date(from.epochMilliseconds), to: new Date(to.epochMilliseconds) });
       const result = freeBusy(rows.map((row) => row.data), { from, to }, calendar.timezone ?? 'UTC');
+      for (const uid of result.skipped) c.var.sync.log.warn('could not expand free-busy object', { calendarId: id, uid });
       results[id] = { busy: result.intervals.map((interval) => ({ start: interval.start.toString(), end: interval.end.toString(), status: interval.status })), truncated: result.truncated };
     }
     return results;

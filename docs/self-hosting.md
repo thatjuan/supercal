@@ -58,6 +58,7 @@ SUPERCAL_OWNER_PASSWORD=    # openssl rand -hex 24
 SUPERCAL_RUNTIME_PASSWORD=  # openssl rand -hex 24
 SUPERCAL_KEYS=v1:           # v1: followed by the output of openssl rand -base64 32
 BETTER_AUTH_SECRET=         # openssl rand -hex 32
+SUPERCAL_METRICS_TOKEN=     # openssl rand -hex 32
 ```
 
 `initdb/supercal.sh` creates the database and its logins the first time Postgres starts (the database setup section explains them):
@@ -107,8 +108,10 @@ services:
       DATABASE_URL: postgres://supercal_runtime:${SUPERCAL_RUNTIME_PASSWORD}@postgres:5432/supercal
       DATABASE_MIGRATION_URL: postgres://supercal_owner:${SUPERCAL_OWNER_PASSWORD}@postgres:5432/supercal
       SUPERCAL_PUBLIC_URL: https://${SUPERCAL_DOMAIN}
+      SUPERCAL_CLIENT_IP_HEADER: X-Forwarded-For
       SUPERCAL_KEYS: ${SUPERCAL_KEYS}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      SUPERCAL_METRICS_TOKEN: ${SUPERCAL_METRICS_TOKEN}
     restart: unless-stopped
 
   caddy:
@@ -126,6 +129,8 @@ volumes:
   caddy:
 ```
 
+Caddy replaces client-sent `X-Forwarded-For` by default, so Supercal can trust that header for login throttles and auth rate limits.
+
 Make the init script executable and start the stack:
 
 ```sh
@@ -142,7 +147,9 @@ Keep these in mind on Kubernetes, Nomad or plain `docker run`:
 
 - **Probes.** The image has no shell, so it has no `HEALTHCHECK`. Point your orchestrator at `GET /healthz` for liveness (the process is up) and `GET /readyz` for readiness. `/readyz` answers 200 only when the database answers `select 1` within one second, the database's newest migration is the one this binary ships, the notification listener is connected, and, in a process with the `worker` role, the scheduler has ticked in the last 30 seconds. Otherwise it answers 503 with the failing checks, such as `{"status":"not ready","failing":["bus"]}`.
 - **Read-only root filesystem.** Supported, but `/tmp` must stay writable: migrations are written to a temporary directory before they are applied. Mount a tmpfs there (`--read-only --tmpfs /tmp` with `docker run`).
-- **Metrics.** `GET /metrics` serves Prometheus text: sync duration and errors per provider, lost leases, recorded changes, notification lag, feed requests by kind and status, ICS cache hits and misses, push subscriptions by provider and state, and sink writes. Set `SUPERCAL_METRICS_TOKEN` to require `Authorization: Bearer <token>`, or keep the path off your public proxy.
+- **Metrics.** `GET /metrics` serves Prometheus text: sync duration and errors per provider, lost leases, recorded changes, notification lag, feed requests by kind and status, ICS cache hits and misses, push subscriptions by provider and state, and sink writes. Set `SUPERCAL_METRICS_TOKEN` and send `Authorization: Bearer <token>` to scrape it. Without a token, the endpoint returns 404 unless `SUPERCAL_INSECURE_DEV=1`.
+- **Time zone data.** Supercal converts zoned times with the time zone rules in Bun's built-in ICU data, which can lag behind tzdata. The image ships newer ICU rule files in `/app/icu-tz` and sets `ICU_TIMEZONE_FILES_DIR=/app/icu-tz` so ICU loads them instead; keep that variable if you override the environment. Running the binary outside the image, point `ICU_TIMEZONE_FILES_DIR` at the same four `.res` files (the Dockerfile names them), or times in zones whose rules changed recently, such as `America/Vancouver` from November 2026, are off by the change.
+- **Client addresses.** Set `SUPERCAL_CLIENT_IP_HEADER` only when a proxy you run overwrites or appends that header; otherwise clients can forge it. When unset, login throttles and auth rate limits use the socket peer.
 - **Shutdown.** On SIGTERM, Supercal stops accepting requests, hands back its sync leases and exits within ten seconds.
 
 ## Database setup
@@ -192,6 +199,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 | `DATABASE_URL` | yes |  | Postgres connection URL the daemon runs on. Recommended: a login that is a member of `supercal_app` and `supercal_control` and owns nothing. |
 | `DATABASE_MIGRATION_URL` |  |  | Postgres URL of the schema owner, used only to apply migrations. Defaults to `DATABASE_URL` (single-URL mode). |
 | `SUPERCAL_PUBLIC_URL` | production |  | Public https base URL, used in feed links, OAuth redirect URIs and push webhooks. Required unless `SUPERCAL_INSECURE_DEV=1`. |
+| `SUPERCAL_CLIENT_IP_HEADER` |  |  | Header holding the client address, set by a reverse proxy you run. When unset, the socket peer is used. |
 | `SUPERCAL_KEYS` | production |  | Master keys for secrets at rest, `v2:<base64 32 bytes>,v1:…`; the first one encrypts. Required unless `SUPERCAL_INSECURE_DEV=1`. |
 | `BETTER_AUTH_SECRET` | production |  | Secret that signs sessions and OAuth state; at least 32 random characters. Required unless `SUPERCAL_INSECURE_DEV=1`. |
 | `SUPERCAL_ROLES` |  | `api,dav,worker` | Comma list of roles this process runs: `api` (API and dashboard), `dav` (CalDAV and ICS feeds), `worker` (sync). |
@@ -204,9 +212,9 @@ Supercal reads its configuration from environment variables once at startup. An 
 | `MICROSOFT_CLIENT_SECRET` |  |  | Microsoft Entra client secret value. |
 | `SUPERCAL_EGRESS_ALLOW` |  |  | LAN servers accounts may reach, as `https://host[:port]=cidr` entries separated by commas. |
 | `SUPERCAL_ICS_CACHE_MB` |  | `64` | Memory bound, in MiB, of the cache of rendered ICS feeds. |
-| `SUPERCAL_SYNC_CONCURRENCY` |  | `8` | Sync jobs a worker process runs at once (at most 2 per account). |
-| `SUPERCAL_METRICS_TOKEN` |  |  | When set, `/metrics` requires `Authorization: Bearer <token>`. |
-| `RESEND_API_KEY` |  |  | Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email. |
+| `SUPERCAL_SYNC_CONCURRENCY` |  | `8` | Sync jobs a worker process runs at once (at most 2 per account; one tenant uses at most half, rounded up). |
+| `SUPERCAL_METRICS_TOKEN` |  |  | Required to enable `/metrics` unless `SUPERCAL_INSECURE_DEV=1`; when set, requires `Authorization: Bearer <token>`. |
+| `RESEND_API_KEY` |  |  | Resend API key. With `MAIL_FROM`, enables verification, password-reset and invitation email. |
 | `MAIL_FROM` |  |  | Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend. |
 | `WEB_ORIGIN` |  |  | Extra trusted origin for the Vite dev server, such as `http://localhost:5173`. Development only. |
 | `SUPERCAL_WEB_DIR` |  |  | Directory of the built dashboard. Defaults to `web/` next to the binary; the image sets `/app/web`. |
@@ -216,7 +224,7 @@ Supercal reads its configuration from environment variables once at startup. An 
 
 Supercal sends email through [Resend](https://resend.com) when both `RESEND_API_KEY` and `MAIL_FROM` are set. Add and verify your sending domain in Resend, create an API key with sending access, and set `MAIL_FROM` to an address on that domain, such as `Supercal <cal@example.com>`.
 
-With email on, new accounts must confirm their address before they can sign in, and Supercal mails invitation, password-reset and magic-link sign-in messages. Without it, nobody needs to confirm an address, magic-link sign-in is off, and admins copy invitation and password-reset links from the dashboard to send themselves.
+With email on, new accounts must confirm their address before they can sign in, and Supercal mails invitation and password-reset messages. Without it, nobody needs to confirm an address, and admins copy invitation and password-reset links from the dashboard to send themselves.
 
 ## Google
 
@@ -257,7 +265,15 @@ Change notifications, like Google push, need an HTTPS `SUPERCAL_PUBLIC_URL`; Mic
 
 ## Connecting a calendar app to hosted calendars
 
-Create a separate DAV login for each device with your tenant API key (or an authenticated session):
+Create a separate login for each device under **Settings → Calendar apps**: choose **New device**,
+name it, and copy the server URL, username and password. The password is shown only then. In Apple
+Calendar, Thunderbird or DAVx5, add a CalDAV account using those three values. Discovery finds your
+active hosted calendars. You can create calendars and create, edit and delete events from the app,
+as you can in the dashboard's event editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
+`/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
+MKCALENDAR, PROPPATCH, PUT and DELETE.
+
+To automate this, create the login with your tenant API key (or an authenticated session):
 
 ```sh
 curl --fail https://cal.example.com/api/v1/dav-logins \
@@ -267,16 +283,11 @@ curl --fail https://cal.example.com/api/v1/dav-logins \
 ```
 
 The 201 response contains `id`, `name`, `username`, `password`, `serverUrl` and `createdAt`.
-Save the password now; it is shown only in this response. Add a CalDAV account using the returned
-server URL, username and password. Discovery exposes your active hosted calendars; the client
-coverage and limitations below describe what has actually been observed. Supercal has no event
-editor. HTTPS must reach the `dav` role, including `/`, `/dav/` and
-`/.well-known/caldav`, and your proxy must forward WebDAV methods such as PROPFIND, REPORT,
-MKCALENDAR, PROPPATCH, PUT and DELETE.
+Save the password now; it is shown only in this response.
 
-List your devices with `GET /api/v1/dav-logins`. Revoke one with
-`DELETE /api/v1/dav-logins/<id>`; it stops authenticating immediately without affecting other
-devices. A tenant admin can revoke a member's device login too. Each user may have at most
+Revoke a device under **Settings → Calendar apps**, or list them with `GET /api/v1/dav-logins` and
+revoke one with `DELETE /api/v1/dav-logins/<id>`. It stops authenticating immediately without
+affecting other devices. A tenant admin can revoke a member's device login too. Each user may have at most
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
 Feed usernames and passwords continue to provide read-only publications; use a DAV login to
 edit hosted calendars. Device credentials cannot open the management API or ICS feeds.
@@ -355,6 +366,8 @@ Every process runs the roles listed in `SUPERCAL_ROLES`, and every role is safe 
 - `dav` serves the CalDAV and ICS feeds that calendar apps subscribe to.
 - `worker` syncs accounts. Replicas share the work through leases in Postgres, and each runs up to `SUPERCAL_SYNC_CONCURRENCY` jobs at once (default 8, at most 2 per account).
 
+Better Auth rate limits and CalDAV login failure budgets are in memory, separately on each replica. Adding replicas increases the total number of attempts an address can make.
+
 A single process with all three roles comfortably serves a household or a small team. To grow, run separate deployments, for example two `api,dav` replicas behind the load balancer and one or more `worker` replicas that receive no traffic.
 
 Every replica needs the same `DATABASE_URL`, `SUPERCAL_KEYS`, `BETTER_AUTH_SECRET` and `SUPERCAL_PUBLIC_URL`. The Google and Microsoft client settings are needed by `api` (to connect accounts) and `worker` (to refresh tokens and sync); email settings only by `api`. Each process opens up to 16 database connections: ten for queries, five for sign-in and sessions, and one that listens for notifications. Size Postgres's `max_connections` for your replica count. Only `/readyz` on worker processes checks the scheduler.
@@ -366,6 +379,8 @@ Postgres holds all of Supercal's state, so back up the database with your usual 
 ## Upgrading
 
 Build or pull the new image and restart your replicas with it. With the default `SUPERCAL_MIGRATE=auto`, each process applies pending migrations at startup under a Postgres advisory lock: the first one applies them, the others wait and find nothing left to do.
+
+When a release changes how events are normalised, such as a time zone rules update that moves stored time ranges, the first worker to start re-normalises every stored event from its raw copy. Connected calendars run one incremental sync to finish it. Only events whose result changed are written, and calendar apps see those as changed.
 
 To run migrations as a separate step, for example as a job before a rolling deploy, set `SUPERCAL_MIGRATE=off` on the replicas and run the binary's `migrate` command with the owner credential:
 

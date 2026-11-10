@@ -8,7 +8,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import { withTenant, type Feed } from '@supercal/db';
 import { icsTokenHash } from '../feeds/credentials.ts';
-import { BadRequest, createApiApp, problemResponses, typeId } from './kit/index.ts';
+import { BadRequest, createApiApp, Forbidden, problemResponses, typeId } from './kit/index.ts';
 
 /** Stands in for the ICS token in paths and links. A real token (base64url) never contains braces. */
 const TOKEN = '{token}';
@@ -195,6 +195,8 @@ export const subscribeRoutes = createApiApp()
     return c.json(subscribeLinks(origin(c.var.auth.publicUrl), feed.name, token), 200);
   })
   .openapi(getMobileconfig, async (c) => {
+    if (!c.req.header('Authorization') && c.req.header('Sec-Fetch-Site') === 'cross-site')
+      throw new Forbidden('Cross-site downloads are not allowed', 'cross-origin');
     const { id } = c.req.valid('param');
     const feed = await withTenant(c.var.principal.tenantId, (tx) => c.var.feeds.getFeed(tx, c.var.principal, id));
     return c.body(caldavMobileconfig({ publicUrl: c.var.auth.publicUrl, feed }), 200, {

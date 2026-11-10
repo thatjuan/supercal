@@ -84,6 +84,7 @@ export function SinkCard({ publications, accounts, sinks, busy, problem, onMirro
                     <span className="text-ink-2">{accountName(s.accountId)}</span>
                     <Badge tone={STATUS[s.status].tone}>{STATUS[s.status].label}</Badge>
                     {s.status === 'error' && s.error && <span className="text-danger">{s.error}</span>}
+                    {s.problem && <span className="text-danger">{s.problem}</span>}
                     {s.status === 'calendar_missing' && <span className="text-ink-2">The calendar was deleted in Google.</span>}
                     <span className="ml-auto flex gap-1.5">
                       {s.status === 'calendar_missing' && (

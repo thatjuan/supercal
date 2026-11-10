@@ -11,7 +11,7 @@
  * 2. `end` is one fenced transaction: a snapshot deletes the objects it did not see (and the
  *    occurrence records of masters that went with them), every dirty
  *    group is normalised from all its objects, resources whose group lost every object (or now
- *    publishes nothing) become deletes, and only real revision changes reach `recordChanges`. Then the cursor is stored.
+ *    publishes nothing) become deletes, and only real revision or span changes reach `recordChanges`. Then the cursor is stored.
  */
 import { normalizers, type Normalizer } from '@supercal/core';
 import {
@@ -31,10 +31,11 @@ import {
   type TenantTx,
 } from '@supercal/db';
 import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type Provider, type SourceCalendarRef, type SyncEnd, type SyncPage } from '@supercal/providers';
-import { and, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, lt, notExists, or, sql } from 'drizzle-orm';
 import { normalizeDirtyGroups } from './changes.ts';
 import type { Logger } from '../log.ts';
 import { metrics } from '../ops/metrics.ts';
+import { MAX_OBJECTS_PER_CALENDAR } from '../hosted/objects.ts';
 import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
 import { LeaseLostError, nextPollMs, StopTargetError, type JobResult } from './scheduler.ts';
 
@@ -73,7 +74,24 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
   const touched = page.upserts.filter((o) => o.payload === null).map((o) => o.id);
   for (const batch of chunks(touched)) await tx.update(sourceObject).set({ seenGeneration: job.version }).where(where(batch));
 
-  for (const batch of chunks(page.upserts.filter((o) => o.payload !== null))) {
+  // Bound both bind parameters and payload bytes in each insert; one oversized object stands alone.
+  const rows = page.upserts.filter((o) => o.payload !== null).map((o) => ({ ...o, payload: typeof o.payload === 'string' ? o.payload : JSON.stringify(o.payload) }));
+  function* batches() {
+    let batch: typeof rows = [];
+    let bytes = 0;
+    for (const row of rows) {
+      const size = Buffer.byteLength(row.payload);
+      if (batch.length && (batch.length >= BATCH || bytes + size > 8 * 1024 * 1024)) {
+        yield batch;
+        batch = [];
+        bytes = 0;
+      }
+      batch.push(row);
+      bytes += size;
+    }
+    if (batch.length) yield batch;
+  }
+  for (const batch of batches()) {
     // An object that moved to another group leaves its old group to rebuild.
     const moved = await tx
       .select({ groupUid: sourceObject.groupUid })
@@ -88,7 +106,7 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
           sourceCalendarId: calendar.id,
           providerObjectId: o.id,
           format,
-          payload: typeof o.payload === 'string' ? o.payload : JSON.stringify(o.payload),
+          payload: o.payload,
           etag: o.etag,
           groupUid: o.groupUid,
           originalStart: o.originalStart ?? null,
@@ -114,6 +132,12 @@ async function writePage(tx: TenantTx, job: TenantJob, calendar: SourceCalendar,
   for (const batch of chunks(page.deletes)) {
     const gone = await tx.delete(sourceObject).where(where(batch)).returning({ groupUid: sourceObject.groupUid });
     await markGroupsDirty(tx, calendar.id, gone.map((g) => g.groupUid));
+  }
+
+  for (const batch of chunks(page.deleteGroupsOf ?? [])) {
+    const groups = await tx.selectDistinct({ groupUid: sourceObject.groupUid }).from(sourceObject).where(where(batch));
+    if (!groups.length) continue;
+    await tx.delete(sourceObject).where(and(eq(sourceObject.sourceCalendarId, calendar.id), inArray(sourceObject.groupUid, groups.map((g) => g.groupUid))));
   }
 
   for (const batch of chunks(page.occurrences ?? []))
@@ -226,7 +250,12 @@ export async function runEvents(deps: SyncDeps, job: TenantJob, signal: AbortSig
     for await (const item of adapter.sync(ctx, ref, cursor)) {
       signal.throwIfAborted();
       if (item.kind === 'page') {
-        await fenced(job, (tx) => writePage(tx, job, calendar, adapter.format, item));
+        const total = await fenced(job, async (tx) => {
+          await writePage(tx, job, calendar, adapter.format, item);
+          const [row] = await tx.select({ count: count() }).from(sourceObject).where(eq(sourceObject.sourceCalendarId, calendar.id));
+          return row?.count ?? 0;
+        });
+        if (total > MAX_OBJECTS_PER_CALENDAR) throw new StopTargetError('This calendar has more than 50,000 events');
         continue;
       }
       return fenced(job, async (tx) => {

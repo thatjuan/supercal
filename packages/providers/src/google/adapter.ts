@@ -8,7 +8,7 @@
  *   a snapshot; with one, the sync token gives a delta. Only the last page has `nextSyncToken`, so
  *   only `end` carries the cursor. A 410 GONE drops the token and restarts as a snapshot.
  * - Raw objects are the event JSON, grouped by `iCalUID` (exceptions share their master's). A
- *   cancelled event without `recurringEventId` (a deleted single event or master) is a delete; a
+ *   cancelled event without `recurringEventId` deletes its whole stored group; a
  *   cancelled instance is an upsert the normaliser turns into an EXDATE.
  * - Push: `events.watch` per calendar and `calendarList.watch` for discovery, when enabled.
  */
@@ -116,12 +116,13 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
       async function toPage(items: JsonValue[]): Promise<SyncPage> {
         const heads = items.map((payload) => ({ head: EventHead.parse(payload), payload }));
         for (const { head } of heads) if (!head.recurringEventId && head.iCalUID) masterUids.set(head.id, head.iCalUID);
-        const page: SyncPage = { kind: 'page', upserts: [], deletes: [] };
+        const cancelledMasters = new Set(heads.filter(({ head }) => head.status === 'cancelled' && !head.recurringEventId).map(({ head }) => head.id));
+        const page: SyncPage = { kind: 'page', upserts: [], deletes: [], deleteGroupsOf: [...cancelledMasters] };
         for (const { head, payload } of heads) {
           if (head.status === 'cancelled' && !head.recurringEventId) {
-            page.deletes.push(head.id);
             continue;
           }
+          if (head.recurringEventId && cancelledMasters.has(head.recurringEventId)) continue;
           const groupUid = head.iCalUID ?? (head.recurringEventId ? await masterUid(head.recurringEventId) : `${head.id}@google.com`);
           // An instance of a master Google no longer has: nothing to attach it to.
           if (!groupUid) continue;

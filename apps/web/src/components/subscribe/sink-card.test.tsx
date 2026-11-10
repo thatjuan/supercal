@@ -12,6 +12,7 @@ const sink = (status: Sink['status'], extra: Partial<Sink> = {}): Sink => ({
   calendarId: 'c@group.calendar.google.com',
   status,
   lastWriteAt: null,
+  problem: null,
   error: null,
   counts: { events: 3 },
   createdAt: '2026-11-07T10:00:00Z',
@@ -28,7 +29,7 @@ describe('SinkCard', () => {
       <SinkCard
         publications={[pub]}
         accounts={[account]}
-        sinks={[sink('up_to_date'), sink('error', { error: 'Google answered 500' }), sink('calendar_missing')]}
+        sinks={[sink('up_to_date', { problem: 'Could not mirror 1 events; first: bad: no DTSTART' }), sink('error', { error: 'Google answered 500' }), sink('calendar_missing')]}
         busy={false}
         problem={null}
         onMirror={() => {}}
@@ -39,6 +40,7 @@ describe('SinkCard', () => {
     expect(screen.getByText(/Edits made to that calendar in Google are overwritten/)).toBeTruthy();
     for (const label of ['Up to date', 'Error', 'Calendar missing']) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.getByText('Google answered 500')).toBeTruthy();
+    expect(screen.getByText('Could not mirror 1 events; first: bad: no DTSTART')).toBeTruthy();
     // Every account already mirrors Work, so there is nothing left to mirror to.
     expect(screen.queryByRole('button', { name: /Mirror to Google account/ })).toBeNull();
 

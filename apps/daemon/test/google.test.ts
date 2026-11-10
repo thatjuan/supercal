@@ -242,6 +242,35 @@ describe.skipIf(!testDatabaseUrl)('Google provider', () => {
     expect(after?.deleted).toBe(true);
   });
 
+  test.each(['master only', 'both with UID', 'both sparse'] as const)('deleting a series with a moved instance removes the resource: %s', async (scenario) => {
+    const uid = `${scenario}@test`, masterId = `series-${scenario}`, instanceId = `${masterId}_instance`;
+    const master = { id: masterId, etag: '1', iCalUID: uid, summary: 'Series', start: { dateTime: '2026-11-09T09:00:00Z' }, end: { dateTime: '2026-11-09T10:00:00Z' }, recurrence: ['RRULE:FREQ=DAILY;COUNT=3'] };
+    const moved = { ...master, id: instanceId, recurringEventId: masterId, originalStartTime: { dateTime: '2026-11-10T09:00:00Z' }, start: { dateTime: '2026-11-10T11:00:00Z' }, end: { dateTime: '2026-11-10T12:00:00Z' } };
+    const id = await targetOf('events', account.calendarId);
+    google.events = () => Response.json({ items: [master, moved], nextSyncToken: 'before-delete' });
+    expect(await runNow(id)).toBeUndefined();
+    const where = and(eq(resource.sourceCalendarId, account.calendarId), eq(resource.uid, uid));
+    expect((await unsafeDb().select().from(resource).where(where))[0]?.data?.overrides).toHaveLength(1);
+    const head = { id: masterId, status: 'cancelled', ...(scenario === 'both with UID' && { iCalUID: uid }) };
+    const instance = { id: instanceId, status: 'cancelled', recurringEventId: masterId, originalStartTime: moved.originalStartTime, ...(scenario === 'both with UID' && { iCalUID: uid }) };
+    // Put the instance first, so page order cannot resurrect an already deleted master.
+    google.events = () => Response.json({ items: scenario === 'master only' ? [head] : [instance, head], nextSyncToken: 'after-delete' });
+    // handle() answers every events.get with 404, including sparse cancellation lookups.
+    expect(await runNow(id)).toBeUndefined();
+    expect((await unsafeDb().select().from(resource).where(where))[0]?.deleted).toBe(true);
+  });
+
+  test('an invitation to a moved instance with no master stays published', async () => {
+    const uid = 'orphan-invitation@test';
+    google.events = () => Response.json({ items: [{ id: 'invited-instance', iCalUID: uid, recurringEventId: 'unavailable-master', summary: 'Invitation',
+      originalStartTime: { dateTime: '2026-11-09T09:00:00Z' }, start: { dateTime: '2026-11-09T11:00:00Z' }, end: { dateTime: '2026-11-09T12:00:00Z' } }], nextSyncToken: 'invitation' });
+    expect(await runNow(await targetOf('events', account.calendarId))).toBeUndefined();
+    const [stored] = await unsafeDb().select().from(resource).where(and(eq(resource.sourceCalendarId, account.calendarId), eq(resource.uid, uid)));
+    expect(stored?.deleted).toBe(false);
+    expect(stored?.data?.master).toBeNull();
+    expect(stored?.data?.overrides).toHaveLength(1);
+  });
+
   test('the webhook wakes the channel’s target; a wrong token is a 404 and a sync message is ignored', async () => {
     const token = 'channel-secret';
     await unsafeDb().insert(pushLease).values({ providerChannelId: 'hook-1', tenantId, accountId: account.id as AccountId, target: 'calendar', targetId: account.calendarId, expiresAt: new Date(Date.now() + 86_400_000), secretHash: secretHash(token) });

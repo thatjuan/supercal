@@ -1,4 +1,4 @@
-/** New virtual calendar (product screen 5): merges two or more source calendars into one publication. */
+/** New virtual calendar (product screen 6): merges two or more source calendars into one publication. */
 import type { Problem } from '@supercal/api-client';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';

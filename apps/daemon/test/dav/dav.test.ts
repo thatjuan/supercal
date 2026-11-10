@@ -3,15 +3,17 @@
  * of architecture §9 and every report as whitespace-normalised golden XML, sync-token rules,
  * listing cost, UID separation between collections, and credential rotation.
  */
-import { closeDb, connectDb, migrate, systemSetting, withTenant, type TenantId } from '@supercal/db';
+import { closeDb, resource, connectDb, migrate, systemSetting, withTenant, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
-import { unsafeDb } from '@supercal/db/unsafe-db';
+import { createDatabase, unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { createConnection, type Socket } from 'node:net';
 import { idleBus } from '../../src/bus.ts';
 import { createDav } from '../../src/dav/index.ts';
 import { createFeedService } from '../../src/feeds/service.ts';
 import { testSecrets } from '../auth-fixture.ts';
+import { DEVICE, seedHosted } from './hosted-fixture.ts';
 import { ALICE, BOB, BULK_SIZE, aliceFeedId, bumpPublicationEpoch, deleteEvent, putEvent, seed } from './fixture.ts';
 
 const HOST = 'https://cal.example.test';
@@ -66,6 +68,7 @@ describe.skipIf(!testDatabaseUrl)('CalDAV server', () => {
     await migrate(scratch.url);
     connectDb(scratch.url);
     await seed();
+    await seedHosted();
     app = createDav({ secrets: testSecrets, bus: idleBus, publicUrl: HOST });
   }, 60_000);
 
@@ -121,6 +124,71 @@ describe.skipIf(!testDatabaseUrl)('CalDAV server', () => {
       const res = await dav('PROPFIND', `/dav/${ALICE.username}/cal/`, { depth: '1', body: propfind('d:resourcetype') });
       expect(responses(res.text).map((r) => r.href)).toEqual(['', 'work/', 'merged/', 'busy/', 'bulk/'].map((s) => `/dav/${ALICE.username}/cal/${s}`));
       expect((await dav('PROPFIND', `/dav/${ALICE.username}/cal/hidden/`, { depth: '0' })).status).toBe(404);
+    });
+  });
+
+  describe('request bounds', () => {
+    test('20 concurrent device requests finish through the default pool of 10', async () => {
+      const options = { user: DEVICE.username, pass: DEVICE.password, body: propfind('d:current-user-principal') };
+      expect((await dav('PROPFIND', '/dav/', options)).status).toBe(207);
+      const results = await Promise.all(Array.from({ length: 20 }, () => dav('PROPFIND', '/dav/', options)));
+      expect(results.map((res) => res.status)).toEqual(Array(20).fill(207));
+      expect((await dav('PROPFIND', '/dav/', { user: BOB.username, pass: BOB.password })).status).toBe(207);
+    });
+
+    test('ten unfinished PROPFIND uploads hold no transaction and another tenant can read', async () => {
+      if (!scratch) throw new Error('scratch database missing');
+      // Warm the feed credential cache, so the only remaining work is reading the body.
+      expect((await dav('PROPFIND', '/dav/')).status).toBe(207);
+      const monitor = createDatabase(scratch.url, 1);
+      let arrived = 0;
+      const started = Promise.withResolvers<void>();
+      const server = Bun.serve({
+        port: 0,
+        fetch(req) {
+          if (++arrived === 10) started.resolve();
+          return app.fetch(req);
+        },
+      });
+      const sockets: Socket[] = [];
+      try {
+        await Promise.all(Array.from({ length: 10 }, () => new Promise<void>((resolve, reject) => {
+          const socket = createConnection({ host: '127.0.0.1', port: server.port ?? 0 }, () => {
+            socket.write(`PROPFIND /dav/ HTTP/1.1\r\nHost: localhost\r\nAuthorization: ${auth(ALICE.username, password)}\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n${' '.repeat(64 * 1024)}`);
+            resolve();
+          });
+          socket.on('error', reject);
+          socket.resume();
+          sockets.push(socket);
+        })));
+        await started.promise;
+        // Let cached authentication and transaction setup run while all uploads remain open.
+        await Bun.sleep(100);
+        const rows = await monitor.execute<{ count: number }>(sql`select count(*)::int as count from pg_stat_activity where datname = current_database() and state = 'idle in transaction'`);
+        expect(rows[0]?.count).toBe(0);
+        const other = await fetch(`http://127.0.0.1:${server.port}/dav/`, {
+          method: 'PROPFIND', headers: { Authorization: auth(BOB.username, BOB.password), Connection: 'close' }, signal: AbortSignal.timeout(2000),
+        });
+        expect(other.status).toBe(207);
+        await other.text();
+      } finally {
+        // Complete uploads only after the assertions, so Bun can settle the pending body reads.
+        await Promise.all(sockets.map((socket) => new Promise<void>((resolve) => {
+          socket.once('close', () => resolve());
+          socket.once('data', () => socket.destroy());
+          const xml = propfind('d:current-user-principal');
+          socket.write(xml + ' '.repeat(1048576 - 64 * 1024 - xml.length));
+        })));
+        await server.stop(true);
+        await monitor.$client.end();
+      }
+    });
+
+    test('DAV and root discovery bodies are capped at 2 MiB', async () => {
+      for (const path of ['/', '/dav', '/dav/']) {
+        const res = await dav('PROPFIND', path, { body: 'x'.repeat(2 * 1024 * 1024 + 1) });
+        expect(res.status).toBe(413);
+      }
     });
   });
 
@@ -228,6 +296,24 @@ describe.skipIf(!testDatabaseUrl)('CalDAV server', () => {
       expect(normalise((await dav('REPORT', WORK, { body })).text)).toBe('<d:multistatus></d:multistatus>');
     });
 
+    test('calendar-multiget deduplicates repeated hrefs and alternate spellings', async () => {
+      const first = responses((await dav('PROPFIND', WORK, { depth: '1', body: propfind('d:getetag') })).text).find((r) => r.etag);
+      if (!first) throw new Error('object missing');
+      for (const hrefs of [Array<string>(16).fill(first.href), [first.href, HOST + first.href]]) {
+        const body = `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop>${hrefs.map((href) => `<d:href>${href}</d:href>`).join('')}</c:calendar-multiget>`;
+        const res = await dav('REPORT', WORK, { body });
+        expect(res.status).toBe(207);
+        expect(responses(res.text)).toHaveLength(1);
+        expect(res.text.match(/BEGIN:VCALENDAR/g)).toHaveLength(1);
+      }
+    });
+
+    test('calendar-multiget rejects 1,001 hrefs before deduplication', async () => {
+      const body = `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">${'<d:href>missing.ics</d:href>'.repeat(1001)}</c:calendar-multiget>`;
+      const res = await dav('REPORT', WORK, { body });
+      expect([res.status, normalise(res.text)]).toEqual([403, '<d:error><d:number-of-matches-within-limits/></d:error>']);
+    });
+
     test('calendar-multiget renders known hrefs and 404s unknown ones', async () => {
       const [first] = responses((await dav('PROPFIND', `/dav/${ALICE.username}/cal/busy/`, { depth: '1', body: propfind('d:getetag') })).text).filter((r) => r.etag);
       const body = `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><d:href>${first?.href}</d:href><d:href>/dav/${ALICE.username}/cal/busy/nope.ics</d:href></c:calendar-multiget>`;
@@ -300,6 +386,46 @@ describe.skipIf(!testDatabaseUrl)('CalDAV server', () => {
       await bumpPublicationEpoch('work');
       expect(await invalid(token)).toEqual(refused);
     });
+
+    test('calendar-multiget caps the accumulated XML response at 32 MiB', async () => {
+      const uids = Array.from({ length: 20 }, (_, i) => `multiget-bytes-${i}`);
+      try {
+        // XML escaping expands these otherwise modest calendar objects beyond the response cap.
+        for (const uid of uids) await putEvent('work', uid, '&'.repeat(350_000));
+        const hrefs = responses((await dav('PROPFIND', WORK, { depth: '1', body: propfind('d:getetag') })).text).filter((r) => r.etag).map((r) => r.href);
+        const body = `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop>${hrefs.map((href) => `<d:href>${href}</d:href>`).join('')}</c:calendar-multiget>`;
+        const res = await dav('REPORT', WORK, { body });
+        expect([res.status, normalise(res.text)]).toEqual([403, '<d:error><d:number-of-matches-within-limits/></d:error>']);
+      } finally {
+        for (const uid of uids) await deleteEvent('work', uid);
+      }
+    }, 30_000);
+  });
+
+  test('an unreadable stored object is omitted from queries and 404 in multiget and sync', async () => {
+    const body = '<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop></c:calendar-query>';
+    const before = responses((await dav('REPORT', WORK, { body })).text);
+    const bad = before.find((r) => r.uid === 'series@example.com');
+    const [row] = await unsafeDb().select().from(resource).where(and(eq(resource.tenantId, 'org_dav_alice' as TenantId), eq(resource.uid, 'series@example.com')));
+    if (!bad || !row?.data) throw new Error('no series');
+    const poisoned = structuredClone(row.data);
+    poisoned.master?.[1].push(['exdate', { tzid: 'Unknown/Zone' }, 'date-time', '2026-11-10T09:00:00']);
+    const where = and(eq(resource.sourceCalendarId, row.sourceCalendarId), eq(resource.uid, row.uid));
+    // Bypass ingestion validation to model an object stored before the gate was fixed.
+    await unsafeDb().update(resource).set({ data: poisoned }).where(where);
+    try {
+      const query = await dav('REPORT', WORK, { body });
+      expect(query.status).toBe(207);
+      expect(responses(query.text).map((r) => r.href)).toEqual(before.filter((r) => r !== bad).map((r) => r.href));
+      const multiget = await dav('REPORT', WORK, { body: `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop><d:href>${bad.href}</d:href></c:calendar-multiget>` });
+      expect(multiget.status).toBe(207);
+      expect(responses(multiget.text)).toEqual([expect.objectContaining({ href: bad.href, status: '404' })]);
+      const sync = await dav('REPORT', WORK, { body: syncBody('').replace('<d:getetag/>', '<d:getetag/><c:calendar-data xmlns:c="urn:ietf:params:xml:ns:caldav"/>') });
+      expect(sync.status).toBe(207);
+      expect(responses(sync.text).find((r) => r.href === bad.href)?.status).toBe('404');
+    } finally {
+      await unsafeDb().update(resource).set({ data: row.data }).where(where);
+    }
   });
 
   test('rotating the password makes the old one fail at once on the same process', async () => {

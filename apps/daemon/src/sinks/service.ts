@@ -62,6 +62,7 @@ export type SinkView = {
   status: 'syncing' | 'up_to_date' | 'error' | 'calendar_missing';
   lastWriteAt: string | null;
   error: string | null;
+  problem: string | null;
   counts: { events: number };
   createdAt: string;
 };
@@ -94,6 +95,7 @@ async function toView(tx: TenantTx, { sink: row, account, epoch, target }: SinkR
     calendarId: row.providerCalendarId,
     status: row.status === 'calendar_missing' ? 'calendar_missing' : error ? 'error' : caughtUp ? 'up_to_date' : 'syncing',
     lastWriteAt: row.lastWriteAt?.toISOString() ?? null,
+    problem: row.problem,
     error,
     counts: { events: ledger?.events ?? 0 },
     createdAt: row.createdAt.toISOString(),

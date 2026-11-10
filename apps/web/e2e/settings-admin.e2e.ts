@@ -108,3 +108,35 @@ test('an invited member joins without the Admin menu', async ({ page }) => {
   await page.goto('/admin');
   await expect(page).toHaveURL(/\/welcome$/);
 });
+
+test('an owner changes a member role from the Members panel', async ({ page, browser }) => {
+  await signUp(page, 'Rita Roles');
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Admin' }).click();
+  const memberEmail = unique('role-member');
+  await page.getByLabel('Invite by email').fill(memberEmail);
+  await page.getByRole('button', { name: 'Invite', exact: true }).click();
+  const invitation = page.getByRole('listitem', { name: `Invitation for ${memberEmail}` });
+  const link = await invitation.getByRole('textbox', { name: 'Invite link' }).inputValue();
+  const memberContext = await browser.newContext();
+  try {
+    const memberPage = await memberContext.newPage();
+    await memberPage.goto(link);
+    await memberPage.getByLabel('Name').fill('Robin Member');
+    await memberPage.getByLabel('Email').fill(memberEmail);
+    await memberPage.getByLabel('Password').fill(PASSWORD);
+    await memberPage.getByRole('button', { name: 'Create account and join' }).click();
+    await expect(memberPage).toHaveURL(/\/welcome$/);
+    await page.reload();
+    const role = page.getByRole('combobox', { name: 'Role of Robin Member' });
+    await expect(role).toHaveValue('member');
+    const changed = page.waitForResponse((response) => response.url().includes('/api/v1/members/') && response.request().method() === 'PATCH');
+    await role.selectOption('admin');
+    expect((await changed).status()).toBe(200);
+    await page.reload();
+    await expect(role).toHaveValue('admin');
+    await memberPage.reload();
+    await expect(memberPage.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Admin' })).toBeVisible();
+  } finally {
+    await memberContext.close();
+  }
+});

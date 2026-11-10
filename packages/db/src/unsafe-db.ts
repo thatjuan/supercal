@@ -8,7 +8,7 @@ import postgres from 'postgres';
 import * as schema from './schema/index.ts';
 
 /** Opens a pool on `url`, quiet about server notices. */
-export const createDatabase = (url: string, max = 10) => drizzle({ client: postgres(url, { max, onnotice: () => {} }), schema });
+export const createDatabase = (url: string, max = 10) => drizzle({ client: postgres(url, { max, onnotice: () => {}, connection: { idle_in_transaction_session_timeout: 60_000 } }), schema });
 
 export type Database = ReturnType<typeof createDatabase>;
 

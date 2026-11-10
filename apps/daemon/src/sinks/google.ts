@@ -191,6 +191,7 @@ export async function runGoogleSink(deps: SyncDeps, job: TenantJob, signal: Abor
   const zone = target.timeZone ?? 'UTC';
   const budgetKey = account.providerSubject ?? account.id;
   let writes = 0;
+  const skipped: { sourceUid: string; reason: string }[] = [];
 
   return withAccount(deps, job, account, signal, async (_adapter, ctx) => {
     /** Waits for a write slot; returns 0 to go ahead, or the wait that ends this run. */
@@ -217,7 +218,22 @@ export async function runGoogleSink(deps: SyncDeps, job: TenantJob, signal: Abor
     /** Applies a plan; returns the wait when the budget ran out first. */
     const apply = async (work: Plan): Promise<number> => {
       for (const object of work.objects) {
-        const { revision, events } = googleEvents(target.id, object, zone);
+        let built: ReturnType<typeof googleEvents>;
+        try {
+          built = googleEvents(target.id, object, zone);
+        } catch (error) {
+          skipped.push({ sourceUid: object.sourceUid, reason: error instanceof Error ? error.message : String(error) });
+          // Remove old full details if a malformed object cannot be mirrored after a downgrade.
+          const stale = work.ledger.get(object.outputUid);
+          for (const id of stale?.eventIds ?? []) {
+            const wait = await slot();
+            if (wait) return wait;
+            await counted(() => client.deleteEvent(ctx, target.providerCalendarId, id));
+          }
+          if (stale) await fenced(job, (tx) => tx.delete(sinkEvent).where(and(eq(sinkEvent.sinkId, target.id), eq(sinkEvent.uid, object.outputUid))));
+          continue;
+        }
+        const { revision, events } = built;
         const before = work.ledger.get(object.outputUid);
         if (before?.appliedRevision === revision) continue;
         const known = new Set(before?.eventIds ?? []);
@@ -257,7 +273,12 @@ export async function runGoogleSink(deps: SyncDeps, job: TenantJob, signal: Abor
         const wait = await apply(work);
         if (wait) return { nextRunInMs: wait };
         await fenced(job, (tx) => tx.update(syncTarget).set({ cursor: work.next }).where(eq(syncTarget.id, job.id)));
-        if (!work.more) return { nextRunInMs: SINK_POLL_MS };
+        if (!work.more) {
+          const first = skipped[0];
+          const problem = first ? `Could not mirror ${skipped.length} events; first: ${first.sourceUid}: ${first.reason}`.slice(0, 1000) : null;
+          await fenced(job, (tx) => tx.update(sink).set({ problem }).where(eq(sink.id, target.id)));
+          return { nextRunInMs: SINK_POLL_MS };
+        }
         current = { ...current, cursor: work.next };
       }
     } catch (error) {

@@ -133,6 +133,7 @@ export const sink = pgTable(
     providerSubject: text('provider_subject'),
     providerCalendarId: text('provider_calendar_id').notNull(),
     status: sinkStatus('status').notNull().default('active'),
+    problem: text('problem'),
     /** The IANA zone the provider calendar was created in; floating times are read in it. */
     timeZone: text('time_zone'),
     /** When the runner last wrote (or deleted) a provider event. */

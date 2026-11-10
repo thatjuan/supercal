@@ -8,11 +8,11 @@ import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { bodyLimit } from 'hono/body-limit';
 import { stream } from 'hono/streaming';
 import { type Principal } from '../auth/principal.ts';
-import { requireAccess } from '../hosted/access.ts';
+import { requireAccess, type Access } from '../hosted/access.ts';
 import { readResources } from '../hosted/read.ts';
 import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import { expandCalendarResources, Occurrence, occurrenceWindow } from './occurrences.ts';
-import { audit, BadRequest, createApiApp, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
+import { audit, BadRequest, createApiApp, Forbidden, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
 
 const Event = JSEvent.clone().openapi('JSEvent', { description: 'JSCalendar 2.0 Event per draft-ietf-calext-jscalendarbis-22; unknown properties are preserved.' });
 const ReadEvent = JSCalendar.clone().openapi('JSCalendar', { description: 'JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Several detached recurrence instances read as a Group per mapping draft-ietf-calext-jscalendar-icalendar-29 §2.1.2.' });
@@ -69,7 +69,8 @@ function eventError(error: Error): ProblemError {
 }
 async function calendarOf(tx: TenantTx, principal: Principal, id: SourceCalendar['id'], write = false) {
   if (write) await lockHostedCalendar(tx, id);
-  const { calendar } = await requireAccess(tx, principal, id, write ? 'write' : 'read');
+  const { calendar, access } = await requireAccess(tx, principal, id, write ? 'write' : 'read');
+  if (!write && calendar.state !== 'active' && access !== 'owner') throw new NotFound('No such calendar');
   const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
   if (write && account?.provider !== 'hosted') throw new ProblemError(409, 'Calendar is not hosted', undefined, 'calendar-not-hosted');
   if (write && calendar.state !== 'active') throw new ProblemError(409, 'Restore the deleted calendar before writing events');
@@ -77,7 +78,7 @@ async function calendarOf(tx: TenantTx, principal: Principal, id: SourceCalendar
 }
 async function reads<T extends { data: EventResource | null }>(tx: TenantTx, principal: Principal, calendar: SourceCalendar, rows: T[]) {
   const { access } = await requireAccess(tx, principal, calendar.id, 'read');
-  return readResources(calendar, access, rows);
+  return { rows: await readResources(calendar, access, rows), access };
 }
 /** Exported calendars use Supercal's PRODID; expose that calendar-level property on JSON entries. */
 function apiEvent(data: EventResource): ReturnType<typeof toJSCalendar> {
@@ -91,7 +92,7 @@ async function findEvent(tx: TenantTx, calendar: SourceCalendar, uid: string) {
 async function loadEvent(tx: TenantTx, calendar: SourceCalendar, uid: string) {
   const row = await findEvent(tx, calendar, uid); if (!row) throw new NotFound('No such event'); return row;
 }
-const tag = (row: { revision: string }) => `"${row.revision}"`;
+const tag = (row: { revision: string }, access: Access) => `"${row.revision}${access === 'read' ? '.redacted' : ''}"`;
 const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
 function decode(v: string): unknown {
   if (!/^[A-Za-z0-9_-]+$/.test(v) || Buffer.from(v, 'base64url').toString('base64url') !== v) throw new Error('Malformed token');
@@ -151,8 +152,8 @@ eventRoutes
       const overlap = query.from || query.to ? sql`${resource.span} && tstzrange(${query.from ?? null}::timestamptz, ${query.to ?? null}::timestamptz)` : undefined;
       const rows = await tx.select().from(resource).where(and(eq(resource.sourceCalendarId, calendar.id), eq(resource.deleted, false), after === undefined ? undefined : gt(resource.uid, after), overlap)).orderBy(asc(resource.uid)).limit(query.limit + 1);
       const page = rows.slice(0, query.limit);
-      const visible = await reads(tx, c.var.principal, calendar, page);
-      return { items: visible.flatMap((row) => row.data ? [{ etag: tag(row), event: apiEvent(row.data) }] : []), nextCursor: rows.length > query.limit ? encode({ v: 1, uid: page.at(-1)!.uid }) : null };
+      const { rows: visible, access } = await reads(tx, c.var.principal, calendar, page);
+      return { items: visible.flatMap((row) => row.data ? [{ etag: tag(row, access), event: apiEvent(row.data) }] : []), nextCursor: rows.length > query.limit ? encode({ v: 1, uid: page.at(-1)!.uid }) : null };
     });
     return c.json(result, 200);
   })
@@ -160,14 +161,14 @@ eventRoutes
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id);
       const row = await loadEvent(tx, calendar, c.req.valid('param').uid);
-      const [visible] = await reads(tx, c.var.principal, calendar, [row]);
+      const { rows: [visible], access } = await reads(tx, c.var.principal, calendar, [row]);
       if (!visible) throw new NotFound('No such event');
-      return visible;
+      return { row: visible, access };
     });
-    const etag = tag(result);
+    const etag = tag(result.row, result.access);
     const matches = c.req.header('if-none-match')?.split(',').map((v) => v.trim().replace(/^W\//, ''));
-    if (matches?.includes(etag) || matches?.includes('*')) return c.body(null, 304, { ETag: etag });
-    return c.json(apiEvent(result.data), 200, { ETag: etag });
+    if (matches?.includes(etag) || matches?.includes('*')) return c.body(null, 304, { ETag: etag, 'Cache-Control': 'no-store' });
+    return c.json(apiEvent(result.row.data), 200, { ETag: etag, 'Cache-Control': 'no-store' });
   })
   .openapi(create, async (c) => {
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
@@ -184,7 +185,7 @@ eventRoutes
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true);
       const event = sameUid(c.req.valid('param').uid, c.req.valid('json'));
       const previous = await findEvent(tx, calendar, event.uid);
-      if (previous) requireIfMatch(c, tag(previous));
+      if (previous) requireIfMatch(c, tag(previous, 'owner'));
       else if (c.req.header('if-match')) throw new ProblemError(412, 'No current event matches If-Match');
       const now = Temporal.Now.instant();
       const result = await store(tx, calendar, fromJSCalendar(serverEvent(event, previous?.data ?? null, now), null, now));
@@ -197,7 +198,7 @@ eventRoutes
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true);
       const previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
-      requireIfMatch(c, tag(previous));
+      requireIfMatch(c, tag(previous, 'owner'));
       if (!previous.data.master) throw new ProblemError(409, 'Detached instances have no master to patch', undefined, 'event-has-no-master');
       const old = toJSCalendar(previous.data);
       if (old['@type'] !== 'Event') throw new Error('Master must convert to Event');
@@ -212,7 +213,7 @@ eventRoutes
   .openapi(remove, async (c) => {
     await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true), previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
-      requireIfMatch(c, tag(previous));
+      requireIfMatch(c, tag(previous, 'owner'));
       if (!previous.objectName) throw new NotFound('No stored object');
       await deleteObject(tx, calendar, { objectName: previous.objectName });
       await audit(tx, c.var.principal, 'event.delete', { type: 'calendar', id: calendar.id }, { uid: previous.uid });
@@ -222,7 +223,7 @@ eventRoutes
   .openapi(split, async (c) => {
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true), previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
-      requireIfMatch(c, tag(previous));
+      requireIfMatch(c, tag(previous, 'owner'));
       const input = c.req.valid('json'), now = Temporal.Now.instant();
       const parts = splitEvent(previous.data, input.at, input.uid ?? crypto.randomUUID(), now);
       const next = toJSCalendar(parts.next);
@@ -240,7 +241,9 @@ eventRoutes
     const window = occurrenceWindow(c.req.valid('query'));
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id);
-      return expandCalendarResources(await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id], window)), window, calendar.timezone ?? 'UTC');
+      const result = expandCalendarResources((await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id], window))).rows, window, calendar.timezone ?? 'UTC');
+      for (const uid of result.skipped) c.var.sync.log.warn('could not expand object', { calendarId: calendar.id, uid });
+      return { items: result.items, truncated: result.truncated };
     });
     return c.json(result, 200);
   })
@@ -254,19 +257,22 @@ eventRoutes
         if (after < await tombstoneFloor(tx)) throw syncExpired();
       }
       const page = await changesSince(tx, [calendar.id], after, input.limit);
-      const visible = new Map((await reads(tx, c.var.principal, calendar, page.rows)).map((row) => [row.uid, row.data]));
+      const { rows, access } = await reads(tx, c.var.principal, calendar, page.rows);
+      const visible = new Map(rows.map((row) => [row.uid, row.data]));
       const changes = page.rows.flatMap<z.infer<typeof Change>>((row) => {
         const data = visible.get(row.uid);
         // Incremental readers must discard cached events that the member projection now hides.
         if (row.deleted || !data) return input.since !== undefined ? [{ uid: row.uid, deleted: true }] : [];
-        return [{ uid: row.uid, deleted: false, etag: tag(row), event: apiEvent(data) }];
+        return [{ uid: row.uid, deleted: false, etag: tag(row, access), event: apiEvent(data) }];
       });
       return { changes, next: encode({ v: 1, e: calendar.syncEpoch, s: page.maxSeq.toString() }), hasMore: page.hasMore };
     });
     return c.json(result, 200);
   })
   .openapi(exportCalendar, async (c) => {
-    const rows = await withTenant(c.var.principal.tenantId, async (tx) => { const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id); return reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id])); });
+    if (!c.req.header('Authorization') && c.req.header('Sec-Fetch-Site') === 'cross-site')
+      throw new Forbidden('Cross-site downloads are not allowed', 'cross-origin');
+    const rows = await withTenant(c.var.principal.tenantId, async (tx) => { const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id); return (await reads(tx, c.var.principal, calendar, await resourcesIn(tx, [calendar.id]))).rows; });
     c.header('Content-Type', 'text/calendar; charset=utf-8');
     return stream(c, async (output) => {
       const empty = serializeCalendar({ props: [], resources: [] });

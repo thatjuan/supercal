@@ -153,10 +153,14 @@ describe('OpenAPI document', () => {
     await SwaggerParser.validate(new URL('../../../packages/api-client/openapi.json', import.meta.url).pathname);
   });
 
-  test('Scalar renders at /api/docs', async () => {
-    const res = await send('/api/docs');
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain('/api/v1/openapi.json');
+  test('both Scalar pages pin the CDN and the auth reference embeds its generated schema', async () => {
+    for (const [path, content] of [['/api/docs', '/api/v1/openapi.json'], ['/api/auth/reference', '/sign-in/email']] as const) {
+      const res = await send(path);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.0');
+      expect(html).toContain(content);
+    }
   });
 });
 

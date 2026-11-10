@@ -6,9 +6,9 @@
  */
 import type { Completeness, EventResource } from '@supercal/core';
 import { and, asc, eq, gt, inArray, max, sql, type SQL } from 'drizzle-orm';
-import type { PgColumn } from 'drizzle-orm/pg-core';
+import { alias, type PgColumn } from 'drizzle-orm/pg-core';
 import type { SourceCalendarId } from './ids.ts';
-import { resource, systemSetting, type Resource } from './schema/index.ts';
+import { resource, systemSetting, type Resource, type Span } from './schema/index.ts';
 import type { ControlTx, TenantTx } from './tx.ts';
 
 /** The NOTIFY channel `recordChanges` signals on, with payload `{"t":"<tenantId>","s":"<maxSeq>"}`. */
@@ -31,7 +31,7 @@ export type ResourceChange =
       sequence: number | null;
       lastModified: Date | null;
       organizer: string | null;
-      span: { start: Date; end: Date | 'infinity' };
+      span: Span;
       completeness: Completeness;
     }
   | { op: 'delete'; sourceCalendarId: SourceCalendarId; uid: string };
@@ -42,6 +42,13 @@ export type LiveResource = Resource & { deleted: false; data: EventResource };
 export type Tombstone = Resource & { deleted: true; data: null };
 /** A row of the change log: narrow on `deleted`. */
 export type ResourceRow = LiveResource | Tombstone;
+
+/**
+ * Whether two spans have the same bounds. A span can change while the revision does not: it is
+ * resolved through the runtime's tzdata, so a zone rule change moves it (BC's permanent UTC-7).
+ */
+export const sameSpan = (a: Span, b: Span): boolean =>
+  a.start.getTime() === b.start.getTime() && (a.end === 'infinity' || b.end === 'infinity' ? a.end === b.end : a.end.getTime() === b.end.getTime());
 
 const tenantSetting = sql`current_setting('app.tenant_id')`;
 const excluded = (column: PgColumn) => sql.raw(`excluded."${column.name}"`);
@@ -60,8 +67,8 @@ function* batches<T>(items: T[]): Generator<T[]> {
  * Applies `changes` to `resource` and signals `supercal_changes`. Call it as the **last** work in
  * the caller's transaction, after all fetching and normalising: it takes the tenant's advisory
  * lock, which is held until commit so the tenant's seqs commit in order (without it, concurrent
- * readers skip changes). Upserts whose revision matches the stored row and deletes of absent or
- * tombstoned rows are dropped; when nothing remains, no lock or seq is taken and `maxSeq` is null.
+ * readers skip changes). Upserts whose revision and span match the stored row and deletes of absent
+ * or tombstoned rows are dropped; when nothing remains, no lock or seq is taken and `maxSeq` is null.
  * `changed` counts the changes that remained. The notification carries `c`, the epoch ms at which
  * it was sent (moments before commit), from which listeners measure notify lag.
  */
@@ -121,19 +128,19 @@ export async function recordChanges(tx: TenantTx, changes: ResourceChange[]): Pr
   return { maxSeq, changed: real.length };
 }
 
-/** Drops upserts that would not change the stored revision, and deletes with nothing live to delete. */
+/** Drops upserts that would change neither the stored revision nor its span, and deletes with nothing live to delete. */
 async function withoutNoops(tx: TenantTx, changes: ResourceChange[]): Promise<ResourceChange[]> {
-  const stored = new Map<string, { revision: string; deleted: boolean }>();
+  const stored = new Map<string, { revision: string; span: Span | null; deleted: boolean }>();
   for (const batch of batches(changes)) {
     const rows = await tx
-      .select({ sourceCalendarId: resource.sourceCalendarId, uid: resource.uid, revision: resource.revision, deleted: resource.deleted })
+      .select({ sourceCalendarId: resource.sourceCalendarId, uid: resource.uid, revision: resource.revision, span: resource.span, deleted: resource.deleted })
       .from(resource)
       .where(keysIn(batch));
     for (const row of rows) stored.set(keyOf(row), row);
   }
   return changes.filter((c) => {
     const row = stored.get(keyOf(c));
-    return c.op === 'upsert' ? !row || row.deleted || row.revision !== c.revision : !!row && !row.deleted;
+    return c.op === 'upsert' ? !row || row.deleted || row.revision !== c.revision || !row.span || !sameSpan(row.span, c.span) : !!row && !row.deleted;
   });
 }
 
@@ -226,7 +233,8 @@ export async function tombstoneFloor(tx: TenantTx | ControlTx): Promise<bigint> 
 /**
  * Deletes tombstones last changed before `olderThan` (default 30 days ago), across tenants. First
  * raises `system_setting.tombstone_floor` to the newest such tombstone's seq (never lowering it),
- * then deletes every tombstone at or below the floor; sync tokens below the floor are rejected.
+ * then deletes tombstones at or below the floor, keeping each calendar's newest row so max(seq)
+ * never regresses. Sync tokens below the floor are rejected.
  * Allocates no seq, so it takes no tenant lock. Returns the floor and how many rows were purged.
  */
 export async function purgeTombstones(
@@ -246,9 +254,14 @@ export async function purgeTombstones(
   if (!setting) throw new Error(`system_setting ${TOMBSTONE_FLOOR} is missing`);
 
   const floor = BigInt(setting.floor);
+  const newer = alias(resource, 'newer');
   const purged = await control
     .delete(resource)
-    .where(and(eq(resource.deleted, true), sql`${resource.seq} <= ${floor.toString()}::bigint`))
+    .where(and(
+      eq(resource.deleted, true),
+      sql`${resource.seq} <= ${floor.toString()}::bigint`,
+      sql`exists (select 1 from ${resource} as ${sql.identifier('newer')} where ${newer.sourceCalendarId} = ${resource.sourceCalendarId} and ${newer.seq} > ${resource.seq})`,
+    ))
     .returning({ seq: resource.seq });
   return { floor, purged: purged.length };
 }

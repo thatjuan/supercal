@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { JSEvent, JSCalendar, parseCalendar, serializeCalendar } from '@supercal/core';
-import { auditLog, calendarAccount, changesSince, closeDb, connectDb, member, migrate, organization, recordChanges, resource, sourceCalendar, sourceObject, systemSetting, user, withTenant, type TenantId, type SourceCalendarId } from '@supercal/db';
+import { auditLog, calendarAccount, calendarShare, changesSince, closeDb, connectDb, member, migrate, organization, recordChanges, resource, sourceCalendar, sourceObject, systemSetting, user, withTenant, type TenantId, type SourceCalendarId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { and, eq } from 'drizzle-orm';
@@ -12,7 +12,7 @@ import type { ApiEnv, Principal } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
 import { writeObject } from '../src/hosted/objects.ts';
 import { upsertOf } from '../src/sync/changes.ts';
-import { testAuth, testSecrets } from './auth-fixture.ts';
+import { TEST_ORIGIN, testAuth, testSecrets } from './auth-fixture.ts';
 
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
 const principal: Principal = { kind: 'user', userId: `events_${crypto.randomUUID()}`, tenantId, role: 'member', via: 'session', isOperator: false };
@@ -71,6 +71,30 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     const read = await call(path); expect(read.headers.get('etag')).toBe(patched.headers.get('etag'));
     expect((await call(path, 'GET', undefined, { 'if-none-match': `W/${patched.headers.get('etag')}` })).status).toBe(304);
   });
+  test('read ETags differ from owner ETags across get, list and changes, with no-store on get', async () => {
+    const id = await calendar(), uid = 'private-etag', base = `/calendars/${id}`;
+    const created = await call(`${base}/events/${uid}`, 'PUT', { ...example, privacy: 'private' });
+    expect(created.status).toBe(201);
+    const ownerTag = created.headers.get('etag')!;
+    const reader: Principal = { ...principal, userId: `reader_${crypto.randomUUID()}` };
+    const now = new Date();
+    await unsafeDb().insert(user).values({ id: reader.userId, name: 'Reader', email: `${reader.userId}@example.test`, updatedAt: now });
+    await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: tenantId, userId: reader.userId, role: 'member', createdAt: now });
+    await unsafeDb().insert(calendarShare).values({ tenantId, calendarId: id, granteeUserId: reader.userId, access: 'read', createdBy: principal.userId });
+    const readerApp = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus }, createMiddleware<ApiEnv>(async (c, next) => { c.set('principal', reader); await next(); }));
+    const read = (suffix: string, etag?: string) => readerApp.request(`/api/v1${base}${suffix}`, { headers: etag ? { 'if-none-match': etag } : {} });
+    const response = await read(`/events/${uid}`, ownerTag);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(JSEvent.parse(await response.json()).title).toBe('Busy');
+    const redactedTag = response.headers.get('etag')!;
+    expect(redactedTag).toBe(ownerTag.replace(/"$/, '.redacted"'));
+    const cached = await read(`/events/${uid}`, redactedTag);
+    expect(cached.status).toBe(304);
+    expect(cached.headers.get('cache-control')).toBe('no-store');
+    expect(EventList.parse(await (await read('/events')).json()).items[0]?.etag).toBe(redactedTag);
+    expect(ChangeList.parse(await (await read('/changes')).json()).changes[0]?.etag).toBe(redactedTag);
+  });
   test('rejections identify the 2.0 replacement and invalid version and zone', async () => {
     const id = await calendar();
     for (const [data, pointer] of [[{ recurrenceRules: [] }, 'recurrenceRules'], [{ version: '1.0' }, 'version'], [{ timeZone: 'Mars/Olympus' }, 'timeZone']] as const) {
@@ -100,6 +124,25 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     expect((await call(`${base}/events/fast`, 'PUT', { ...example, uid: 'fast', timeZone: undefined, duration: 'PT1S', recurrenceRule: { frequency: 'minutely' } })).status).toBe(201);
     const expanded = Occurrences.parse(await (await call(`${base}/occurrences?from=2026-11-12T00:00:00Z&to=2026-11-20T00:00:00Z`)).json()); expect(expanded.items).toHaveLength(5000); expect(expanded.truncated).toBe(true);
   });
+  test('occurrences and free-busy skip unreadable stored objects and retain their neighbours', async () => {
+    const id = await calendar();
+    for (const [uid, hour] of [['first', '09'], ['bad', '11'], ['last', '13']] as const) {
+      expect((await call(`/calendars/${id}/events/${uid}`, 'PUT', { ...example, uid, start: `2026-11-12T${hour}:00:00`, timeZone: 'Etc/UTC', recurrenceRule: undefined })).status).toBe(201);
+    }
+    const stored = await rowFor(id, 'bad');
+    stored.data.master?.[1].push(['exdate', { tzid: 'Unknown/Zone' }, 'date-time', '2026-11-12T11:00:00']);
+    await unsafeDb().update(resource).set({ data: stored.data }).where(and(eq(resource.sourceCalendarId, id), eq(resource.uid, 'bad')));
+    const occurrences = await call(`/calendars/${id}/occurrences?from=2026-11-12T00:00:00Z&to=2026-11-13T00:00:00Z`);
+    expect(occurrences.status).toBe(200);
+    expect(Occurrences.parse(await occurrences.json())).toMatchObject({ truncated: false, items: [{ uid: 'first' }, { uid: 'last' }] });
+    const busy = await call('/free-busy', 'POST', { from: '2026-11-12T00:00:00Z', to: '2026-11-13T00:00:00Z', calendarIds: [id] });
+    expect(busy.status).toBe(200);
+    expect(await busy.json()).toEqual({ calendars: { [id]: { busy: [
+      { start: '2026-11-12T09:00:00Z', end: '2026-11-12T10:00:00Z', status: 'busy' },
+      { start: '2026-11-12T13:00:00Z', end: '2026-11-12T14:00:00Z', status: 'busy' },
+    ], truncated: false } } });
+  });
+
   test('changes resumes create/update/delete, pages, and expires malformed, old-epoch and below-floor tokens', async () => {
     const id = await calendar(), base = `/calendars/${id}`;
     const first = ChangeList.parse(await (await call(`${base}/changes`)).json());
@@ -157,5 +200,33 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     expect((await importIcs('x'.repeat(8 * 1024 * 1024 + 1))).status).toBe(413);
     const audit = await unsafeDb().select().from(auditLog).where(eq(auditLog.targetId, second));
     expect(audit.filter((row) => row.action === 'calendar.import').every((row) => !JSON.stringify(row.data).includes('Team sync'))).toBe(true);
+  });
+
+  test('calendar exports refuse cross-site cookie navigation and allow same-origin or bearer clients', async () => {
+    const sessionFixture = testAuth('open', scratch.url);
+    try {
+      const api = createApi({ auth: sessionFixture.auth, secrets: testSecrets, bus: idleBus });
+      const signedUp = await api.request('/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { origin: TEST_ORIGIN, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: `export-${crypto.randomUUID()}@example.invalid`, password: 'correct-horse-battery', name: 'Exporter' }),
+      });
+      expect(signedUp.status).toBe(200);
+      const cookie = signedUp.headers.getSetCookie().map((line) => line.split(';')[0]).join('; ');
+      const created = await api.request('/api/v1/calendars', { method: 'POST', headers: { cookie, origin: TEST_ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Export' }) });
+      expect(created.status).toBe(201);
+      const { id } = Calendar.parse(await created.json());
+      const path = `/api/v1/calendars/${id}/export.ics`;
+      expect((await api.request(path, { headers: { cookie, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(403);
+      const sameOrigin = await api.request(path, { headers: { cookie, 'Sec-Fetch-Site': 'same-origin' } });
+      expect(sameOrigin.status).toBe(200);
+      expect(await sameOrigin.text()).toContain('BEGIN:VCALENDAR');
+      const issued = await api.request('/api/v1/api-keys', { method: 'POST', headers: { cookie, origin: TEST_ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Export' }) });
+      expect(issued.status).toBe(201);
+      const { key } = await issued.json() as { key: string };
+      expect((await api.request(path, { headers: { authorization: `Bearer ${key}`, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(200);
+    } finally {
+      await sessionFixture.close();
+    }
   });
 });

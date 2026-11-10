@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import { CHANGES_CHANNEL, changesSince, publicationState, purgeTombstones, recordChanges, resourcesByUids, type ResourceChange } from './changes.ts';
 import { newId, type SourceCalendarId, type TenantId } from './ids.ts';
 import { migrate } from './migrate.ts';
-import { calendarAccount, organization, sourceCalendar, systemSetting, user } from './schema/index.ts';
+import { calendarAccount, organization, resource, sourceCalendar, systemSetting, user } from './schema/index.ts';
 import { testDatabaseUrl } from './test-db.ts';
 import { withControl, withTenant, type TenantTx } from './tx.ts';
 import { closeDb, connectDb, unsafeDb } from './unsafe-db.ts';
@@ -13,7 +13,13 @@ import { closeDb, connectDb, unsafeDb } from './unsafe-db.ts';
 test('nothing outside changes.ts writes resource', async () => {
   const root = join(import.meta.dir, '../../..');
   const writes = [/\.(insert|update|delete)\(\s*resource\s*\)/, /\b(insert\s+into|update|delete\s+from)\s+"?resource\b/i];
-  const allowed = new Set(['packages/db/src/changes.ts']);
+  const allowed = new Set([
+    'packages/db/src/changes.ts',
+    // Legacy poison-object fixtures deliberately bypass the ingestion gate to test read isolation.
+    'apps/daemon/test/dav/dav.test.ts',
+    'apps/daemon/test/events.test.ts',
+    'apps/daemon/test/feeds.test.ts',
+  ]);
   const offenders: string[] = [];
   for (const dir of ['apps', 'packages'])
     for await (const file of new Bun.Glob(`${dir}/**/*.{ts,tsx}`).scan({ cwd: root })) {
@@ -22,6 +28,12 @@ test('nothing outside changes.ts writes resource', async () => {
       if (writes.some((pattern) => pattern.test(text))) offenders.push(file);
     }
   expect(offenders).toEqual([]);
+});
+
+test('a legacy empty span reads as null, so the next upsert rewrites it', () => {
+  expect(resource.span.mapFromDriverValue('empty')).toBeNull();
+  const point = '["2026-12-01 10:00:00+00","2026-12-01 10:00:00+00"]';
+  expect(resource.span.mapFromDriverValue(point)).toEqual({ start: new Date('2026-12-01T10:00:00Z'), end: new Date('2026-12-01T10:00:00Z') });
 });
 
 const upsert = (sourceCalendarId: SourceCalendarId, uid: string, revision = 'r1'): ResourceChange => ({
@@ -146,6 +158,15 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     expect(await sequenceValue()).toBe(before);
   });
 
+  test('a moved span with an unchanged revision is recorded', async () => {
+    const { maxSeq: first } = await withTenant(tenant, (tx) => recordChanges(tx, [upsert(calendar, 'moved')]));
+    const moved = { ...upsert(calendar, 'moved'), span: { start: new Date('2026-12-01T09:00:00Z'), end: new Date('2026-12-01T10:00:00Z') } };
+    const { maxSeq: second } = await withTenant(tenant, (tx) => recordChanges(tx, [moved]));
+    expect(second).toBeGreaterThan(first ?? 0n);
+    const [row] = await withTenant(tenant, (tx) => resourcesByUids(tx, [calendar], ['moved']));
+    expect(row?.span).toEqual(moved.span);
+  });
+
   test('a delete leaves a tombstone with a new seq that changesSince reports', async () => {
     const { maxSeq: created } = await withTenant(tenant, (tx) => recordChanges(tx, [upsert(calendar, 'gone')]));
     const { maxSeq: deleted } = await withTenant(tenant, (tx) => recordChanges(tx, [remove(calendar, 'gone')]));
@@ -189,6 +210,22 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     expect(setting?.value).toBe(Number(floor));
     const left = await inSecond((tx) => changesSince(tx, [cal], start, 10));
     expect(left.rows.map((row) => row.uid).sort()).toEqual(['live', 'recent']);
+  });
+
+  test('purging keeps the newest tombstone until a newer calendar row arrives', async () => {
+    const cal = calendars[2] as SourceCalendarId, inThird = inTenant(tenants[2] as TenantId);
+    await inThird((tx) => recordChanges(tx, [upsert(cal, 'purge-anchor')]));
+    const { maxSeq: deleted } = await inThird((tx) => recordChanges(tx, [remove(cal, 'purge-anchor')]));
+    const cutoff = new Date(Date.now() + 60_000);
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const retained = await inThird((tx) => changesSince(tx, [cal], 0n, 1000));
+    expect(retained.rows.find((row) => row.uid === 'purge-anchor')).toMatchObject({ deleted: true, seq: deleted });
+    expect((await inThird((tx) => publicationState(tx, [cal]))).maxSeq).toBe(deleted!);
+    const { maxSeq: newer } = await inThird((tx) => recordChanges(tx, [upsert(cal, 'newer-than-anchor')]));
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const removed = await inThird((tx) => changesSince(tx, [cal], 0n, 1000));
+    expect(removed.rows.some((row) => row.uid === 'purge-anchor')).toBe(false);
+    expect((await inThird((tx) => publicationState(tx, [cal]))).maxSeq).toBe(newer!);
   });
 
   test('NOTIFY reaches another connection only after commit, and never on rollback', async () => {

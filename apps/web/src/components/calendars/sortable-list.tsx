@@ -35,7 +35,7 @@ export function SortableList<T>({ items, keyOf, labelOf, onReorder, children, la
   };
 
   return (
-    <ol aria-label={label} className={cx('grid', className)}>
+    <ol aria-label={label} className={cx('grid grid-cols-[minmax(0,1fr)]', className)}>
       {items.map((item, index) => (
         <li
           key={keyOf(item)}

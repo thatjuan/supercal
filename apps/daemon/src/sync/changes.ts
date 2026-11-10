@@ -1,5 +1,5 @@
 import { lastModified, organizer, revisionOf, sequence, spanOf, type Completeness, type EventResource, type Normalizer } from '@supercal/core';
-import { resource, sourceObject, type ResourceChange, type SourceCalendar, type Span, type TenantTx } from '@supercal/db';
+import { resource, sameSpan, sourceObject, type ResourceChange, type SourceCalendar, type Span, type TenantTx } from '@supercal/db';
 import { and, eq, inArray, notExists, sql } from 'drizzle-orm';
 import type { Logger } from '../log.ts';
 
@@ -14,8 +14,21 @@ export const spanDates = ({ start, end }: ReturnType<typeof spanOf>): Span => ({
   end: end === 'infinity' ? 'infinity' : new Date(end.epochMilliseconds),
 });
 
-/** The `ResourceChange` for a normalised group. Without `span`, computes it, throwing when the resource has no usable timing. */
+/** Reject strings jsonb cannot represent, including property names and nested jCal values. */
+function assertStorable(value: unknown): void {
+  if (typeof value === 'string') {
+    if (value.includes('\0') || !value.isWellFormed()) throw new RangeError('Object contains a string PostgreSQL cannot store');
+  } else if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      assertStorable(key);
+      assertStorable(nested);
+    }
+  }
+}
+
+/** The `ResourceChange` for a normalised group. Without `span`, computes it, throwing for unreadable timing or strings jsonb cannot store. */
 export function upsertOf(calendar: SourceCalendar, uid: string, data: EventResource, completeness: Completeness, span?: Span): Upsert {
+  assertStorable(data);
   const main = data.master ?? data.overrides[0] ?? null;
   const modified = main && lastModified(main);
   return {
@@ -62,7 +75,7 @@ export async function normalizeDirtyGroups(tx: TenantTx, calendar: SourceCalenda
         change = last?.data && last.span ? upsertOf(calendar, uid, last.data, { incomplete: reason }, last.span) : null;
       }
       if (change && objectNames && members[0]) change.objectName = members[0].providerObjectId;
-      if (change && (!before || before.deleted || before.revision !== change.revision)) changes.push(change);
+      if (change && (!before || before.deleted || before.revision !== change.revision || !before.span || !sameSpan(before.span, change.span))) changes.push(change);
     }
     await tx
       .update(sourceObject)

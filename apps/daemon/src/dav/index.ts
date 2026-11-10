@@ -3,11 +3,12 @@
  * each request then uses one tenant transaction. Shared handlers read CollectionView; only device
  * logins can enter the hosted write path. Listings fetch metadata without rendering payloads.
  */
-import { assertIanaZone, freeBusy, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
+import { assertIanaZone, freeBusy, freeBusyWindowProblem, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
 import { Temporal } from '@js-temporal/polyfill';
 import { sourceCalendar, sourceObject, resourcesIn, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
 import { Hono, type Context } from 'hono';
-import { getConnInfo } from 'hono/bun';
+import { clientIp } from '../client-ip.ts';
+import { bodyLimit } from 'hono/body-limit';
 import { and, eq } from 'drizzle-orm';
 import { audit, ProblemError } from '../api/kit/index.ts';
 import { requireAccess, atLeast } from '../hosted/access.ts';
@@ -16,13 +17,17 @@ import { createFeedService } from '../feeds/service.ts';
 import { createCalendar, deleteCalendar, getOrCreateHostedAccount } from '../hosted/calendars.ts';
 import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import type { Bus } from '../bus.ts';
+import { createLogger } from '../log.ts';
 import { createFeedAuth } from './auth.ts';
 import { collectionProps, homeProps, objectProps, principalProps, propResponse, rootProps, statusResponse, wanted, type Account } from './props.ts';
 import { loadAccount, loadUserAccount, loginByUsername, publicationCollection, type CollectionView } from './store.ts';
 import { NS, child, children, esc, is, parseXml, xmlWriter, type XmlEl } from './xml.ts';
 
+const log = createLogger({ component: 'dav' });
+
 export type DavDeps = {
   secrets: SecretBox;
+  clientIpHeader?: string | undefined;
   /** Invalidates cached feed and device credentials across replicas. */
   bus: Pick<Bus, 'on'>;
   /** `SUPERCAL_PUBLIC_URL`; its host goes into sync tokens. Without it, the request's Host is used. */
@@ -35,6 +40,9 @@ const READ_METHODS = ['OPTIONS', 'PROPFIND', 'REPORT', 'GET', 'HEAD'];
 const WRITE_METHODS = ['PUT', 'DELETE', 'POST', 'PROPPATCH', 'MKCALENDAR', 'MKCOL', 'MOVE', 'COPY', 'LOCK', 'UNLOCK'];
 /** sync-collection without `<d:limit>` still answers in one page; this only bounds a runaway. */
 const SYNC_PAGE_MAX = 1_000_000;
+const MAX_DAV_BODY = 2 * 1024 * 1024;
+const MAX_MULTIGET_HREFS = 1000;
+const MAX_MULTIGET_BYTES = 32 * 1024 * 1024;
 
 type Node =
   | { kind: 'root'; path: string }
@@ -155,7 +163,7 @@ function metadataProperties(body: XmlEl | undefined, creating: boolean) {
 }
 
 /** Builds the CalDAV routes. */
-export function createDav({ secrets, bus, publicUrl }: DavDeps) {
+export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) {
   const feedAuth = createFeedAuth(loginByUsername);
   bus.on('feed-credentials-rotated', ({ feedId }) => feedAuth.forget(feedId));
   bus.on('dav-login-revoked', ({ loginId }) => feedAuth.forget(loginId));
@@ -164,20 +172,19 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
 
   /** Authenticates, opens the tenant transaction, resolves the path and runs `handle`. */
   async function inLogin(c: Context, handle: (r: Request) => Promise<Response>): Promise<Response> {
-    let ip = 'unknown';
-    try {
-      ip = getConnInfo(c).remote.address ?? ip;
-    } catch {
-      // Not served by Bun.serve (app.request in tests): no peer address.
-    }
-    const result = await feedAuth.authenticate(c.req.header('Authorization'), ip);
+    const result = await feedAuth.authenticate(c.req.header('Authorization'), clientIp(c, clientIpHeader));
     const unauthorized = () => c.body('authentication required', 401, { 'WWW-Authenticate': 'Basic realm="Supercal", charset="UTF-8"' });
     if (!result.ok)
       return result.status === 429 ? c.body('too many failed logins', 429, { 'Retry-After': String(result.retryAfter ?? 300) }) : unauthorized();
     const { login } = result;
     const host = tokenHost ?? c.req.header('Host') ?? 'localhost';
-    // Buffer a device's write body now (Hono caches it), so a slow upload holds no connection or calendar lock.
-    if (login.kind === 'user' && WRITE_METHODS.includes(c.req.method)) await c.req.text();
+    // Buffer any body now (Hono caches it), so a slow upload holds no connection or calendar lock.
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') await c.req.text();
+    const current = await membership(login.kind === 'user' ? login.userId : login.ownerUserId, login.tenantId);
+    if (login.kind === 'feed' && !current) {
+      feedAuth.forget(login.id);
+      return unauthorized();
+    }
 
     return withTenant(login.tenantId, async (tx) => {
       let principal: Principal | null = null;
@@ -196,7 +203,6 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
         displayName = account.feed.name;
         email = account.ownerEmail;
       } else {
-        const current = await membership(login.userId, login.tenantId);
         principal = current ? { kind: 'user', via: 'davLogin', userId: login.userId, tenantId: login.tenantId, ...current } : null;
         const account = principal && await loadUserAccount(tx, login.id, host, principal);
         if (!account || account.login.passwordHash !== login.passwordHash || account.login.userId !== login.userId) {
@@ -289,10 +295,12 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
       let from: Temporal.Instant, to: Temporal.Instant;
       try {
         from = instant(range?.attrs.start); to = instant(range?.attrs.end);
-        if (Temporal.Instant.compare(from, to) >= 0) throw new Error('Invalid window');
       } catch { return c.body('expected a valid time-range with UTC start and end', 400); }
+      const problem = freeBusyWindowProblem({ from, to });
+      if (problem) return c.body(problem, 400);
       const rows = await resourcesIn(tx, [view.calendar.id], { from: new Date(from.epochMilliseconds), to: new Date(to.epochMilliseconds) });
       const result = freeBusy(rows.map((row) => row.data), { from, to }, view.calendar.timezone ?? 'UTC');
+      for (const uid of result.skipped) log.warn('could not expand free-busy object', { calendarId: view.calendar.id, uid });
       if (result.truncated) return davError(403, 'd:number-of-matches-within-limits');
       const stamp = (value: Temporal.Instant) => value.toString({ smallestUnit: 'second' }).replace(/[-:]/g, '');
       const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Supercal//EN', 'BEGIN:VFREEBUSY', `DTSTART:${stamp(from)}`, `DTEND:${stamp(to)}`, `DTSTAMP:${stamp(Temporal.Now.instant())}`,
@@ -316,22 +324,31 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
     }
 
     if (is(body, NS.CALDAV, 'calendar-multiget')) {
-      const requested = children(body, NS.DAV, 'href').map((h) => {
+      const hrefs = children(body, NS.DAV, 'href');
+      if (hrefs.length > MAX_MULTIGET_HREFS) return davError(403, 'd:number-of-matches-within-limits');
+      const seen = new Set<string>();
+      const requested = hrefs.map((h) => {
         const pathname = URL.parse(h.text, 'http://x')?.pathname ?? '';
         let name = '';
         try { name = pathname.startsWith(path) ? decodeURIComponent(pathname.slice(path.length)) : ''; } catch {}
         return { href: h.text, entry: index?.byHref.get(name) };
+      }).filter(({ href, entry }) => {
+        const key = entry?.uid ?? href;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
       const rendered = await view.objects(tx, requested.flatMap((q) => (q.entry ? [q.entry.uid] : [])));
-      return multistatus(
-        w,
-        requested
-          .map(({ href, entry }) => {
-            const o = entry && rendered.get(entry.uid);
-            return o ? object(entry.uid, o.ics) : statusResponse(href, '404 Not Found');
-          })
-          .join(''),
-      );
+      const parts: string[] = [];
+      let bytes = 0;
+      for (const { href, entry } of requested) {
+        const o = entry && rendered.get(entry.uid);
+        const part = o ? object(entry.uid, o.ics) : statusResponse(href, '404 Not Found');
+        bytes += Buffer.byteLength(part);
+        if (bytes > MAX_MULTIGET_BYTES) return davError(403, 'd:number-of-matches-within-limits');
+        parts.push(part);
+      }
+      return multistatus(w, parts.join(''));
     }
 
     if (is(body, NS.DAV, 'sync-collection')) {
@@ -451,6 +468,9 @@ export function createDav({ secrets, bus, publicUrl }: DavDeps) {
   }
 
   const app = new Hono();
+  const davBody = bodyLimit({ maxSize: MAX_DAV_BODY, onError: (c) => c.body('request body too large', 413) });
+  app.use('/dav/*', davBody);
+  app.use('/', davBody);
   app.all('/.well-known/caldav', (c) => c.redirect('/dav/', 301));
   app.on('OPTIONS', ['/dav', '/dav/*'], (c) => {
     if (!c.req.header('Authorization')) return c.body(null, 200, { DAV: DAV_HEADER, Allow: READ_METHODS.join(', ') });
