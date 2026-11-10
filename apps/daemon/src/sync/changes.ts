@@ -1,5 +1,5 @@
 import { lastModified, organizer, revisionOf, sequence, spanOf, type Completeness, type EventResource, type Normalizer } from '@supercal/core';
-import { resource, sourceObject, type ResourceChange, type SourceCalendar, type Span, type TenantTx } from '@supercal/db';
+import { resource, sameSpan, sourceObject, type ResourceChange, type SourceCalendar, type Span, type TenantTx } from '@supercal/db';
 import { and, eq, inArray, notExists, sql } from 'drizzle-orm';
 import type { Logger } from '../log.ts';
 
@@ -62,7 +62,7 @@ export async function normalizeDirtyGroups(tx: TenantTx, calendar: SourceCalenda
         change = last?.data && last.span ? upsertOf(calendar, uid, last.data, { incomplete: reason }, last.span) : null;
       }
       if (change && objectNames && members[0]) change.objectName = members[0].providerObjectId;
-      if (change && (!before || before.deleted || before.revision !== change.revision)) changes.push(change);
+      if (change && (!before || before.deleted || before.revision !== change.revision || !before.span || !sameSpan(before.span, change.span))) changes.push(change);
     }
     await tx
       .update(sourceObject)

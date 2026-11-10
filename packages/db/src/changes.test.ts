@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import { CHANGES_CHANNEL, changesSince, publicationState, purgeTombstones, recordChanges, resourcesByUids, type ResourceChange } from './changes.ts';
 import { newId, type SourceCalendarId, type TenantId } from './ids.ts';
 import { migrate } from './migrate.ts';
-import { calendarAccount, organization, sourceCalendar, systemSetting, user } from './schema/index.ts';
+import { calendarAccount, organization, resource, sourceCalendar, systemSetting, user } from './schema/index.ts';
 import { testDatabaseUrl } from './test-db.ts';
 import { withControl, withTenant, type TenantTx } from './tx.ts';
 import { closeDb, connectDb, unsafeDb } from './unsafe-db.ts';
@@ -22,6 +22,12 @@ test('nothing outside changes.ts writes resource', async () => {
       if (writes.some((pattern) => pattern.test(text))) offenders.push(file);
     }
   expect(offenders).toEqual([]);
+});
+
+test('a legacy empty span reads as null, so the next upsert rewrites it', () => {
+  expect(resource.span.mapFromDriverValue('empty')).toBeNull();
+  const point = '["2026-12-01 10:00:00+00","2026-12-01 10:00:00+00"]';
+  expect(resource.span.mapFromDriverValue(point)).toEqual({ start: new Date('2026-12-01T10:00:00Z'), end: new Date('2026-12-01T10:00:00Z') });
 });
 
 const upsert = (sourceCalendarId: SourceCalendarId, uid: string, revision = 'r1'): ResourceChange => ({
@@ -144,6 +150,15 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     const result = await withTenant(tenant, (tx) => recordChanges(tx, [upsert(calendar, 'same')]));
     expect(result).toEqual({ maxSeq: null, changed: 0 });
     expect(await sequenceValue()).toBe(before);
+  });
+
+  test('a moved span with an unchanged revision is recorded', async () => {
+    const { maxSeq: first } = await withTenant(tenant, (tx) => recordChanges(tx, [upsert(calendar, 'moved')]));
+    const moved = { ...upsert(calendar, 'moved'), span: { start: new Date('2026-12-01T09:00:00Z'), end: new Date('2026-12-01T10:00:00Z') } };
+    const { maxSeq: second } = await withTenant(tenant, (tx) => recordChanges(tx, [moved]));
+    expect(second).toBeGreaterThan(first ?? 0n);
+    const [row] = await withTenant(tenant, (tx) => resourcesByUids(tx, [calendar], ['moved']));
+    expect(row?.span).toEqual(moved.span);
   });
 
   test('a delete leaves a tombstone with a new seq that changesSince reports', async () => {

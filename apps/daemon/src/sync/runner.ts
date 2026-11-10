@@ -11,7 +11,7 @@
  * 2. `end` is one fenced transaction: a snapshot deletes the objects it did not see (and the
  *    occurrence records of masters that went with them), every dirty
  *    group is normalised from all its objects, resources whose group lost every object (or now
- *    publishes nothing) become deletes, and only real revision changes reach `recordChanges`. Then the cursor is stored.
+ *    publishes nothing) become deletes, and only real revision or span changes reach `recordChanges`. Then the cursor is stored.
  */
 import { normalizers, type Normalizer } from '@supercal/core';
 import {
