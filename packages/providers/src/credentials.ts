@@ -32,6 +32,8 @@ export type GoogleCredentials = z.infer<typeof GoogleCredentials>;
  */
 const MicrosoftCredentials = z.object({
   provider: z.literal('microsoft'),
+  /** Missing on connections made before incremental editing consent was supported. */
+  scopes: z.array(z.string()).optional(),
   subject: z.string(),
   email: z.string(),
   accessToken: z.string(),

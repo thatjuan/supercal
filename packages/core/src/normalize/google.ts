@@ -3,7 +3,7 @@
  * that shares one iCalUID becomes one EventResource. The master carries the recurrence lines and
  * an EXDATE per cancelled instance; every other exception becomes an override whose RECURRENCE-ID
  * is its `originalStartTime` in the master's zone. Zones are IANA names, so VTIMEZONEs are
- * generated (`addMissingTimezones`). Reminders are dropped (VALARM is stripped on output anyway).
+ * generated (`addMissingTimezones`). Explicit reminders become VALARMs for device editing.
  */
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
@@ -42,6 +42,7 @@ export const GoogleEvent = z.object({
   attendees: z.array(GooglePerson).optional(),
   conferenceData: z.object({ entryPoints: z.array(z.object({ entryPointType: z.string().optional(), uri: z.string().optional() })).optional() }).optional(),
   hangoutLink: z.string().optional(),
+  reminders: z.object({ useDefault: z.boolean().optional(), overrides: z.array(z.object({ method: z.string(), minutes: z.number().int().nonnegative() })).optional() }).optional(),
 });
 export type GoogleEvent = z.infer<typeof GoogleEvent>;
 type GoogleTime = z.infer<typeof GoogleTime>;
@@ -120,6 +121,10 @@ function eventLines(uid: string, e: GoogleEvent, zone: string | undefined, extra
   }
   const meeting = conferenceUrl(e);
   if (meeting) lines.push(`CONFERENCE;VALUE=URI;FEATURE=VIDEO:${meeting}`, `URL:${meeting}`);
+  if (!e.reminders?.useDefault) for (const reminder of e.reminders?.overrides ?? []) {
+    if (reminder.method !== 'popup' && reminder.method !== 'email') continue;
+    lines.push('BEGIN:VALARM', `ACTION:${reminder.method === 'email' ? 'EMAIL' : 'DISPLAY'}`, `TRIGGER:-PT${reminder.minutes}M`, 'END:VALARM');
+  }
   return lines;
 }
 

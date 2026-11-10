@@ -6,6 +6,7 @@
  */
 import type { components } from '@supercal/api-client';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { consentUrl } from '../subscribe/sinks.ts';
 import { $api, keyPath } from '../../api.ts';
 import type { Account, Calendar } from './health.ts';
 import type { OAuthProvider } from './providers.tsx';
@@ -94,4 +95,20 @@ export function useOAuth(onProblem: (error: unknown) => void) {
     connect: (provider: OAuthProvider, returnTo: string) => ({ google, microsoft })[provider].mutate({ body: { returnTo } }),
     reconnect: (accountId: string, returnTo: string) => reconnect.mutate({ params: { path: { id: accountId } }, body: { returnTo } }),
   };
+}
+
+/** Providers whose account-level editing consent is implemented by the API. */
+export const EDITING_CONSENT_PROVIDERS: ReadonlySet<Account['provider']> = new Set(['google']);
+
+/** Start incremental consent, or refresh the account when consent was already granted. */
+export function useAllowEditing(onProblem: (error: unknown) => void) {
+  const client = useQueryClient();
+  return $api.useMutation('post', '/api/v1/accounts/{id}/allow-editing', {
+    onSuccess: () => refreshAccounts(client),
+    onError: (error) => {
+      const url = consentUrl(error);
+      if (url) window.location.assign(url);
+      else onProblem(error);
+    },
+  });
 }

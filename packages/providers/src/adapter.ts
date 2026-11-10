@@ -69,6 +69,8 @@ export type SourceCalendarInfo = {
 export type SourceCalendarRef = {
   id: string;
   providerCalendarId: string;
+  /** Calendar zone for floating device times. */
+  timezone?: string | null;
   capabilities: CalendarCapabilities;
   occurrences?: (masterId: ProviderObjectId) => Promise<Map<string, string>>;
 };
@@ -167,4 +169,11 @@ export class ProviderConflictError extends Error {}
 /** A refusal for this object, without affecting the account's authentication status. */
 export class ProviderWriteRejectedError extends Error {
   constructor(readonly reason: 'read-only' | 'invalid-data' | 'quota' | 'not-found', message: string) { super(message); }
+}
+
+/** A multi-call write stopped after these changes were accepted upstream. Apply them before reporting the cause. */
+export class ProviderPartialWriteError extends Error {
+  constructor(readonly partial: WriteResult, override readonly cause: unknown) {
+    super('Provider write only partially succeeded', { cause });
+  }
 }

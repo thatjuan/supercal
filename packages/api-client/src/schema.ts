@@ -116,6 +116,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{id}/allow-editing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["allowAccountEditing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts": {
         parameters: {
             query?: never;
@@ -883,6 +899,18 @@ export interface components {
             /** @description The secret; shown only in this response */
             key: string;
         };
+        /** @description `type` …/problems/needs-consent: send the browser to `authorizationUrl`, then retry the operation */
+        NeedsConsentProblem: components["schemas"]["Problem"] & {
+            /** Format: uri */
+            authorizationUrl: string;
+        };
+        OAuthStart: {
+            /**
+             * @description A path (or URL) on this server to send the browser back to
+             * @example /accounts
+             */
+            returnTo: string;
+        };
         AccountList: {
             items: components["schemas"]["Account"][];
         };
@@ -899,6 +927,8 @@ export interface components {
             /** @enum {string} */
             status: "active" | "reauth_required" | "error" | "disabled";
             statusDetail: string | null;
+            /** @description The account holds its provider’s write scope; individual calendars may still be read-only */
+            canWrite: boolean;
             /** @description Newly discovered calendars are published enabled */
             autoPublish: boolean;
         };
@@ -1066,13 +1096,6 @@ export interface components {
         AuthorizationUrl: {
             /** Format: uri */
             authorizationUrl: string;
-        };
-        OAuthStart: {
-            /**
-             * @description A path (or URL) on this server to send the browser back to
-             * @example /accounts
-             */
-            returnTo: string;
         };
         CalendarList: {
             items: components["schemas"]["Calendar"][];
@@ -2018,11 +2041,6 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        /** @description `type` …/problems/needs-consent: send the browser to `authorizationUrl`, then create the sink again. Any other 409: the sink exists already */
-        NeedsConsentProblem: components["schemas"]["Problem"] & {
-            /** Format: uri */
-            authorizationUrl: string;
-        };
         NewSink: {
             /** @example pub_01h455vb4pex5vsknk084sn02q */
             publicationId: string;
@@ -2636,6 +2654,93 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    allowAccountEditing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthStart"];
+            };
+        };
+        responses: {
+            /** @description The account already has editing permission */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Editing requires incremental consent */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["NeedsConsentProblem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

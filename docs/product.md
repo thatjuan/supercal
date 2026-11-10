@@ -34,7 +34,8 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
   One device login also lists connected calendars enabled on the Calendars page with full event
   details, alongside shared calendars. It can create, edit and delete events in your connected
-  iCloud or CalDAV calendars when the provider allows it; shared connected calendars stay read-only.
+  Google, iCloud or CalDAV calendars when the provider allows it; shared connected calendars stay read-only.
+  Google editing needs `calendar.events` consent and an owner or writer calendar role. Existing accounts can grant it with **Allow editing** on the Accounts page. Google events created from a device preserve the client's UID through `events.import`, which adds a private copy and does not send invitations to attendees. Editing the event later in Google sends invitations. This invitation behavior has not been verified with a live account.
   Edits go through to the provider immediately, and conflicts ask the calendar app to refetch. Feed privacy and filters do not apply to the
   owner's device login; hosted calendars stay listed even when their feed publication is disabled.
   The dashboard also shows each hosted calendar's events and creates, edits and deletes them,

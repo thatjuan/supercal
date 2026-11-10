@@ -302,14 +302,33 @@ The CalDAV/iCloud adapter discovers write access from `current-user-privilege-se
 `write-content` or `all`) on VEVENT collections. It conditionally PUTs the existing href or a fresh
 UUID href, then GETs the stored bytes and ETag even when PUT returned one. DELETE uses `If-Match`.
 Objects split across `path#uid` identifiers remain read-only to avoid overwriting other UIDs.
-All requests use the guarded session transport. Google and Microsoft write adapters are separate
-extensions of the same contract.
+CalDAV requests use the guarded session transport. Google uses its fixed-host API client and shares
+its per-account token bucket with sync. Google write access requires `calendar.events` plus an
+`owner` or `writer` calendar role. Granular consent may grant only `calendar.events.readonly`;
+those accounts keep syncing read-only. `Account.canWrite` reports the account scope, independently
+of calendar roles. `POST /accounts/{id}/allow-editing` returns 409 `needs-consent` with a Google
+incremental-consent URL, or 204 when already granted. Successful consent wakes discovery to
+refresh calendar capabilities.
+
+Google creates with `events.import` and the client's `iCalUID`. Edits PATCH only changed mapped
+fields, preserving conference data, attachments, colors and extended properties. Masters run
+before instances. New instances resolve Google's deterministic id, or a bounded `events.instances`
+lookup when it is absent; each mutation of a known event uses `If-Match`. Missing exceptions revert
+to the series at their original start, while cancellations and newly excluded dates cancel the
+instance. Participant notifications are sent for organizer scheduling changes or the account's
+own RSVP; other edits use `sendUpdates=none`. Imported events do not send invitations on creation;
+live invitation behavior remains unverified.
+
+A multi-call provider failure carries accepted changes in `ProviderPartialWriteError.partial`.
+The write service applies that result through the same third step before mapping the underlying
+cause to the device response. The follow-up sync repairs any upstream state not returned by the
+failed request. Microsoft writes extend the same contract separately.
 
 ### Providers
 
 | Provider | Discovery | Events | Push | Notes |
 | --- | --- | --- | --- | --- |
-| Google | `calendarList` poll + `calendarList.watch` | `events.list` `singleEvents=false&showDeleted=true`; terminal `nextSyncToken`; 410 → staged full resync | `events.watch` per calendar; renew before `expiration` (default TTL 7 d), allow overlap | Scopes `calendar.calendarlist.readonly` + `calendar.events.readonly`; sink adds `calendar.app.created` by incremental consent. Quota 600 req/min/user. |
+| Google | `calendarList` poll + `calendarList.watch` | `events.list` `singleEvents=false&showDeleted=true`; terminal `nextSyncToken`; 410 → staged full resync | `events.watch` per calendar; renew before `expiration` (default TTL 7 d), allow overlap | Scopes `calendar.calendarlist.readonly` + `calendar.events` (legacy/read-only consent may retain `calendar.events.readonly`); sink adds `calendar.app.created` by incremental consent. Quota 600 req/min/user. |
 | Microsoft | `/me/calendars` poll | Per calendar, an etag-style reconciliation: list `id, changeKey, type` (masters + singles), diff against `source_object.etag`, then fetch only changed items. Series are fetched with `exceptionOccurrences` and `cancelledOccurrences`. Every run is a `snapshot` | One basic change-notification subscription **per mailbox** on `/me/events` (≤10,080 min) with a lifecycle URL. A notification wakes all of the account's calendar targets. Handle `reauthorizationRequired`, `missed`, `subscriptionRemoved` *(ingest review)* | v1.0 has no unbounded event delta *(ingest)*. Throttle: 4 concurrent / mailbox; honour Retry-After. |
 | iCloud | CalDAV discovery from `caldav.icloud.com` | CalDAV | none (poll) | App-specific password. Partition-host credential policy. |
 | CalDAV | URL + `/.well-known/caldav` → principal → home (SRV/email-domain discovery is deferred) | `sync-collection` if advertised, else ctag → etag diff → multiget; per collection | none (poll) | Basic auth in v1. |

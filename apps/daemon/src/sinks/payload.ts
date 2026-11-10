@@ -8,27 +8,24 @@
  *   const { revision, events } = googleEvents(sinkId, object, 'Europe/Paris');
  */
 import { createHash } from 'node:crypto';
-import { Temporal } from '@js-temporal/polyfill';
 import {
-  assertIanaZone,
+  googleTime,
+  googleEndTime,
+  type GoogleTime,
   classification,
   getProp,
   getProps,
   propertyLine,
-  propParam,
-  propType,
   recurrenceId,
   status,
   textValue,
   transp,
-  vtimezoneUtcOffset,
   type EventResource,
   type JCalComponent,
-  type JCalProperty,
   type ProjectedObject,
 } from '@supercal/core';
 
-export type GoogleTime = { date: string } | { dateTime: string; timeZone?: string };
+export type { GoogleTime } from '@supercal/core';
 
 /** Everything a sink sends for one event. The type has no attendee, organizer or conference fields on purpose. */
 export type SinkEventBody = {
@@ -72,42 +69,6 @@ function base32hex(bytes: Uint8Array): string {
 export const sinkEventId = (sinkId: string, uid: string, recurrence: string): string =>
   base32hex(createHash('sha256').update(`${sinkId}\0${uid}\0${recurrence}`).digest()).slice(0, 26).toLowerCase();
 
-function isIana(zone: string): boolean {
-  try {
-    assertIanaZone(zone);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** A DATE or DATE-TIME property as a Google time. Floating times are read in `zone`; a non-IANA TZID is resolved through the resource's VTIMEZONE to UTC. */
-function timeOf(prop: JCalProperty, resource: EventResource, zone: string): GoogleTime {
-  const value = String(prop[3]);
-  if (propType(prop) === 'date') return { date: value };
-  if (value.endsWith('Z')) return { dateTime: value };
-  const tzid = propParam(prop, 'tzid');
-  if (tzid && isIana(tzid)) return { dateTime: value, timeZone: tzid };
-  const vtimezone = tzid ? resource.timezones[tzid] : undefined;
-  if (vtimezone) {
-    const wall = Temporal.PlainDateTime.from(value);
-    return { dateTime: wall.toZonedDateTime('UTC').toInstant().subtract({ seconds: vtimezoneUtcOffset(vtimezone, wall) }).toString() };
-  }
-  return { dateTime: value, timeZone: zone };
-}
-
-/** DTEND, else DTSTART + DURATION, else the RFC 5545 default (one day for a date, zero length otherwise). */
-function endOf(component: JCalComponent, start: GoogleTime, resource: EventResource, zone: string): GoogleTime {
-  const dtend = getProp(component, 'dtend');
-  if (dtend) return timeOf(dtend, resource, zone);
-  const raw = getProp(component, 'duration')?.[3];
-  const duration = typeof raw === 'string' ? Temporal.Duration.from(raw) : null;
-  if ('date' in start) return { date: Temporal.PlainDate.from(start.date).add(duration ?? { days: 1 }).toString() };
-  if (!duration) return start;
-  if (start.dateTime.endsWith('Z') || /[+-]\d\d:\d\d$/.test(start.dateTime)) return { dateTime: Temporal.Instant.from(start.dateTime).add(duration).toString() };
-  return { ...start, dateTime: Temporal.PlainDateTime.from(start.dateTime).add(duration).toString({ smallestUnit: 'second' }) };
-}
-
 /** The first join URL of a component (CONFERENCE, else URL), for the description. */
 function joinUrl(component: JCalComponent): string | null {
   for (const name of ['conference', 'url']) {
@@ -125,7 +86,7 @@ type Unrevised = Omit<SinkEventBody, 'extendedProperties'>;
 function body(id: string, component: JCalComponent, resource: EventResource, zone: string): Unrevised {
   const dtstart = getProp(component, 'dtstart');
   if (!dtstart) throw new RangeError(`a component of ${resource.uid} has no DTSTART`);
-  const start = timeOf(dtstart, resource, zone);
+  const start = googleTime(dtstart, resource, zone);
   const summary = textValue(component, 'summary');
   const location = textValue(component, 'location');
   const url = joinUrl(component);
@@ -138,7 +99,7 @@ function body(id: string, component: JCalComponent, resource: EventResource, zon
     ...(description !== null && { description }),
     ...(location !== null && { location }),
     start,
-    end: endOf(component, start, resource, zone),
+    end: googleEndTime(component, start, resource, zone),
     status: STATUS[status(component) as keyof typeof STATUS] ?? 'confirmed',
     transparency: transp(component) === 'TRANSPARENT' ? 'transparent' : 'opaque',
     ...(visibility && { visibility }),
@@ -165,7 +126,7 @@ export function googleEvents(sinkId: string, object: ProjectedObject, zone: stri
     const slot = getProp(override, 'recurrence-id');
     if (!slot) continue;
     const own = body(sinkEventId(sinkId, uid, recurrenceId(override) ?? ''), override, resource, zone);
-    bodies.push(master ? { ...own, recurringEventId: masterId, originalStartTime: timeOf(slot, resource, zone) } : own);
+    bodies.push(master ? { ...own, recurringEventId: masterId, originalStartTime: googleTime(slot, resource, zone) } : own);
   }
   const revision = createHash('sha256').update(JSON.stringify(bodies)).digest('base64url').slice(0, 27);
   return {

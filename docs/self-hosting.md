@@ -237,7 +237,10 @@ Google accounts need an OAuth client of your own. These steps use the Google Clo
    - `openid`
    - `.../auth/userinfo.email`
    - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
-   - `https://www.googleapis.com/auth/calendar.events.readonly`
+   - `https://www.googleapis.com/auth/calendar.events`
+
+   Existing OAuth apps must add `calendar.events` under **Data access** too. Existing accounts grant it with **Allow editing** on the Accounts page; accounts that grant only the read scope keep syncing read-only.
+
 5. Under **Clients**, create an OAuth client of type **Web application**. Add one authorized redirect URI: your `SUPERCAL_PUBLIC_URL` followed by `/api/v1/oauth/google/callback`, for example `https://cal.example.com/api/v1/oauth/google/callback`. It must match exactly, with no trailing slash.
 6. Copy the client ID and secret into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` and restart Supercal. Users can now connect Google accounts from the dashboard.
 7. **Publish the app.** Under **Audience**, click **Publish app** to move it from Testing to In production. An app left in Testing issues refresh tokens that expire after seven days, so every connected Google account would stop syncing each week and need reconnecting. The dashboard marks such accounts as needing reauthorization.
@@ -291,7 +294,7 @@ affecting other devices. A tenant admin can revoke a member's device login too. 
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
 Feed usernames and passwords continue to provide read-only publications. A DAV login lists your
 hosted calendars, imported calendars enabled on the Calendars page, and calendars shared with you.
-You can edit hosted calendars; your imported calendars are read-only and show full event details,
+You can edit hosted calendars and your writable Google, iCloud and CalDAV calendars; read-only imported calendars show full event details,
 regardless of feed privacy and filters. Hosted calendars stay listed even when their feed publication
 is disabled. Device credentials cannot open the management API or ICS feeds.
 

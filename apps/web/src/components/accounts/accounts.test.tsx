@@ -1,15 +1,18 @@
+import { fetchMock, respondWith, requests } from '../../test/fetch-mock.ts';
 import type { Problem } from '@supercal/api-client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { AccountRow } from './account-list.tsx';
+import { useAllowEditing } from './data.ts';
 import { RemoveDialog } from './account-dialogs.tsx';
 import { CaldavForm, IcloudForm, IcsForm } from './credential-forms.tsx';
 import type { Account, AccountHealth, Calendar } from './health.ts';
 import type { FormProvider } from './providers.tsx';
 import { StatusBadge } from './status.tsx';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); fetchMock.mockReset(); vi.unstubAllGlobals(); });
 
 const withQueries = (ui: ReactElement) => render(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
 
@@ -124,7 +127,7 @@ describe('RemoveDialog', () => {
     serverUrl: 'cal.example',
     status: 'active',
     statusDetail: null,
-    autoPublish: true,
+    autoPublish: true, canWrite: false,
   };
   const calendar = (id: string, publicationIds: string[]): Calendar => ({
     id,
@@ -155,5 +158,38 @@ describe('RemoveDialog', () => {
   test('uses the singular for one of each', () => {
     withQueries(<RemoveDialog account={account} calendars={[calendar('cal_a', ['pub_a'])]} open onOpenChange={() => {}} onRemoved={() => {}} />);
     expect(screen.getByText('Removes 1 calendar from 1 publication.')).toBeTruthy();
+  });
+});
+
+
+describe('Allow editing', () => {
+  const account: Account = { id: 'acc_google', provider: 'google', ownerUserId: 'user_1', displayName: 'Work', email: 'me@example.test', serverUrl: null, status: 'active', statusDetail: null, autoPublish: true, canWrite: false };
+  test.each([['google', false, true], ['google', true, false], ['microsoft', false, false], ['ics', false, false], ['caldav', true, false]] as const)('renders only for supported accounts lacking consent: %s, canWrite=%s', (provider, canWrite, shown) => {
+    withQueries(<AccountRow account={{ ...account, provider, canWrite }} calendars={[]} onReconnect={() => {}} />);
+    expect(Boolean(screen.queryByRole('button', { name: 'Allow editing' }))).toBe(shown);
+  });
+  test('posts the account and return location; already-granted consent refreshes successfully', async () => {
+    respondWith({});
+    withQueries(<AccountRow account={account} calendars={[]} onReconnect={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow editing' }));
+    await waitFor(() => expect(requests('POST')).toHaveLength(1));
+    const request = requests('POST')[0]!;
+    expect(new URL(request.url).pathname).toBe('/api/v1/accounts/acc_google/allow-editing');
+    expect(await request.json()).toEqual({ returnTo: '/accounts' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow editing' }).hasAttribute('disabled')).toBe(false));
+  });
+  test('a 409 consent response sends the browser to Google; other errors remain visible', async () => {
+    const url = 'https://accounts.google.com/consent';
+    respondWith({}, () => Response.json({ ...problem('needs-consent', 409), authorizationUrl: url }, { status: 409 }));
+    const onProblem = vi.fn();
+    const { result } = renderHook(() => useAllowEditing(onProblem), { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider> });
+    const assign = vi.fn();
+    vi.stubGlobal('window', { ...window, document, location: { assign }, addEventListener: window.addEventListener.bind(window), removeEventListener: window.removeEventListener.bind(window) });
+    act(() => result.current.mutate({ params: { path: { id: account.id } }, body: { returnTo: '/accounts' } }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(url));
+    expect(onProblem).not.toHaveBeenCalled();
+    respondWith({}, () => Response.json(problem('unsupported-provider'), { status: 422 }));
+    act(() => result.current.mutate({ params: { path: { id: account.id } }, body: { returnTo: '/accounts' } }));
+    await waitFor(() => expect(onProblem).toHaveBeenCalledOnce());
   });
 });

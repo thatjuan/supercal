@@ -12,7 +12,7 @@ import { useFeedCalendars, type Account, type Calendar, type Feed } from './data
 import { VirtualBuilder } from './virtual-builder.tsx';
 
 const feed = { id: 'feed_1', ownerUserId: ME_ID } as Feed;
-const account: Account = { id: 'acc_1', provider: 'ics', ownerUserId: ME_ID, displayName: 'Work feed', email: null, serverUrl: null, status: 'active', statusDetail: null, autoPublish: true };
+const account: Account = { id: 'acc_1', provider: 'ics', ownerUserId: ME_ID, displayName: 'Work feed', email: null, serverUrl: null, status: 'active', statusDetail: null, autoPublish: true, canWrite: false };
 const connected: Calendar = {
   ...hosted('cal_work', { name: 'Work' }),
   kind: 'connected',

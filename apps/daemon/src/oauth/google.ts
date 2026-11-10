@@ -8,14 +8,14 @@
  * The callback needs the same signed-in user who started the flow: otherwise someone could start a
  * flow and get a victim to complete it, connecting the victim's calendar to their account.
  *
- * Incremental consent (sinks): `startGoogleFlow(…, { accountId, scopes })` asks for extra scopes on
+ * Incremental consent (editing and sinks): `startGoogleFlow(…, { accountId, scopes })` asks for extra scopes on
  * top of those already granted (`include_granted_scopes`). The callback then only updates that
  * account; if the user signs in as another Google identity it fails with `account_mismatch`, and
  * if they untick an extra scope with `consent_declined`, leaving the account as it was.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import { withTenant, type AccountId } from '@supercal/db';
-import { idTokenClaims, OAuthError, tokenRequest, type GoogleCredentials } from '@supercal/providers';
+import { GOOGLE_EVENTS_WRITE_SCOPE, idTokenClaims, OAuthError, tokenRequest, type GoogleCredentials } from '@supercal/providers';
 import { BadRequest, createApiApp, problemResponses, Unprocessable } from '../api/kit/index.ts';
 import type { Principal } from '../auth/principal.ts';
 import { connectAccount, findOwnAccount, reconnectAccount } from '../sync/accounts.ts';
@@ -23,9 +23,9 @@ import type { SyncDeps } from '../sync/index.ts';
 import { allowedReturnTo, beginFlow, redirectWith, takeFlow, type OAuthClient, type OAuthDeps } from './common.ts';
 
 export const GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
+const EVENTS_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_LIST_SCOPE = 'https://www.googleapis.com/auth/calendar.calendarlist.readonly';
-export const GOOGLE_SCOPES = ['openid', 'email', CALENDAR_LIST_SCOPE, EVENTS_SCOPE];
+export const GOOGLE_SCOPES = ['openid', 'email', CALENDAR_LIST_SCOPE, GOOGLE_EVENTS_WRITE_SCOPE];
 const ISSUERS = new Set(['https://accounts.google.com', 'accounts.google.com']);
 const EXCHANGE_TIMEOUT_MS = 30_000;
 
@@ -57,7 +57,7 @@ export async function startGoogleFlow(oauth: OAuthDeps, principal: Principal, re
     client_id: client.clientId,
     redirect_uri: redirectUri(oauth),
     response_type: 'code',
-    scope: [...GOOGLE_SCOPES, ...(consent?.scopes ?? [])].join(' '),
+    scope: [...new Set([...GOOGLE_SCOPES, ...(consent?.scopes ?? [])])].join(' '),
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
@@ -89,7 +89,7 @@ async function exchange(oauth: OAuthDeps, client: OAuthClient, code: string, ver
   });
   const scopes = token.scope?.split(' ') ?? [];
   // Google's granular consent lets the user untick either calendar scope.
-  if (!scopes.includes(EVENTS_SCOPE) || !scopes.includes(CALENDAR_LIST_SCOPE)) throw new CallbackFailure('missing_scopes');
+  if ((!scopes.includes(GOOGLE_EVENTS_WRITE_SCOPE) && !scopes.includes(EVENTS_READ_SCOPE)) || !scopes.includes(CALENDAR_LIST_SCOPE)) throw new CallbackFailure('missing_scopes');
   if (!token.refresh_token) throw new CallbackFailure('no_refresh_token');
   const claims = IdClaims.safeParse(token.id_token ? idTokenClaims(token.id_token) : null);
   if (!claims.success || claims.data.aud !== client.clientId || !ISSUERS.has(claims.data.iss)) throw new CallbackFailure('invalid_id_token');

@@ -3,14 +3,15 @@
  * flow (state tampering, foreign `returnTo`, reconnecting the same `sub`), `invalid_grant` on
  * refresh, a sync through the runner, the push webhook and channel renewal.
  */
-import { calendarAccount, closeDb, connectDb, member, migrate, organization, pushLease, resource, sourceCalendar, syncTarget, user, type AccountId, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
+import { calendarAccount, davLogin, sourceObject, closeDb, connectDb, member, migrate, organization, pushLease, resource, sourceCalendar, syncTarget, user, type AccountId, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { createGoogleAdapter, createGuardedFetch, GOOGLE_INVALID_GRANT_DETAIL, ProviderCredentials } from '@supercal/providers';
-import { googleCredentials, mockGoogle, type MockRequest } from '@supercal/providers/test/google-mock';
+import { createGoogleAdapter, createGuardedFetch, GOOGLE_EVENTS_WRITE_SCOPE, GOOGLE_INVALID_GRANT_DETAIL, ProviderCredentials } from '@supercal/providers';
+import { googleCredentials, googleEventStore, mockGoogle, type MockRequest } from '@supercal/providers/test/google-mock';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
+import { createDav } from '../src/dav/index.ts';
 import { createApi } from '../src/api/index.ts';
 import type { ApiEnv, Principal } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
@@ -43,6 +44,8 @@ const google = {
   events: (_req: MockRequest): Response => Response.json({ items: [], nextSyncToken: 'token-1' }),
   onStop: async (_req: MockRequest) => {},
   watched: 0,
+  readers: false,
+  store: undefined as ReturnType<typeof googleEventStore> | undefined,
 };
 
 function handle(req: MockRequest): Response | Promise<Response> {
@@ -52,12 +55,14 @@ function handle(req: MockRequest): Response | Promise<Response> {
     if (form.get('code_verifier')?.length !== 43) return Response.json({ error: 'invalid_grant' }, { status: 400 });
     return Response.json({ access_token: 'access-1', expires_in: 3600, refresh_token: 'refresh-1', scope: google.scope, id_token: idToken(google.sub) });
   }
-  if (req.path === '/calendar/v3/users/me/calendarList') return Response.json({ items: [{ id: 'work@example.test', summary: 'Work', backgroundColor: '#336699', timeZone: 'Europe/Paris' }] });
+  if (req.path === '/calendar/v3/users/me/calendarList') return Response.json({ items: [{ id: 'work@example.test', summary: 'Work', backgroundColor: '#336699', timeZone: 'Europe/Paris', accessRole: 'owner' }, ...(google.readers ? [{ id: 'holidays', summary: 'Holidays', accessRole: 'reader' }] : [])] });
   if (req.path.endsWith('/watch')) {
     const { id } = JSON.parse(req.body) as { id: string };
     return Response.json({ id, resourceId: `res-${++google.watched}`, expiration: String(Date.now() + 7 * 86_400_000) });
   }
   if (req.path === '/calendar/v3/channels/stop') return google.onStop(req).then(() => new Response(null, { status: 204 }));
+  const write = google.store?.handle(req);
+  if (write) return write;
   if (req.path.endsWith('/events')) return google.events(req);
   return new Response(null, { status: 404 });
 }
@@ -128,6 +133,7 @@ describe.skipIf(!testDatabaseUrl)('Google provider', () => {
     await unsafeDb().insert(organization).values({ id: tenantId, name: 'T', slug: tenantId, createdAt: now });
     await unsafeDb().insert(user).values({ id: userId, name: 'Alice', email: 'alice@example.com', updatedAt: now });
     await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: tenantId, userId, role: 'member', createdAt: now });
+    await unsafeDb().insert(davLogin).values({ tenantId, userId, name: 'Google device', username: 'google-writer-abcdefgh', passwordHash: await Bun.password.hash('device-password', { algorithm: 'argon2id' }) });
   });
 
   afterAll(async () => {
@@ -144,7 +150,7 @@ describe.skipIf(!testDatabaseUrl)('Google provider', () => {
     expect(params).toMatchObject({
       client_id: 'client-id',
       redirect_uri: `${TEST_ORIGIN}/api/v1/oauth/google/callback`,
-      scope: `openid email ${CALENDAR_SCOPES}`,
+      scope: `openid email ${CALENDAR_SCOPES.replace('calendar.events.readonly', 'calendar.events')}`,
       access_type: 'offline',
       prompt: 'consent',
       include_granted_scopes: 'true',
@@ -311,4 +317,65 @@ describe.skipIf(!testDatabaseUrl)('Google provider', () => {
     const [target] = await unsafeDb().select({ dueInDays: sql<number>`extract(epoch from ${syncTarget.nextRunAt} - clock_timestamp())::float8 / 86400` }).from(syncTarget).where(eq(syncTarget.id, await targetOf('push_renew', account.calendarId)));
     expect(target?.dueInDays).toBeCloseTo(5.6, 1);
   });
+
+  test('read-only consent stays active; Allow editing wakes discovery and writable calendars accept device writes', async () => {
+    google.readers = true;
+    google.store = googleEventStore();
+    expect(await runNow(await targetOf('discover', account.id))).toBeUndefined();
+    const dav = createDav({ ...deps, bus: idleBus });
+    const auth = `Basic ${btoa('google-writer-abcdefgh:device-password')}`;
+    const request = (calendarId: string, method: string, name = '', body?: string, headers: Record<string, string> = {}) => dav.request(`/dav/google-writer-abcdefgh/cal/${calendarId}/${name}`, { method, headers: { authorization: auth, 'content-type': 'text/calendar', ...headers }, ...(body !== undefined && { body }) });
+    const ics = (title: string, override = false) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:device-uid@test', 'DTSTAMP:20261101T000000Z', 'DTSTART;TZID=Europe/Paris:20261109T090000', 'DURATION:PT1H', `SUMMARY:${title}`, 'RRULE:FREQ=DAILY;COUNT=5', 'END:VEVENT', ...(override ? ['BEGIN:VEVENT', 'UID:device-uid@test', 'DTSTAMP:20261101T000000Z', 'RECURRENCE-ID;TZID=Europe/Paris:20261110T090000', 'DTSTART;TZID=Europe/Paris:20261110T110000', 'DURATION:PT1H', 'SUMMARY:Moved occurrence', 'END:VEVENT'] : []), 'END:VCALENDAR', ''].join('\r\n');
+    expect((await request(account.calendarId, 'PUT', 'device.ics', ics('Series'))).status).toBe(403);
+    expect((await accountRow(account.id))?.status).toBe('active');
+    const view = await app.request(`/api/v1/accounts/${account.id}`);
+    expect(await view.json()).toMatchObject({ canWrite: false });
+    const allow = () => app.request(`/api/v1/accounts/${account.id}/allow-editing`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ returnTo: '/accounts' }) });
+    const res = await allow();
+    expect(res.status).toBe(409);
+    const consent = new URL(((await res.json()) as { authorizationUrl: string }).authorizationUrl);
+    expect(consent.searchParams.get('include_granted_scopes')).toBe('true');
+    expect(consent.searchParams.get('scope')).toContain(GOOGLE_EVENTS_WRITE_SCOPE);
+    // Declining the extra scope preserves the active, read-only account.
+    const callback = (url: URL) => app.request(`/api/v1/oauth/google/callback?${new URLSearchParams({ code: 'code', state: url.searchParams.get('state') ?? '' })}`);
+    const declined = await callback(consent);
+    expect(new URL(declined.headers.get('location') ?? '').searchParams.get('error')).toBe('consent_declined');
+    expect((await accountRow(account.id))?.status).toBe('active');
+    const retried = await allow();
+    const next = new URL(((await retried.json()) as { authorizationUrl: string }).authorizationUrl);
+    google.scope = `openid email ${CALENDAR_SCOPES.replace('calendar.events.readonly', 'calendar.events')}`;
+    const discover = await targetOf('discover', account.id);
+    await unsafeDb().update(syncTarget).set({ nextRunAt: sql`now() + interval '1 day'` }).where(eq(syncTarget.id, discover));
+    expect(new URL((await callback(next)).headers.get('location') ?? '').searchParams.get('accountId')).toBe(account.id);
+    const [target] = await unsafeDb().select({ due: sql<boolean>`${syncTarget.nextRunAt} <= clock_timestamp()` }).from(syncTarget).where(eq(syncTarget.id, discover));
+    expect(target?.due).toBe(true);
+    expect((await unsafeDb().select().from(sourceCalendar).where(eq(sourceCalendar.id, account.calendarId)))[0]?.capabilities.write).toBe(false);
+    expect(await runNow(discover)).toBeUndefined();
+    expect((await unsafeDb().select().from(sourceCalendar).where(eq(sourceCalendar.id, account.calendarId)))[0]?.capabilities.write).toBe(true);
+    expect(await (await app.request(`/api/v1/accounts/${account.id}`)).json()).toMatchObject({ canWrite: true });
+    expect((await allow()).status).toBe(204);
+    const [reader] = await unsafeDb().select().from(sourceCalendar).where(and(eq(sourceCalendar.accountId, account.id as AccountId), eq(sourceCalendar.providerCalendarId, 'holidays')));
+    if (!reader) throw new Error('missing reader calendar');
+    expect(reader.capabilities.write).toBe(false);
+    expect(await (await request(reader.id, 'PROPFIND')).text()).not.toContain('<d:write-content/>');
+    expect((await request(reader.id, 'PUT', 'reader.ics', ics('No write'))).status).toBe(403);
+    expect((await accountRow(account.id))?.status).toBe('active');
+    google.store.hooks.beforeWrite = () => Response.json({ error: { errors: [{ reason: 'insufficientPermissions' }] } }, { status: 403 });
+    expect((await request(account.calendarId, 'PUT', 'device.ics', ics('Rejected'))).status).toBe(403);
+    expect((await accountRow(account.id))?.status).toBe('active');
+    delete google.store.hooks.beforeWrite;
+    expect((await request(account.calendarId, 'PUT', 'device.ics', ics('Series'), { 'If-None-Match': '*' })).status).toBe(201);
+    const first = await request(account.calendarId, 'GET', 'device.ics');
+    expect(await first.text()).toContain('UID:device-uid@test');
+    expect((await request(account.calendarId, 'PUT', 'device.ics', ics('Series', true), { 'If-Match': first.headers.get('etag')! })).status).toBe(204);
+    const edited = await request(account.calendarId, 'GET', 'device.ics');
+    expect(await edited.text()).toContain('SUMMARY:Moved occurrence');
+    const raw = await unsafeDb().select().from(sourceObject).where(and(eq(sourceObject.sourceCalendarId, account.calendarId), eq(sourceObject.groupUid, 'device-uid@test')));
+    expect(raw).toHaveLength(2);
+    for (const object of raw) expect(JSON.parse(object.payload)).toEqual(google.store.events.get(object.providerObjectId));
+    expect((await request(account.calendarId, 'DELETE', 'device.ics', undefined, { 'If-Match': edited.headers.get('etag')! })).status).toBe(204);
+    expect(google.store.events.size).toBe(0);
+    expect((await request(account.calendarId, 'GET', 'device.ics')).status).toBe(404);
+  });
+
 });
