@@ -1,6 +1,6 @@
 /** Calendar grants to a colleague or every current member of the tenant. */
 import { createRoute, z } from '@hono/zod-openapi';
-import { calendarAccount, calendarShare, member, sourceCalendar, user, withTenant, type CalendarShare, type AccountId, type SourceCalendarId, type TenantTx } from '@supercal/db';
+import { calendarAccount, calendarShare, member, sourceCalendar, user, withTenant, type CalendarShare, type SourceCalendar, type SourceCalendarId, type TenantTx } from '@supercal/db';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Principal } from '../auth/principal.ts';
 import { ACCESS_LEVELS, pruneOrphanLinks, requireAccess, requireGrantChange, type Access } from '../hosted/access.ts';
@@ -48,9 +48,11 @@ async function managed(tx: TenantTx, principal: Principal, id: SourceCalendarId)
   await tx.select({ id: sourceCalendar.id }).from(sourceCalendar).where(eq(sourceCalendar.id, id)).for('update');
   return requireAccess(tx, principal, id, 'manage');
 }
-async function grantable(tx: TenantTx, accountId: AccountId, access: Access) {
-  const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, accountId));
-  if (account?.provider !== 'hosted' && (access === 'write' || access === 'manage')) throw new ProblemError(422, 'Imported calendars support free-busy and read access', undefined, 'calendar-not-hosted');
+/** Connected calendars delegate event edits only while the provider permits writes. */
+async function grantable(tx: TenantTx, calendar: SourceCalendar, access: Access) {
+  const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
+  if (account?.provider !== 'hosted' && access === 'manage') throw new ProblemError(422, 'Only hosted calendars support manage access', undefined, 'calendar-not-hosted');
+  if (account?.provider !== 'hosted' && access === 'write' && calendar.capabilities.write !== true) throw new ProblemError(422, 'Calendar is read-only', undefined, 'calendar-read-only');
 }
 
 export const shareRoutes = createApiApp()
@@ -71,7 +73,7 @@ export const shareRoutes = createApiApp()
     const result = await withTenant(principal.tenantId, async (tx) => {
       const { calendar, access } = await managed(tx, principal, id);
       requireGrantChange(access, input.access);
-      await grantable(tx, calendar.accountId, input.access);
+      await grantable(tx, calendar, input.access);
       const granteeUserId = input.grantee.type === 'user' ? input.grantee.userId : null;
       if (granteeUserId) {
         const [membership] = await tx.select({ id: member.userId }).from(member).where(and(eq(member.organizationId, principal.tenantId), eq(member.userId, granteeUserId)));
@@ -96,7 +98,7 @@ export const shareRoutes = createApiApp()
       const [before] = await tx.select().from(calendarShare).where(and(eq(calendarShare.id, shareId), eq(calendarShare.calendarId, id)));
       if (!before) throw new NotFound('No such share');
       requireGrantChange(access, before.access, input.access);
-      await grantable(tx, calendar.accountId, input.access);
+      await grantable(tx, calendar, input.access);
       requireIfMatch(c, etagOf(before));
       const [row] = await tx.update(calendarShare).set({ access: input.access, updatedAt: new Date(Math.max(Date.now(), before.updatedAt.getTime() + 1)) }).where(eq(calendarShare.id, shareId)).returning();
       if (!row) throw new NotFound('No such share');

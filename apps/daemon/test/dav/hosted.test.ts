@@ -1,7 +1,8 @@
 import { MAX_OBJECT_BYTES } from '@supercal/core';
-import { apikey, apiKeyTenant, auditLog, closeDb, connectDb, davLogin, feed, member, migrate, organization, publication, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
+import { apikey, apiKeyTenant, auditLog, calendarAccount, calendarShare, closeDb, connectDb, davLogin, feed, member, migrate, organization, publication, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
 import { scratchDatabase, sqlState, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
+import { createFakeAdapter } from '@supercal/providers/test/fake';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
@@ -80,6 +81,25 @@ describe.skipIf(!testDatabaseUrl)('hosted CalDAV', () => {
     // Hosted calendars remain listed even though their default-feed publication starts disabled.
     expect(res.text).toContain(`<d:href>${path}</d:href>`);
     expect(res.text).not.toContain(`${home}${imported.calendar.providerCalendarId}/`);
+  });
+
+  test('a grantee device home gives a writable shared Google calendar write privileges, falling back to read until access returns', async () => {
+    const imported = await seedImported({ name: 'Shared Google' });
+    const ownerId = `google-owner-${crypto.randomUUID()}`;
+    await unsafeDb().insert(user).values({ id: ownerId, name: 'Google owner', email: `${ownerId}@test.invalid`, updatedAt: new Date() });
+    await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: DEVICE.tenantId, userId: ownerId, role: 'member', createdAt: new Date() });
+    await unsafeDb().update(calendarAccount).set({ ownerUserId: ownerId }).where(eq(calendarAccount.id, imported.account.id));
+    await unsafeDb().insert(calendarShare).values({ tenantId: DEVICE.tenantId, calendarId: imported.calendar.id, granteeUserId: DEVICE.userId, access: 'write', createdBy: ownerId });
+    const fake = createFakeAdapter({ provider: 'google' });
+    const sharedDav = createDav({ secrets: testSecrets, bus: idleBus, adapters: { google: fake.adapter } });
+    for (const writable of [true, false, true]) {
+      await unsafeDb().update(sourceCalendar).set({ capabilities: { incremental: 'delta', push: false, write: writable } }).where(eq(sourceCalendar.id, imported.calendar.id));
+      const response = await sharedDav.request(home, { method: 'PROPFIND', headers: { authorization: basic(), depth: '1' } });
+      expect(response.status).toBe(207);
+      const entry = (await response.text()).split('<d:response>').find((item) => item.startsWith(`<d:href>${home}${imported.calendar.id}/</d:href>`));
+      expect(entry).toContain('<d:displayname>Shared Google (Google owner)</d:displayname>');
+      expect(entry?.includes('<d:write-content/>')).toBe(writable);
+    }
   });
 
   test('the next home PROPFIND reflects enabled, disabled and re-enabled publication toggles', async () => {

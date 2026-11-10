@@ -149,3 +149,13 @@ test('a 409 says a grant already exists and refetches', async () => {
   expect(await requests('POST')[0]?.clone().json()).toEqual({ grantee: { type: 'user', userId: LIN.id }, access: 'read' });
   expect(requests('GET').length).toBeGreaterThan(before);
 });
+
+test.each([true, false])('connected sharing offers event editing only when writable=%s and never manage', async (writable) => {
+  respondWith({ '/api/v1/me': me, '/api/v1/accounts': { items: [{ id: 'acc_1', provider: 'google' }] }, '/api/v1/calendars/cal_1/shares': { items: [] } });
+  const calendar = { ...hosted('cal_1', { writable }), kind: 'connected' as const, accountId: 'acc_1' };
+  await renderApp(<SharingTab loaded={{ calendar, etag: '"c"' }} mine reload={() => Promise.resolve(undefined)} />);
+  const options = optionsOf(await screen.findByRole('combobox', { name: 'Access' }));
+  expect(options.includes('Edit events')).toBe(writable);
+  expect(options).not.toContain('Manage');
+  if (writable) expect(await screen.findByText("Edits are made in the owner's Google account.")).toBeTruthy();
+});

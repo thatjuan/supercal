@@ -15,13 +15,13 @@ import { ColorChip } from '../ui/calendar-color.tsx';
 import { Panel } from '../ui/panel.tsx';
 import { fieldErrors, ProblemAlert, toProblem } from '../ui/problem-alert.tsx';
 import { CalendarFields, NAME_MISSING, type CalendarValues } from './calendar-fields.tsx';
-import { atLeast, hostedCalendarKey, type CalendarTabProps, type HostedCalendar, type LoadedCalendar } from './data.ts';
+import { atLeast, hostedCalendarKey, type CalendarTabProps, type Calendar, type LoadedCalendar } from './data.ts';
 
 type Props = Pick<CalendarTabProps, 'loaded' | 'reload'>;
 
 const ZONE_HINT = 'Changing this does not recompute the time span of events with no time zone of their own.';
 
-const valuesOf = (calendar: HostedCalendar): CalendarValues => ({ name: calendar.name, color: calendar.color, timezone: calendar.timezone, description: calendar.description ?? '' });
+const valuesOf = (calendar: Calendar): CalendarValues => ({ name: calendar.name, color: calendar.color, timezone: calendar.timezone, description: calendar.description ?? '' });
 
 /** What differs from `base`, in the API's shape: colours lowercase, and no field the API cannot take (a null colour or zone). */
 const changedFields = (base: CalendarValues, values: CalendarValues) => {
@@ -43,7 +43,7 @@ export function DetailsForm({ loaded, reload }: Props) {
   );
 }
 
-function ReadOnlyDetails({ calendar }: { calendar: HostedCalendar }) {
+function ReadOnlyDetails({ calendar }: { calendar: Calendar }) {
   return (
     <dl className="grid gap-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)]">
       <dt className="font-semibold">Name</dt>

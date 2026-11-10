@@ -1,4 +1,4 @@
-/** Hosted calendar data for the Hosted screens: access levels, the list's sections, loading one calendar with its ETag, and restoring. */
+/** Calendar data for the detail and Hosted screens: access levels, the list's sections, loading one calendar with its ETag, and restoring. */
 import type { components } from '@supercal/api-client';
 import { useQuery } from '@tanstack/react-query';
 import { $api, client, isProblem, meQuery } from '../../api.ts';
@@ -6,6 +6,8 @@ import { useToast } from '../accounts/toast.tsx';
 import { useRefreshFeeds } from '../calendars/data.ts';
 import { toProblem } from '../ui/problem-alert.tsx';
 
+/** A hosted or connected calendar that can be opened in the event and sharing tabs. */
+export type Calendar = components['schemas']['Calendar'];
 export type HostedCalendar = Extract<components['schemas']['Calendar'], { kind: 'hosted' }>;
 export type Access = HostedCalendar['access'];
 
@@ -14,7 +16,7 @@ const LEVELS = ['free-busy', 'read', 'write', 'manage', 'owner'] as const satisf
 export const atLeast = (access: Access, min: Access) => LEVELS.indexOf(access) >= LEVELS.indexOf(min);
 
 /** A calendar as the detail page loaded it: with the ETag saving needs. */
-export type LoadedCalendar = { calendar: HostedCalendar; etag: string };
+export type LoadedCalendar = { calendar: Calendar; etag: string };
 
 /** What every tab of the detail page receives. `reload` refetches and returns the newest version. */
 export type CalendarTabProps = { loaded: LoadedCalendar; mine: boolean; reload: () => Promise<LoadedCalendar | null | undefined> };
@@ -52,14 +54,14 @@ export function useHostedCalendars(): { mine: HostedCalendar[]; others: HostedCa
 /** The key's second part is the API path, so the live stream and `useRefreshFeeds` refresh it along with the other calendar queries. */
 export const hostedCalendarKey = (id: string) => ['hosted-calendar', '/api/v1/calendars/{id}', id];
 
-/** One calendar with its ETag, which `$api` hides; `null` when the id names a connected calendar. */
+/** One hosted or connected calendar with its ETag, which `$api` hides. */
 export function useHostedCalendar(id: string) {
   return useQuery({
     queryKey: hostedCalendarKey(id),
     queryFn: async (): Promise<LoadedCalendar | null> => {
       const { data, error, response } = await client.GET('/api/v1/calendars/{id}', { params: { path: { id } } });
       if (error) throw error;
-      return data.kind === 'hosted' ? { calendar: data, etag: response.headers.get('etag') ?? '' } : null;
+      return { calendar: data, etag: response.headers.get('etag') ?? '' };
     },
   });
 }

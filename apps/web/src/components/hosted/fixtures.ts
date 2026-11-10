@@ -15,6 +15,7 @@ export const me: components['schemas']['Me'] = {
 export const hosted = (id: string, overrides: Partial<HostedCalendar> = {}): HostedCalendar => ({
   id,
   kind: 'hosted',
+  writable: true,
   accountId: null,
   name: id,
   color: '#2f80ed',

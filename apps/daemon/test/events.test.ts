@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { JSEvent, JSCalendar, parseCalendar, serializeCalendar } from '@supercal/core';
-import { auditLog, calendarAccount, calendarShare, changesSince, closeDb, connectDb, member, migrate, organization, recordChanges, resource, sourceCalendar, sourceObject, systemSetting, user, withTenant, type TenantId, type SourceCalendarId } from '@supercal/db';
+import { auditLog, calendarAccount, calendarShare, changesSince, closeDb, davObjectName, davLogin, connectDb, member, migrate, organization, recordChanges, resource, sourceCalendar, sourceObject, systemSetting, user, withTenant, type TenantId, type SourceCalendarId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { and, eq } from 'drizzle-orm';
+import { createFakeAdapter } from '@supercal/providers/test/fake';
+import { createGuardedFetch, ProviderConflictError, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError } from '@supercal/providers';
+import { and, eq, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
 import { Calendar } from '../src/api/calendars.ts';
@@ -12,6 +14,10 @@ import type { ApiEnv, Principal } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
 import { writeObject } from '../src/hosted/objects.ts';
 import { upsertOf } from '../src/sync/changes.ts';
+import { createDav } from '../src/dav/index.ts';
+import { createLogger } from '../src/log.ts';
+import { createSyncDeps } from '../src/sync/index.ts';
+import { connectAccount } from '../src/sync/accounts.ts';
 import { TEST_ORIGIN, testAuth, testSecrets } from './auth-fixture.ts';
 
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
@@ -44,6 +50,98 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: tenantId, userId: principal.userId, role: 'member', createdAt: now });
   });
   afterAll(async () => { await fixture?.close(); await closeDb(); await scratch?.drop(); });
+
+  /** Connect a fake writable provider through the same credential and target setup as real accounts. */
+  async function connected() {
+    const fake = createFakeAdapter({ provider: 'caldav' });
+    const name = crypto.randomUUID();
+    fake.calendar(name, { capabilities: { incremental: 'delta', push: false, write: true } });
+    const api = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus, adapters: { caldav: fake.adapter } }, inject);
+    const deps = createSyncDeps({ adapters: { caldav: fake.adapter }, secrets: testSecrets, fetch: createGuardedFetch({ allow: [] }), log: createLogger({}, () => {}) });
+    const { calendars } = await connectAccount(deps, principal, { displayName: 'Connected', credentials: { provider: 'caldav', serverUrl: 'https://dav.test/', username: 'owner', password: 'secret' } });
+    const calendar = calendars.find((calendar) => calendar.providerCalendarId === name)!;
+    const request = (path: string, method: string, data?: unknown, etag?: string) => api.request(`/api/v1/calendars/${calendar.id}/events${path}`, {
+      method, headers: { 'content-type': 'application/json', ...(etag && { 'if-match': etag }) }, ...(data !== undefined && { body: JSON.stringify(data) }),
+    });
+    return { fake, calendar, request, api };
+  }
+
+  test('connected REST creates, replaces, patches and deletes outside transactions with resource revision ETags and stable names', async () => {
+    const { fake, calendar, request, api } = await connected();
+    let calls = 0;
+    fake.hooks.beforeWrite = async () => {
+      const [row] = await unsafeDb().execute<{ open: number }>(sql`select count(*)::int as open from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and xact_start is not null`);
+      expect(row?.open).toBe(0); calls++;
+    };
+    expect(Calendar.parse(await (await api.request(`/api/v1/calendars/${calendar.id}`)).json()).writable).toBe(true);
+    const created = await request('', 'POST', { ...example, uid: 'connected' });
+    expect(created.status).toBe(201);
+    expect(created.headers.get('etag')).toBe(`"${(await rowFor(calendar.id, 'connected')).revision}"`);
+    const duplicate = await request('', 'POST', { ...example, uid: 'connected' });
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toMatchObject({ type: 'https://supercal.dev/problems/uid-conflict' });
+    expect((await request('/connected/split', 'POST', { at: '2026-12-03T09:00:00' })).status).toBe(409);
+    const imported = await api.request(`/api/v1/calendars/${calendar.id}/import?onConflict=skip`, { method: 'POST', headers: { 'content-type': 'text/calendar' }, body: serializeCalendar({ props: [], resources: [(await rowFor(calendar.id, 'connected')).data] }) });
+    expect(imported.status).toBe(409);
+    // A pre-existing DAV name must win over the UID-derived REST fallback.
+    await unsafeDb().update(davObjectName).set({ objectName: 'device-chosen.ics' }).where(eq(davObjectName.sourceCalendarId, calendar.id));
+    const replaced = await request('/connected', 'PUT', { ...example, title: 'Replaced' }, created.headers.get('etag')!);
+    expect(replaced.status).toBe(200);
+    const patched = await request('/connected', 'PATCH', { title: 'Patched' }, replaced.headers.get('etag')!);
+    expect(patched.status).toBe(200);
+    expect(patched.headers.get('etag')).toBe(`"${(await rowFor(calendar.id, 'connected')).revision}"`);
+    expect(JSEvent.parse(await patched.json()).title).toBe('Patched');
+    expect((await request('/connected', 'PATCH', { title: 'Stale' }, created.headers.get('etag')!)).status).toBe(412);
+    const read = await api.request(`/api/v1/calendars/${calendar.id}/events/connected`);
+    expect(read.headers.get('etag')).toBe(patched.headers.get('etag'));
+    expect((await request('/connected', 'DELETE', undefined, patched.headers.get('etag')!)).status).toBe(204);
+    expect(fake.calendar(calendar.providerCalendarId).objects.size).toBe(0);
+    expect(calls).toBe(4);
+  });
+
+  test('connected writes map provider refusals to problem details, including retry headers', async () => {
+    const { fake, calendar, request } = await connected();
+    for (const [error, status, slug] of [
+      [new ProviderConflictError('Changed upstream'), 412, 'precondition-failed'],
+      [new ProviderWriteRejectedError('read-only', 'Provider denied editing'), 403, 'calendar-read-only'],
+      [new ProviderWriteRejectedError('invalid-data', 'Unsupported event content'), 422, 'invalid-calendar-data'],
+      [new ProviderUnavailableError('Down'), 502, 'provider-unavailable'],
+      [new ProviderThrottledError(2500), 503, 'provider-unavailable'],
+    ] as const) {
+      fake.fail({ calendar: calendar.providerCalendarId, at: 'write', error });
+      const response = await request('', 'POST', { ...example, uid: crypto.randomUUID() });
+      expect(response.status).toBe(status);
+      expect(response.headers.get('content-type')).toContain('application/problem+json');
+      expect(await response.json()).toMatchObject({ type: `https://supercal.dev/problems/${slug}` });
+      if (status === 503) expect(Number(response.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+    }
+    await unsafeDb().update(sourceCalendar).set({ capabilities: { incremental: 'delta', push: false, write: false } }).where(eq(sourceCalendar.id, calendar.id));
+    const readOnly = await request('', 'POST', example);
+    expect(readOnly.status).toBe(403);
+    expect(await readOnly.json()).toMatchObject({ type: 'https://supercal.dev/problems/calendar-read-only' });
+  });
+
+  test('a connected write grantee uses the owner credentials and is named in the audit log', async () => {
+    const { fake, calendar } = await connected();
+    const writer: Principal = { ...principal, userId: `writer_${crypto.randomUUID()}` };
+    await unsafeDb().insert(user).values({ id: writer.userId, name: 'Writer', email: `${writer.userId}@test.invalid`, updatedAt: new Date() });
+    await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: tenantId, userId: writer.userId, role: 'member', createdAt: new Date() });
+    await unsafeDb().insert(calendarShare).values({ tenantId, calendarId: calendar.id, granteeUserId: writer.userId, access: 'write', createdBy: principal.userId });
+    fake.hooks.beforeWrite = async (ctx) => expect(ctx.credentials).toMatchObject({ username: 'owner' });
+    const writerApi = createApi({ auth: fixture.auth, secrets: testSecrets, bus: idleBus, adapters: { caldav: fake.adapter } }, createMiddleware<ApiEnv>(async (c, next) => { c.set('principal', writer); await next(); }));
+    const response = await writerApi.request(`/api/v1/calendars/${calendar.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...example, uid: 'grantee' }) });
+    expect(response.status).toBe(201);
+    const [entry] = await unsafeDb().select().from(auditLog).where(and(eq(auditLog.targetId, calendar.id), eq(auditLog.action, 'event.create')));
+    expect(entry?.actor).toMatchObject({ userId: writer.userId });
+    const username = `grantee-${crypto.randomUUID()}`;
+    await unsafeDb().insert(davLogin).values({ tenantId, userId: writer.userId, username, name: 'Writer device', passwordHash: await Bun.password.hash('device-password', { algorithm: 'argon2id' }) });
+    const dav = createDav({ secrets: testSecrets, bus: idleBus, adapters: { caldav: fake.adapter } });
+    const deviceWrite = await dav.request(`/dav/${username}/cal/${calendar.id}/from-device.ics`, { method: 'PUT', headers: { authorization: `Basic ${btoa(`${username}:device-password`)}`, 'content-type': 'text/calendar' }, body: 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:device-grantee\r\nDTSTART:20261112T090000Z\r\nSUMMARY:Device\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n' });
+    expect(deviceWrite.status).toBe(201);
+    const entries = await unsafeDb().select().from(auditLog).where(and(eq(auditLog.targetId, calendar.id), eq(auditLog.action, 'event.create')));
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => z.object({ userId: z.string() }).parse(entry.actor).userId === writer.userId)).toBe(true);
+  });
 
   test('worked create and occurrence patch examples run as written, with vendor JSPROP and server metadata', async () => {
     const id = await calendar();
@@ -164,7 +262,7 @@ describe.skipIf(!testDatabaseUrl)('events API', () => {
     const [cal] = await unsafeDb().insert(sourceCalendar).values({ tenantId, accountId: account!.id, providerCalendarId: 'external', name: 'Imported' }).returning();
     const imported = parseCalendar('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:imported\r\nDTSTART:20261112T090000Z\r\nSUMMARY:Imported\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n').resources[0]!;
     await withTenant(tenantId, (tx) => recordChanges(tx, [upsertOf(cal!, imported.uid, imported, 'complete')]));
-    expect((await call(`/calendars/${cal!.id}/events/imported`)).status).toBe(200); expect((await call(`/calendars/${cal!.id}/events`, 'POST', example)).status).toBe(409);
+    expect((await call(`/calendars/${cal!.id}/events/imported`)).status).toBe(200); expect((await call(`/calendars/${cal!.id}/events`, 'POST', example)).status).toBe(403);
     const id = await calendar(), calendarRow = await storedCalendar(id);
     const detached = (uid: string, days: number[]) => ['BEGIN:VCALENDAR','VERSION:2.0',...days.flatMap((day) => ['BEGIN:VEVENT',`UID:${uid}`,`RECURRENCE-ID:202611${day}T090000Z`,`DTSTART:202611${day}T100000Z`,'END:VEVENT']),'END:VCALENDAR',''].join('\r\n');
     for (const [uid, days] of [['single', [12]], ['group', [12, 19]]] as const) await withTenant(tenantId, (tx) => writeObject(tx, calendarRow, { objectName: `${uid}.ics`, payload: detached(uid, [...days]) }));

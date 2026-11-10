@@ -281,7 +281,7 @@ export const accountRoutes = createApiApp()
     const { account, calendars } = await connectAccount(sync, principal, accountInput(input.provider, input)).catch((error: unknown) => {
       throw connectProblem(error, input.provider);
     });
-    const items = await withTenant(principal.tenantId, (tx) => toCalendars(tx, calendars));
+    const items = await withTenant(principal.tenantId, (tx) => toCalendars(tx, calendars, undefined, c.var.sync.adapters));
     return c.json({ account: await toAccount(account, c.var.sync.secrets), calendars: items }, 201, { ETag: etagOf(account) });
   })
   .openapi(getAccount, async (c) => {

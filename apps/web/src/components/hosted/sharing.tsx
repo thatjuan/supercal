@@ -1,5 +1,5 @@
 /**
- * A hosted calendar's Sharing tab: who has access, at what level, and granting more. Only owners and
+ * A calendar's Sharing tab: who has access, at what level, and granting more. Only owners and
  * tenant admins may grant or remove `manage`, so a manager sees those rows read-only and is never
  * offered the level. The server still enforces this (`requireGrantChange`); a refusal shows as a 403.
  */
@@ -7,13 +7,14 @@ import type { components, Problem } from '@supercal/api-client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { $api, isProblem, meQuery } from '../../api.ts';
+import { PROVIDER } from '../calendars/data.ts';
 import { organizationQuery } from '../admin/members.tsx';
 import { Badge } from '../ui/badge.tsx';
 import { Button } from '../ui/button.tsx';
 import { ConfirmDialog } from '../ui/confirm-dialog.tsx';
 import { Panel } from '../ui/panel.tsx';
 import { ProblemAlert, toProblem } from '../ui/problem-alert.tsx';
-import { atLeast, type CalendarTabProps, type HostedCalendar } from './data.ts';
+import { atLeast, type CalendarTabProps, type Calendar } from './data.ts';
 
 type Share = components['schemas']['CalendarShare'];
 type ShareAccess = Share['access'];
@@ -46,13 +47,17 @@ export function SharingTab({ loaded: { calendar } }: CalendarTabProps) {
   const shares = useQuery(sharesQuery);
   const refresh = () => queryClient.invalidateQueries({ queryKey: sharesQuery.queryKey });
 
-  const mayGrantManage = atLeast(calendar.access, 'owner');
-  const levels: readonly Level[] = mayGrantManage ? LEVELS : LEVELS.filter((level) => level.value !== 'manage');
+  const accounts = $api.useQuery('get', '/api/v1/accounts', {}, { enabled: calendar.kind === 'connected' });
+  const account = accounts.data?.items.find((account) => account.id === calendar.accountId);
+  const mayGrantManage = calendar.kind === 'hosted' && atLeast(calendar.access, 'owner');
+  const levels = LEVELS.filter((level) => (level.value !== 'manage' || mayGrantManage) && (level.value !== 'write' || calendar.writable));
   const tenant = me.data?.tenant;
   const items = shares.data?.items ?? [];
 
   return (
     <div className="grid gap-5">
+      {calendar.kind === 'connected' && !calendar.writable && <p className="text-sm text-ink-2">Existing editing grants act as read access until the provider allows editing again.</p>}
+      {calendar.kind === 'connected' && calendar.writable && <p className="text-sm text-ink-2">Edits are made in the owner's {account ? PROVIDER[account.provider] : 'provider'} account.</p>}
       <Panel title="Sharing" description="Grant colleagues in this tenant access to this calendar.">
         <div className="grid gap-5">
           {tenant && <AddShare calendar={calendar} tenant={tenant} shares={items} levels={levels} onChanged={refresh} />}
@@ -72,7 +77,7 @@ export function SharingTab({ loaded: { calendar } }: CalendarTabProps) {
       </Panel>
       <Panel title="Access levels">
         <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-y-2">
-          {LEVELS.map((level) => (
+          {levels.map((level) => (
             <div key={level.value} className="grid gap-0.5 sm:col-span-2 sm:grid-cols-subgrid">
               <dt className="font-semibold">{level.label}</dt>
               <dd className="text-ink-2">{level.explanation}</dd>
@@ -94,7 +99,7 @@ function pickerOptions(members: readonly { user: { id: string; name: string; ema
   ];
 }
 
-type AddShareProps = { calendar: HostedCalendar; tenant: Tenant; shares: readonly Share[]; levels: readonly Level[]; onChanged: () => Promise<unknown> };
+type AddShareProps = { calendar: Calendar; tenant: Tenant; shares: readonly Share[]; levels: readonly Level[]; onChanged: () => Promise<unknown> };
 
 function AddShare({ calendar, tenant, shares, levels, onChanged }: AddShareProps) {
   // Always refetched on opening: the Admin screen's copy can predate a colleague who just joined.
@@ -233,6 +238,7 @@ function ShareRow({ share, calendarId, tenantName, levels, readOnly, onChanged }
               }}
               className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-sm"
             >
+              {!levels.some((level) => level.value === share.access) && <option value={share.access} disabled>{levelOf(share.access).label} (currently read-only)</option>}
               {levels.map((level) => (
                 <option key={level.value} value={level.value}>
                   {level.label}
