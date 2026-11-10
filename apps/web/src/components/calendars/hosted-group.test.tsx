@@ -12,10 +12,10 @@ import { useFeedCalendars, type Account, type Calendar, type Feed } from './data
 import { VirtualBuilder } from './virtual-builder.tsx';
 
 const feed = { id: 'feed_1', ownerUserId: ME_ID } as Feed;
-const account: Account = { id: 'acc_1', provider: 'ics', ownerUserId: ME_ID, displayName: 'Work feed', email: null, serverUrl: null, status: 'active', statusDetail: null, autoPublish: true };
+const account: Account = { id: 'acc_1', provider: 'ics', ownerUserId: ME_ID, displayName: 'Work feed', email: null, serverUrl: null, status: 'active', statusDetail: null, autoPublish: true, canWrite: false };
 const connected: Calendar = {
   ...hosted('cal_work', { name: 'Work' }),
-  kind: 'connected',
+  kind: 'connected', writable: false,
   accountId: 'acc_1',
 } satisfies components['schemas']['Calendar'];
 
@@ -69,4 +69,23 @@ test('a hosted calendar can be picked in the virtual builder and labels itself H
   render(<VirtualBuilder groups={groups} initial={{ name: 'Merged', color: null, privacy: 'full', filters: { hideDeclined: false, hideCancelled: false, hideAllDay: false }, keepAlarms: false, sources: [{ calendarId: 'cal_mine', priority: 0 }] }} onSubmit={() => {}} onCancel={() => {}} pending={false} problem={null} />);
   expect(screen.getByRole('group', { name: 'Hosted' })).toBeTruthy();
   expect(within(screen.getByRole('list', { name: 'Source priority' })).getByText('· Hosted')).toBeTruthy();
+});
+
+test.each([
+  ['google', false, 'Read-only. Allow editing in Accounts'],
+  ['google', true, 'Read-only in Google'],
+  ['icloud', true, 'Read-only in iCloud'],
+  ['caldav', true, 'Read-only in CalDAV'],
+  ['microsoft', true, 'Read-only in Microsoft 365'],
+] as const)('a read-only %s calendar explains its lock', async (provider, canWrite, reason) => {
+  const row = { calendar: connected, account: { ...account, provider, canWrite }, passthrough: undefined, virtuals: [] };
+  render(<CalendarList feed={feed} groups={[{ id: account.id, title: 'Connected', subtitle: provider, rows: [row] }]} onOpen={() => {}} />, { wrapper });
+  expect(screen.getByRole('img', { name: reason }).getAttribute('title')).toBe(reason);
+  expect(screen.getByRole('link', { name: 'Events' }).getAttribute('href')).toBe('/hosted/cal_work');
+});
+
+test('a writable connected calendar has no lock', () => {
+  const row = { calendar: { ...connected, writable: true }, account, passthrough: undefined, virtuals: [] };
+  render(<CalendarList feed={feed} groups={[{ id: account.id, title: 'Connected', subtitle: 'Google', rows: [row] }]} onOpen={() => {}} />, { wrapper });
+  expect(screen.queryByRole('img')).toBeNull();
 });

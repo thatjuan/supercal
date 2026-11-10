@@ -3,11 +3,15 @@
  * a changed master refetching its series), cancelled-occurrence resolution, throttling, the
  * per-mailbox request limit, token rotation and subscription renewal.
  */
+import { normalizeGraph } from '@supercal/core';
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   AuthFailedError,
   createMicrosoftAdapter,
   ProviderThrottledError,
+  ProviderWriteRejectedError,
+  ProviderConflictError,
+  ProviderPartialWriteError,
   ProviderUnavailableError,
   type AdapterContext,
   type MicrosoftCursor,
@@ -40,7 +44,7 @@ function setup(credentials: ProviderCredentials = microsoftCredentials(), pageSi
 const calendar = (occurrences?: Record<string, Record<string, string>>): SourceCalendarRef => ({
   id: 'cal_1',
   providerCalendarId: 'cal-a',
-  capabilities: { incremental: 'reconcile', push: false },
+  capabilities: { incremental: 'reconcile', push: false, write: false },
   ...(occurrences && { occurrences: async (masterId: string) => new Map(Object.entries(occurrences[masterId] ?? {})) }),
 });
 
@@ -221,4 +225,110 @@ describe('Microsoft adapter', () => {
     expect(recreated.providerChannelId).not.toBe(lease.providerChannelId);
     await push.teardown(ctx, lease);
   });
+});
+
+/** Stored objects from an accepted write, as the daemon supplies them on replacement. */
+function storedResult(result: import('../src/adapter.ts').WriteResult) {
+  return result.upserts.map((object) => {
+    if (object.payload === null) throw new Error('unexpected touch');
+    return { ...object, payload: object.payload };
+  });
+}
+const writeIcs = (extra = '', overrides = '') => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:device@test\r\nDTSTAMP:20261101T000000Z\r\nDTSTART:20261109T090000Z\r\nDURATION:PT1H\r\nSUMMARY:Series\r\nRRULE:FREQ=DAILY;COUNT=5\r\n${extra}END:VEVENT\r\n${overrides}END:VCALENDAR\r\n`;
+const writeOverride = (cancel = false) => `BEGIN:VEVENT\r\nUID:device@test\r\nDTSTAMP:20261101T000000Z\r\nRECURRENCE-ID:20261110T090000Z\r\nDTSTART:20261110T110000Z\r\nDURATION:PT1H\r\nSUMMARY:Moved\r\n${cancel ? 'STATUS:CANCELLED\r\n' : ''}END:VEVENT\r\n`;
+
+describe('Microsoft writes', () => {
+  test('discovery requires both canEdit and the write scope, including prefixed grants', async () => {
+    const { graph, adapter, ctx } = setup();
+    graph.calendars.push({ id: 'a', canEdit: true }, { id: 'b', canEdit: false });
+    expect((await adapter.listCalendars(ctx)).map((c) => c.capabilities.write)).toEqual([true, false]);
+    ctx.credentials = { ...microsoftCredentials(), scopes: ['https://graph.microsoft.com/Calendars.ReadWrite'] };
+    expect((await adapter.listCalendars(ctx))[0]?.capabilities.write).toBe(true);
+    ctx.credentials = { ...microsoftCredentials(), scopes: ['Calendars.Read'] };
+    expect((await adapter.listCalendars(ctx)).map((c) => c.capabilities.write)).toEqual([false, false]);
+    await expect(adapter.writes!.put(ctx, { ...calendar(), capabilities: { incremental: 'reconcile', push: false, write: true } }, writeIcs(), [])).rejects.toBeInstanceOf(ProviderWriteRejectedError);
+  });
+  test('read-only refresh asks only for held scopes', async () => {
+    const { graph, adapter, ctx } = setup({ ...microsoftCredentials(undefined, { expired: true }), scopes: ['Calendars.Read', 'offline_access'] });
+    await adapter.listCalendars(ctx);
+    expect(new URLSearchParams(graph.requests[0]?.body).get('scope')).toBe('Calendars.Read offline_access');
+  });
+  test('create deduplicates UID, changes identity, edits/reverts/cancels occurrences and deletes conditionally', async () => {
+    const { graph, adapter, ctx } = setup();
+    const ref = { ...calendar(), capabilities: { incremental: 'reconcile' as const, push: false, write: true } };
+    const writes = adapter.writes!;
+    const first = await writes.put(ctx, ref, writeIcs(), []);
+    const duplicate = await writes.put(ctx, ref, writeIcs(), []);
+    expect(duplicate.upserts[0]?.id).toBe(first.upserts[0]?.id);
+    expect(first.upserts[0]?.groupUid).not.toBe('device@test');
+    const id = first.upserts[0]!.id;
+    graph.instances.set(id, [{ id: 'instance', originalStart: '2026-11-10T09:00:00Z' }]);
+    const edited = await writes.put(ctx, ref, writeIcs('', writeOverride()), storedResult(first));
+    expect(edited.upserts).toHaveLength(2);
+    expect(edited.occurrences).toContainEqual({ masterId: id, occurrenceId: 'instance', originalStart: '2026-11-10T09:00:00Z' });
+    expect(edited.upserts[1]?.payload).toMatchObject({ subject: 'Moved' });
+    const reverted = await writes.put(ctx, ref, writeIcs(), storedResult(edited));
+    expect(reverted.upserts[1]?.payload).toMatchObject({ subject: 'Series', start: { dateTime: '2026-11-10T09:00:00' } });
+    const cancelled = await writes.put(ctx, ref, writeIcs('EXDATE:20261110T090000Z\r\n'), storedResult(reverted));
+    expect(cancelled.deletes).toContain('instance');
+    expect(cancelled.upserts[0]?.payload).toMatchObject({ '@supercal.cancelled': [{ id: 'instance', originalStart: '2026-11-10T09:00:00Z' }] });
+    await writes.delete(ctx, ref, storedResult(cancelled));
+    expect(graph.requests.filter((r) => ['PATCH', 'DELETE'].includes(r.method)).every((r) => r.headers.get('if-match')?.startsWith('W/"'))).toBe(true);
+    await expect(writes.delete(ctx, ref, storedResult(cancelled))).rejects.toBeInstanceOf(ProviderWriteRejectedError);
+  });
+  test('rejects invalid rules before requests, compares stored keys even when If-Match is ignored, and maps write errors', async () => {
+    const { graph, adapter, ctx } = setup();
+    const ref = { ...calendar(), capabilities: { incremental: 'reconcile' as const, push: false, write: true } };
+    await expect(adapter.writes!.put(ctx, ref, writeIcs().replace('FREQ=DAILY', 'FREQ=HOURLY'), [])).rejects.toBeInstanceOf(ProviderWriteRejectedError);
+    expect(graph.requests).toHaveLength(0);
+    const first = await adapter.writes!.put(ctx, ref, writeIcs(), []);
+    const stale = storedResult(first).map((object) => ({ ...object, etag: 'stale' }));
+    await expect(adapter.writes!.put(ctx, ref, writeIcs().replace('SUMMARY:Series', 'SUMMARY:Changed'), stale)).rejects.toBeInstanceOf(ProviderConflictError);
+    graph.state.intercept = (r) => {
+      if (r.method === 'PATCH') expect(r.headers.get('if-match')).toBe(`W/"${first.upserts[0]!.etag}"`);
+      return r.method === 'PATCH' ? Response.json({ error: { code: 'ErrorIrresolvableConflict' } }, { status: 412 }) : undefined;
+    };
+    await expect(adapter.writes!.put(ctx, ref, writeIcs().replace('SUMMARY:Series', 'SUMMARY:Changed'), storedResult(first))).rejects.toBeInstanceOf(ProviderConflictError);
+    for (const [status, code, expected] of [[412, 'ErrorIrresolvableConflict', ProviderConflictError], [403, 'ErrorAccessDenied', ProviderWriteRejectedError], [404, 'ErrorItemNotFound', ProviderWriteRejectedError], [400, 'ErrorInvalidRequest', ProviderWriteRejectedError]] as const) {
+      graph.state.intercept = (r) => r.method === 'PATCH' ? Response.json({ error: { code, message: 'Rejected event data' } }, { status }) : undefined;
+      await expect(adapter.writes!.put(ctx, ref, writeIcs().replace('SUMMARY:Series', 'SUMMARY:Changed'), storedResult(first))).rejects.toBeInstanceOf(expected);
+    }
+  });
+  test('a failed occurrence returns the accepted master; a zone rejection retries once in UTC', async () => {
+    const { graph, adapter, ctx } = setup();
+    const ref = { ...calendar(), capabilities: { incremental: 'reconcile' as const, push: false, write: true } };
+    const first = await adapter.writes!.put(ctx, ref, writeIcs(), []);
+    graph.instances.set(first.upserts[0]!.id, [{ id: 'instance', originalStart: '2026-11-10T09:00:00Z' }]);
+    graph.state.intercept = (r) => r.method === 'PATCH' && r.path.endsWith('/instance') ? Response.json({ error: { code: 'ErrorAccessDenied' } }, { status: 403 }) : undefined;
+    const error = await adapter.writes!.put(ctx, ref, writeIcs('', writeOverride()).replace('SUMMARY:Series', 'SUMMARY:Changed'), storedResult(first)).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderPartialWriteError);
+    if (!(error instanceof ProviderPartialWriteError)) throw error;
+    expect(error.partial.upserts[0]?.etag).not.toBe(first.upserts[0]?.etag);
+    expect(error.cause).toBeInstanceOf(ProviderWriteRejectedError);
+    let calls = 0;
+    graph.state.intercept = (r) => r.method === 'POST' && ++calls === 1 ? Response.json({ error: { message: 'Unsupported time zone' } }, { status: 400 }) : undefined;
+    await adapter.writes!.put(ctx, ref, writeIcs().replace('DTSTART:20261109T090000Z', 'DTSTART;TZID=Europe/Paris:20261109T090000'), []);
+    expect(calls).toBe(2);
+    expect(JSON.parse(graph.requests.filter((r) => r.method === 'POST').at(-1)!.body).start).toEqual({ dateTime: '2026-11-09T08:00:00', timeZone: 'UTC' });
+  });
+  test('an accepted cancellation survives a failed follow-up fetch in the partial result', async () => {
+    const { graph, adapter, ctx } = setup();
+    const ref = { ...calendar(), capabilities: { incremental: 'reconcile' as const, push: false, write: true } };
+    const first = await adapter.writes!.put(ctx, ref, writeIcs(), []);
+    const id = first.upserts[0]!.id;
+    graph.instances.set(id, [{ id: 'cancelled-slot', originalStart: '2026-11-10T09:00:00Z' }]);
+    let cancelled = false;
+    graph.state.intercept = (r) => {
+      if (r.method === 'DELETE') cancelled = true;
+      return cancelled && r.method === 'GET' && r.path.endsWith(`/${id}`) ? new Response(null, { status: 503 }) : undefined;
+    };
+    const failure = await adapter.writes!.put(ctx, ref, writeIcs('EXDATE:20261110T090000Z\r\n'), storedResult(first)).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ProviderPartialWriteError);
+    if (!(failure instanceof ProviderPartialWriteError)) throw failure;
+    expect(failure.partial.upserts).toHaveLength(1);
+    expect(failure.partial.occurrences).toContainEqual({ masterId: id, occurrenceId: 'cancelled-slot', originalStart: '2026-11-10T09:00:00Z' });
+    const normalized = normalizeGraph(failure.partial.upserts.map((object) => ({ ...object, payload: JSON.stringify(object.payload) })));
+    expect(normalized?.resource.master?.[1].some((prop) => prop[0] === 'exdate')).toBe(true);
+  });
+
 });

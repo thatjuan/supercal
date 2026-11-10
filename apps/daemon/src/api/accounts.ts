@@ -8,10 +8,12 @@
  */
 import { createRoute, z } from '@hono/zod-openapi';
 import { CONNECTED_PROVIDERS, calendarAccount, connectionStatus, withTenant, type CalendarAccount } from '@supercal/db';
-import { AuthFailedError, EgressBlockedError, ICLOUD_SERVER_URL, ProviderThrottledError, ProviderUnavailableError, UnsupportedAuthError } from '@supercal/providers';
+import { AuthFailedError, EgressBlockedError, GOOGLE_EVENTS_WRITE_SCOPE, ProviderCredentials, ICLOUD_SERVER_URL, ProviderThrottledError, ProviderUnavailableError, UnsupportedAuthError } from '@supercal/providers';
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { hasRole } from '../auth/policy.ts';
-import { NoAdapterError } from '../sync/context.ts';
+import { NeedsConsent } from '../sinks/service.ts';
+import { NeedsConsentProblem } from './sinks.ts';
+import { credentialsContext, type SyncDeps, NoAdapterError } from '../sync/context.ts';
 import { connectAccount, deleteAccount, loadAccount, replaceCredentials, requestSync, updateAccount, type NewAccount as NewAccountInput } from '../sync/accounts.ts';
 import { AuthorizationUrl, OAuthStart, startGoogleFlow } from '../oauth/google.ts';
 import { startMicrosoftFlow } from '../oauth/microsoft.ts';
@@ -28,6 +30,7 @@ const Account = z
     serverUrl: z.string().nullable().openapi({ description: 'For ICS accounts only the host: the URL is a secret' }),
     status: z.enum(connectionStatus.enumValues),
     statusDetail: z.string().nullable(),
+    canWrite: z.boolean().openapi({ description: "The account holds its provider’s write scope; individual calendars may still be read-only" }),
     autoPublish: z.boolean().openapi({ description: 'Newly discovered calendars are published enabled' }),
   })
   .openapi('Account');
@@ -117,19 +120,22 @@ function credentialsFor(account: CalendarAccount, input: CredentialsUpdate) {
 
 const AccountPatch = z.object({ displayName: DisplayName.optional(), autoPublish: z.boolean().optional() });
 
-const toAccount = ({ id, provider, ownerUserId, displayName, email, serverUrl, status, statusDetail, autoPublish }: CalendarAccount) => {
+/** Whether an account has its provider's write scope; CalDAV access is determined per calendar. */
+export async function accountCanWrite(account: Pick<CalendarAccount, 'id' | 'tenantId' | 'provider' | 'credentials'>, secrets: SyncDeps['secrets']): Promise<boolean> {
+  if (account.provider === 'ics') return false;
+  if (account.provider !== 'google' && account.provider !== 'microsoft') return true;
+  if (!account.credentials) return false;
+  const { value } = await secrets.decryptJson(ProviderCredentials, account.credentials, credentialsContext(account));
+  if (value.provider === 'google') return value.scopes.includes(GOOGLE_EVENTS_WRITE_SCOPE);
+  if (value.provider === 'microsoft') return value.scopes?.some((scope) => scope.replace(/^https:\/\/graph\.microsoft\.com\//, '').toLowerCase() === 'calendars.readwrite') ?? false;
+  return false;
+}
+
+/** Public account view, deriving consent state from the stored encrypted credentials. */
+const toAccount = async (account: CalendarAccount, secrets: SyncDeps['secrets']) => {
+  const { id, provider, ownerUserId, displayName, email, serverUrl, status, statusDetail, autoPublish } = account;
   if (provider === 'hosted') throw new Error('Hosted accounts are hidden');
-  return {
-    id,
-    provider,
-    ownerUserId,
-    displayName,
-    email,
-    serverUrl,
-    status,
-    statusDetail,
-    autoPublish,
-  };
+  return { id, provider, ownerUserId, displayName, email, serverUrl, status, statusDetail, autoPublish, canWrite: await accountCanWrite(account, secrets) };
 };
 
 const APPLE_APP_PASSWORDS = 'https://support.apple.com/en-us/102654';
@@ -225,6 +231,19 @@ const reconnect = createRoute({
   },
 });
 
+const allowEditing = createRoute({
+  method: 'post',
+  path: '/api/v1/accounts/{id}/allow-editing',
+  operationId: 'allowAccountEditing',
+  tags,
+  request: { params, body: { required: true, content: { 'application/json': { schema: OAuthStart } } } },
+  responses: {
+    204: { description: 'The account already has editing permission' },
+    409: { description: 'Editing requires incremental consent', content: { 'application/problem+json': { schema: NeedsConsentProblem } } },
+    ...problemResponses(400, 401, 403, 404, 422),
+  },
+});
+
 const putCredentials = createRoute({
   method: 'put',
   path: '/api/v1/accounts/{id}/credentials',
@@ -238,6 +257,14 @@ const putCredentials = createRoute({
 });
 
 export const accountRoutes = createApiApp()
+  .openapi(allowEditing, async (c) => {
+    const { principal, oauth, sync } = c.var;
+    const account = await withTenant(principal.tenantId, (tx) => loadAccount(tx, principal, c.req.valid('param').id));
+    if (account.provider !== 'google' && account.provider !== 'microsoft') throw new Unprocessable(`${account.provider} accounts do not support editing consent`, 'unsupported-provider');
+    if (await accountCanWrite(account, sync.secrets)) return c.body(null, 204);
+    if (account.provider === 'microsoft') throw new NeedsConsent(await startMicrosoftFlow(oauth, principal, c.req.valid('json').returnTo, account.email, { accountId: account.id, scopes: ['Calendars.ReadWrite'] }), 'Editing needs permission to change events in this Microsoft account');
+    throw new NeedsConsent(await startGoogleFlow(oauth, principal, c.req.valid('json').returnTo, account.email, { accountId: account.id, scopes: [GOOGLE_EVENTS_WRITE_SCOPE] }), 'Editing needs permission to change events in this Google account');
+  })
   .openapi(listAccounts, async (c) => {
     const { principal } = c.var;
     const rows = await withTenant(principal.tenantId, (tx) =>
@@ -247,7 +274,7 @@ export const accountRoutes = createApiApp()
         .where(and(ne(calendarAccount.provider, 'hosted'), hasRole(principal, 'admin') ? undefined : eq(calendarAccount.ownerUserId, principal.userId)))
         .orderBy(asc(calendarAccount.id)),
     );
-    return c.json({ items: rows.map(toAccount) }, 200);
+    return c.json({ items: await Promise.all(rows.map((row) => toAccount(row, c.var.sync.secrets))) }, 200);
   })
   .openapi(createAccount, async (c) => {
     const input = c.req.valid('json');
@@ -255,18 +282,18 @@ export const accountRoutes = createApiApp()
     const { account, calendars } = await connectAccount(sync, principal, accountInput(input.provider, input)).catch((error: unknown) => {
       throw connectProblem(error, input.provider);
     });
-    const items = await withTenant(principal.tenantId, (tx) => toCalendars(tx, calendars));
-    return c.json({ account: toAccount(account), calendars: items }, 201, { ETag: etagOf(account) });
+    const items = await withTenant(principal.tenantId, (tx) => toCalendars(tx, calendars, undefined, c.var.sync.adapters));
+    return c.json({ account: await toAccount(account, c.var.sync.secrets), calendars: items }, 201, { ETag: etagOf(account) });
   })
   .openapi(getAccount, async (c) => {
     const { id } = c.req.valid('param');
     const row = await withTenant(c.var.principal.tenantId, (tx) => loadAccount(tx, c.var.principal, id));
-    return c.json(toAccount(row), 200, { ETag: etagOf(row) });
+    return c.json(await toAccount(row, c.var.sync.secrets), 200, { ETag: etagOf(row) });
   })
   .openapi(patchAccount, async (c) => {
     const { id } = c.req.valid('param');
     const row = await updateAccount(c.var.principal, id, c.req.valid('json'), (current) => requireIfMatch(c, etagOf(current)));
-    return c.json(toAccount(row), 200, { ETag: etagOf(row) });
+    return c.json(await toAccount(row, c.var.sync.secrets), 200, { ETag: etagOf(row) });
   })
   .openapi(removeAccount, async (c) => {
     await deleteAccount(c.var.sync, c.var.principal, c.req.valid('param').id);
@@ -281,7 +308,7 @@ export const accountRoutes = createApiApp()
     const row = await replaceCredentials(c.var.sync, c.var.principal, c.req.valid('param').id, (account) => credentialsFor(account, input)).catch((error: unknown) => {
       throw connectProblem(error, input.provider);
     });
-    return c.json(toAccount(row), 200, { ETag: etagOf(row) });
+    return c.json(await toAccount(row, c.var.sync.secrets), 200, { ETag: etagOf(row) });
   })
   .openapi(reconnect, async (c) => {
     const { principal, oauth } = c.var;

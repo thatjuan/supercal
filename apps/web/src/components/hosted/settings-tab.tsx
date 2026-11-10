@@ -8,7 +8,7 @@ import { Button } from '../ui/button.tsx';
 import { ConfirmDialog } from '../ui/confirm-dialog.tsx';
 import { Panel } from '../ui/panel.tsx';
 import { toProblem } from '../ui/problem-alert.tsx';
-import { atLeast, RESTORE_NOTE, type CalendarTabProps, type HostedCalendar } from './data.ts';
+import { atLeast, RESTORE_NOTE, type CalendarTabProps, type Calendar } from './data.ts';
 import { DetailsForm } from './details-form.tsx';
 import { ImportExport } from './import-export.tsx';
 
@@ -33,7 +33,7 @@ export function SettingsTab({ loaded, mine, reload }: CalendarTabProps) {
   );
 }
 
-function DangerZone({ calendar }: { calendar: HostedCalendar }) {
+function DangerZone({ calendar }: { calendar: Calendar }) {
   const navigate = useNavigate();
   const refresh = useRefreshFeeds();
   const remove = $api.useMutation('delete', '/api/v1/calendars/{id}');

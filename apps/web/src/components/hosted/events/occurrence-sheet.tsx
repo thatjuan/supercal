@@ -14,7 +14,7 @@ import { Button } from '../../ui/button.tsx';
 import { ConfirmDialog } from '../../ui/confirm-dialog.tsx';
 import { Dialog, DialogClose, DialogContent } from '../../ui/dialog.tsx';
 import { ProblemAlert, toProblem } from '../../ui/problem-alert.tsx';
-import type { HostedCalendar } from '../data.ts';
+import type { Calendar } from '../data.ts';
 import { EventEditor } from './event-editor.tsx';
 import { eventForm, REMINDER_OFFSETS, repeatSummary, type EventForm, type JSEvent } from './form.ts';
 import { canSplit, eventPatch, followingEvent, occurrenceEvent, occurrencePatch, overrideKey, overridePatch } from './patch.ts';
@@ -139,7 +139,7 @@ const CONFIRM: Record<Scope, string> = {
 const deleteProblem = (failure: unknown): Problem =>
   isProblem(failure) && failure.status === 412 ? { ...failure, title: 'This event changed elsewhere', detail: 'Check its details before deleting it.' } : toProblem(failure);
 
-type Props = { calendar: HostedCalendar; canWrite: boolean; zone: string; occurrence: CalendarOccurrence; onClose: () => void };
+type Props = { calendar: Calendar; canWrite: boolean; zone: string; occurrence: CalendarOccurrence; onClose: () => void };
 
 export function OccurrenceSheet({ calendar, canWrite, zone, occurrence, onClose }: Props) {
   const id = calendar.id;
@@ -174,9 +174,14 @@ export function OccurrenceSheet({ calendar, canWrite, zone, occurrence, onClose 
     if (!editing) return;
     const { base, scope } = editing;
     const patch = scope === 'this' ? occurrencePatch(base.event, key, form) : eventPatch(scopedEvent(base.event, scope, key), form);
-    if (Object.keys(patch).length > 0) {
-      if (scope === 'following') await splitEvent(id, uid, base.etag, key, patch);
-      else await patchEvent(id, uid, base.etag, patch);
+    try {
+      if (Object.keys(patch).length > 0) {
+        if (scope === 'following') await splitEvent(id, uid, base.etag, key, patch);
+        else await patchEvent(id, uid, base.etag, patch);
+      }
+    } catch (failure) {
+      if (isProblem(failure) && failure.status === 412) await query.refetch();
+      throw failure;
     }
     onClose();
     await refresh();
@@ -199,6 +204,7 @@ export function OccurrenceSheet({ calendar, canWrite, zone, occurrence, onClose 
       else await deleteEvent(id, uid, loaded.etag);
     } catch (failure) {
       setProblem(deleteProblem(failure));
+      if (isProblem(failure) && failure.status === 412) await query.refetch();
       void refresh();
       throw failure;
     }
@@ -237,7 +243,7 @@ export function OccurrenceSheet({ calendar, canWrite, zone, occurrence, onClose 
           )}
         </div>
       )}
-      {asking && entry && <ScopePrompt action={asking} splittable={canSplit(entry, key)} onPick={(scope) => act(asking, scope)} onCancel={() => setAsking(null)} />}
+      {asking && entry && <ScopePrompt action={asking} splittable={calendar.kind === 'hosted' && canSplit(entry, key)} onPick={(scope) => act(asking, scope)} onCancel={() => setAsking(null)} />}
       {deleting && (
         <ConfirmDialog
           open

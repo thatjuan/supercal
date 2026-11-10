@@ -10,13 +10,13 @@ const account = (patch: Partial<Account> = {}): Account => ({
   serverUrl: 'https://dav.example/',
   status: 'active',
   statusDetail: null,
-  autoPublish: true,
+  autoPublish: true, canWrite: false,
   ...patch,
 });
 
 const calendar = (lastSuccessAt: number | null, state: Calendar['state'] = 'active'): Calendar => ({
   id: 'cal_1',
-  kind: 'connected',
+  kind: 'connected', writable: false,
   access: 'owner',
   owner: { id: 'user_1', name: 'Owner' },
   description: null,
@@ -28,7 +28,7 @@ const calendar = (lastSuccessAt: number | null, state: Calendar['state'] = 'acti
   color: null,
   timezone: null,
   state,
-  capabilities: { incremental: 'sync-token', push: false },
+  capabilities: { incremental: 'sync-token', push: false, write: false },
   freshness: { lastSuccessAt: lastSuccessAt === null ? null : new Date(lastSuccessAt).toISOString(), pushActive: false, expectedLatency: 900, stale: false },
   publicationIds: [],
 });

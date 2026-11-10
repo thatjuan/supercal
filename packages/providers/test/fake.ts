@@ -1,5 +1,5 @@
 /**
- * An in-memory provider for sync-engine tests. Each calendar keeps its objects and a change log,
+ * An in-memory provider for sync and write-through tests. Each calendar keeps its objects and a change log,
  * so a sync with a cursor is a delta of what changed since, and one without is a snapshot (or every
  * sync is, with `mode: 'snapshot'`). Tests script failures, throttling, delays and pauses:
  *
@@ -8,9 +8,13 @@
  *   fake.fail({ calendar: 'work', at: 2, error: new ProviderUnavailableError('boom') });
  *   fake.hooks.beforeItem = async (calendar, item) => { if (item.kind === 'end') await paused; };
  */
+import { groupUidsOf } from '@supercal/core';
 import type { AccountProvider } from '@supercal/db';
 import {
   ProviderUnavailableError,
+  ProviderConflictError,
+  ProviderWriteRejectedError,
+  type StoredObject,
   type AdapterContext,
   type ProviderAdapter,
   type SourceCalendarInfo,
@@ -23,7 +27,7 @@ export type FakeCursor = { v: 1; version: number; etags: Record<string, string> 
 type Item = SyncPage | SyncEnd<FakeCursor>;
 
 /** Where a scripted failure fires: listing calendars, before page `n` (1-based) of a sync, or before its end. */
-export type FaultSite = 'list' | number | 'end';
+export type FaultSite = 'list' | number | 'end' | 'write';
 type Fault = { calendar: string | undefined; at: FaultSite; error: Error; times: number };
 
 class FakeCalendar {
@@ -52,6 +56,15 @@ class FakeCalendar {
   }
 }
 
+/** Check the entire group before changing any of its provider objects. */
+function checkEtags(calendar: FakeCalendar, existing: StoredObject[]) {
+  for (const object of existing) {
+    const stored = calendar.objects.get(object.id);
+    if (!stored) throw new ProviderWriteRejectedError('not-found', 'Object disappeared');
+    if (stored.etag !== object.etag) throw new ProviderConflictError('Object changed');
+  }
+}
+
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
@@ -74,7 +87,7 @@ export function createFakeAdapter({
   const faults: Fault[] = [];
   const syncs = new Map<string, number>();
   /** `beforeItem` is awaited before each page or end is yielded; for pausing a run mid-sync. */
-  const hooks: { beforeItem?: (calendar: string, item: Item) => Promise<void> } = {};
+  const hooks: { beforeItem?: (calendar: string, item: Item) => Promise<void>; beforeWrite?: (ctx: AdapterContext, operation: 'put' | 'delete') => Promise<void> } = {};
 
   const fire = (calendar: string | undefined, at: FaultSite) => {
     const fault = faults.find((f) => f.at === at && f.times > 0 && (f.calendar === undefined || f.calendar === calendar));
@@ -93,7 +106,7 @@ export function createFakeAdapter({
     calendar(providerCalendarId: string, info: Partial<SourceCalendarInfo> = {}): FakeCalendar {
       let found = calendars.get(providerCalendarId);
       if (!found) {
-        found = new FakeCalendar({ providerCalendarId, name: providerCalendarId, color: null, timezone: null, capabilities: { incremental: mode, push: false }, ...info });
+        found = new FakeCalendar({ providerCalendarId, name: providerCalendarId, color: null, timezone: null, capabilities: { incremental: mode, push: false, write: false }, ...info });
         calendars.set(providerCalendarId, found);
       }
       return found;
@@ -114,6 +127,32 @@ export function createFakeAdapter({
         return [...calendars.values()].map((c) => c.info);
       },
 
+      writes: {
+        async put(ctx, ref, ics, existing) {
+          await hooks.beforeWrite?.(ctx, 'put');
+          ctx.signal.throwIfAborted();
+          fire(ref.providerCalendarId, 'write');
+          const calendar = calendars.get(ref.providerCalendarId);
+          if (!calendar) throw new ProviderUnavailableError('No such calendar');
+          checkEtags(calendar, existing);
+          const uid = groupUidsOf(ics)[0];
+          if (!uid) throw new ProviderWriteRejectedError('invalid-data', 'No UID');
+          const id = existing[0]?.id ?? `${crypto.randomUUID()}.ics`;
+          for (const object of existing.slice(1)) calendar.remove(object.id);
+          calendar.put(id, { groupUid: uid, payload: ics });
+          return { upserts: [{ id, groupUid: uid, payload: ics, etag: calendar.objects.get(id)!.etag }], deletes: existing.slice(1).map((object) => object.id) };
+        },
+        async delete(ctx, ref, existing) {
+          await hooks.beforeWrite?.(ctx, 'delete');
+          ctx.signal.throwIfAborted();
+          fire(ref.providerCalendarId, 'write');
+          const calendar = calendars.get(ref.providerCalendarId);
+          if (!calendar) throw new ProviderUnavailableError('No such calendar');
+          checkEtags(calendar, existing);
+          for (const object of existing) calendar.remove(object.id);
+          return { upserts: [], deletes: existing.map((object) => object.id) };
+        },
+      },
       async *sync(ctx: AdapterContext, ref, cursor) {
         const id = ref.providerCalendarId;
         syncs.set(id, (syncs.get(id) ?? 0) + 1);

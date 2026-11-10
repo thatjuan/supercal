@@ -3,14 +3,15 @@ import { isDeepStrictEqual } from 'node:util';
 import { createRoute, z } from '@hono/zod-openapi';
 import { Temporal } from '@js-temporal/polyfill';
 import { addMissingTimezones, applyPatch, fromJSCalendar, InvalidPatchError, InvalidSplitError, JSCalendar, JSEvent, LocalDateTime, objectNameFor, parseCalendar, PRODID, recurrenceId, setProp, serializeCalendar, splitEvent, toJSCalendar, UnknownTimeZoneError, type EventResource, type JCalComponent } from '@supercal/core';
-import { calendarAccount, changesSince, resource, resourcesIn, sourceObject, tombstoneFloor, withTenant, type SourceCalendar, type TenantTx } from '@supercal/db';
+import { calendarAccount, changesSince, davObjectName, resource, resourcesIn, sourceObject, tombstoneFloor, withTenant, type SourceCalendar, type TenantTx } from '@supercal/db';
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { bodyLimit } from 'hono/body-limit';
 import { stream } from 'hono/streaming';
 import { type Principal } from '../auth/principal.ts';
 import { requireAccess, type Access } from '../hosted/access.ts';
 import { readResources } from '../hosted/read.ts';
-import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
+import { deleteObject, HostedWriteError, lockCalendarWrites, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
+import { deleteImported, putImported, type WriteDeps } from '../writeback/index.ts';
 import { expandCalendarResources, Occurrence, occurrenceWindow } from './occurrences.ts';
 import { audit, BadRequest, createApiApp, Forbidden, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
 
@@ -24,22 +25,23 @@ const Patch = z.record(z.string(), z.unknown()).openapi('PatchObject');
 const json = <T extends z.ZodType>(description: string, schema: T) => ({ description, content: { 'application/json': { schema } } });
 const body = <T extends z.ZodType>(schema: T) => ({ required: true as const, content: { 'application/json': { schema } } });
 const tags = ['Events'];
-const description = 'Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.';
+const description = 'Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.';
 const errors = problemResponses(400, 401, 403, 404, 409, 412, 413, 422);
+const writeErrors = { ...errors, ...problemResponses(502, 503) };
 const rangeFields = { from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) };
 const list = createRoute({ method: 'get', path: '/api/v1/calendars/{id}/events', operationId: 'listEvents', tags, description,
   request: { params, query: z.object({ from: rangeFields.from.optional(), to: rangeFields.to.optional(), limit: z.coerce.number().int().min(1).max(100).default(100), cursor: z.string().optional() }) },
   responses: { 200: json('Events ordered by UID; span filtering is coarse', z.object({ items: z.array(Envelope), nextCursor: z.string().nullable() })), ...errors } });
 const get = createRoute({ method: 'get', path: '/api/v1/calendars/{id}/events/{uid}', operationId: 'getEvent', tags, description,
-  request: { params: eventParams, headers: z.object({ 'if-none-match': z.string().optional() }) }, responses: { 200: json('Event; ETag is shared with writable CalDAV', ReadEvent), 304: { description: 'Not modified' }, ...errors } });
+  request: { params: eventParams, headers: z.object({ 'if-none-match': z.string().optional() }) }, responses: { 200: json('Event; ETag is the stored resource revision', ReadEvent), 304: { description: 'Not modified' }, ...errors } });
 const create = createRoute({ method: 'post', path: '/api/v1/calendars/{id}/events', operationId: 'createEvent', tags, description,
-  request: { params, body: body(Event) }, responses: { 201: json('Created event', ReadEvent), ...errors } });
+  request: { params, body: body(Event) }, responses: { 201: json('Created event', ReadEvent), ...writeErrors } });
 const put = createRoute({ method: 'put', path: '/api/v1/calendars/{id}/events/{uid}', operationId: 'putEvent', tags, description,
-  request: { params: eventParams, headers: ifMatchHeaders, body: body(Event) }, responses: { 200: json('Replaced event', ReadEvent), 201: json('Created event', ReadEvent), ...errors } });
+  request: { params: eventParams, headers: ifMatchHeaders, body: body(Event) }, responses: { 200: json('Replaced event', ReadEvent), 201: json('Created event', ReadEvent), ...writeErrors } });
 const patch = createRoute({ method: 'patch', path: '/api/v1/calendars/{id}/events/{uid}', operationId: 'patchEvent', tags, description,
-  request: { params: eventParams, headers: ifMatchHeaders, body: body(Patch) }, responses: { 200: json('Patched event', ReadEvent), ...errors } });
+  request: { params: eventParams, headers: ifMatchHeaders, body: body(Patch) }, responses: { 200: json('Patched event', ReadEvent), ...writeErrors } });
 const remove = createRoute({ method: 'delete', path: '/api/v1/calendars/{id}/events/{uid}', operationId: 'deleteEvent', tags, description,
-  request: { params: eventParams, headers: ifMatchHeaders }, responses: { 204: { description: 'Deleted event' }, ...errors } });
+  request: { params: eventParams, headers: ifMatchHeaders }, responses: { 204: { description: 'Deleted event' }, ...writeErrors } });
 const split = createRoute({ method: 'post', path: '/api/v1/calendars/{id}/events/{uid}/split', operationId: 'splitEvent', tags, description,
   request: { params: eventParams, headers: ifMatchHeaders, body: body(z.object({ at: LocalDateTime, uid: z.string().min(1).optional(), patch: Patch.optional() })) },
   responses: { 201: json('Atomically split this and following occurrences', z.object({ original: Envelope, next: Envelope })), ...errors } });
@@ -58,21 +60,23 @@ const hostedErrors = {
   'invalid-calendar-data': { status: 422, slug: 'invalid-calendar-data' }, 'unsupported-component': { status: 422, slug: 'unsupported-component' },
   'invalid-object': { status: 422, slug: 'invalid-object' }, 'too-large': { status: 413, slug: 'too-large' }, 'uid-conflict': { status: 409, slug: 'uid-conflict' },
   quota: { status: 409, slug: 'event-quota' }, 'precondition-failed': { status: 412, slug: 'precondition-failed' }, 'not-found': { status: 404, slug: 'not-found' },
-} satisfies Record<HostedWriteCode, { status: 404 | 409 | 412 | 413 | 422; slug: string }>;
+  'read-only': { status: 403, slug: 'calendar-read-only' }, 'provider-unavailable': { status: 503, slug: 'provider-unavailable' },
+} satisfies Record<HostedWriteCode, { status: 403 | 404 | 409 | 412 | 413 | 422 | 503; slug: string }>;
 function eventError(error: Error): ProblemError {
   if (error instanceof ProblemError) return error;
+  // Without a provider retry hint, an unavailable provider is a bad gateway rather than a 503.
+  if (error instanceof HostedWriteError && error.code === 'provider-unavailable' && error.retryAfterMs === undefined) return new ProblemError(502, error.message, undefined, 'provider-unavailable');
   if (error instanceof HostedWriteError) { const mapped = hostedErrors[error.code]; return new ProblemError(mapped.status, error.message, undefined, mapped.slug); }
   if (error instanceof InvalidPatchError) return new BadRequest([{ path: error.pointer, message: error.message }]);
   if (error instanceof z.ZodError) return new BadRequest(error.issues.map((e) => ({ path: e.path.join('/'), message: e.message })));
   if (error instanceof InvalidSplitError) return new ProblemError(422, error.message);
   throw error;
 }
-async function calendarOf(tx: TenantTx, principal: Principal, id: SourceCalendar['id'], write = false) {
-  if (write) await lockHostedCalendar(tx, id);
+async function calendarOf(tx: TenantTx, principal: Principal, id: SourceCalendar['id'], write: boolean | 'hosted' = false) {
+  if (write) await lockCalendarWrites(tx, id);
   const { calendar, access } = await requireAccess(tx, principal, id, write ? 'write' : 'read');
   if (!write && calendar.state !== 'active' && access !== 'owner') throw new NotFound('No such calendar');
-  const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
-  if (write && account?.provider !== 'hosted') throw new ProblemError(409, 'Calendar is not hosted', undefined, 'calendar-not-hosted');
+  if (write === 'hosted' && !await isHosted(tx, calendar)) throw new ProblemError(409, 'Calendar is not hosted', undefined, 'calendar-not-hosted');
   if (write && calendar.state !== 'active') throw new ProblemError(409, 'Restore the deleted calendar before writing events');
   return calendar;
 }
@@ -121,17 +125,45 @@ function stampImported(data: EventResource, previous: EventResource | null, now:
   };
   return { ...data, master: data.master && stamp(data.master), overrides: data.overrides.map(stamp) };
 }
+/** Persist a hosted object; atomic split and bulk import remain hosted-only. */
 async function store(tx: TenantTx, calendar: SourceCalendar, data: EventResource, options: { ifMatch?: string; createOnly?: boolean } = {}) {
   const [object] = await tx.select().from(sourceObject).where(and(eq(sourceObject.sourceCalendarId, calendar.id), eq(sourceObject.groupUid, data.uid)));
   if (options.createOnly && object) throw new HostedWriteError('uid-conflict', 'UID already exists');
-  let payload: string;
-  try { payload = serializeCalendar({ props: [], resources: [addMissingTimezones(data)] }); } catch (error) {
-    if (error instanceof RangeError || error instanceof UnknownTimeZoneError) throw new HostedWriteError('invalid-calendar-data', error.message);
-    throw error;
-  }
+  const payload = eventPayload(data);
   const result = await writeObject(tx, calendar, { objectName: object?.providerObjectId ?? await objectNameFor(data.uid), payload,
     ...(options.ifMatch !== undefined && { ifMatch: options.ifMatch }), ...(options.createOnly && { ifNoneMatch: '*' }) });
   return { ...result, event: apiEvent(data) };
+}
+/** Serialize the same iCalendar payload for hosted storage and provider writes. */
+function eventPayload(data: EventResource) {
+  try { return serializeCalendar({ props: [], resources: [addMissingTimezones(data)] }); } catch (error) {
+    if (error instanceof RangeError || error instanceof UnknownTimeZoneError) throw new HostedWriteError('invalid-calendar-data', error.message);
+    throw error;
+  }
+}
+/** Identify local storage without inferring write support from a provider name. */
+async function isHosted(tx: TenantTx, calendar: SourceCalendar) {
+  const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
+  return account?.provider === 'hosted';
+}
+/** REST resolves stable device names, independently of the provider's object ids. */
+async function importedName(tx: TenantTx, calendar: SourceCalendar, uid: string) {
+  const [name] = await tx.select({ objectName: davObjectName.objectName }).from(davObjectName).where(and(eq(davObjectName.sourceCalendarId, calendar.id), eq(davObjectName.uid, uid)));
+  return name?.objectName ?? await objectNameFor(uid);
+}
+/** Prepare in the request transaction, then call upstream and refetch the resource after commit. */
+async function storeEvent(tx: TenantTx, deps: WriteDeps, principal: Principal, calendar: SourceCalendar, data: EventResource, options: { createOnly?: boolean; resourceIfMatch?: string } = {}) {
+  if (await isHosted(tx, calendar)) return store(tx, calendar, data, options);
+  if (options.createOnly && await findEvent(tx, calendar, data.uid)) throw new HostedWriteError('uid-conflict', 'UID already exists');
+  const objectName = await importedName(tx, calendar, data.uid), ics = eventPayload(data);
+  return { deferred: async () => {
+    const result = await putImported(deps, principal, calendar.id, { objectName, ics,
+      ...(options.createOnly && { ifNoneMatch: '*' }), ...(options.resourceIfMatch !== undefined && { resourceIfMatch: options.resourceIfMatch }) });
+    return withTenant(principal.tenantId, async (readTx) => {
+      const row = await loadEvent(readTx, calendar, data.uid);
+      return { ...result, uid: row.uid, etag: tag(row, 'owner'), event: apiEvent(row.data) };
+    });
+  } };
 }
 function sameUid(path: string, event: JSEvent) {
   if (event.uid !== undefined && event.uid !== path) throw new BadRequest([{ path: 'uid', message: 'Body UID must match the path UID' }]);
@@ -139,7 +171,10 @@ function sameUid(path: string, event: JSEvent) {
 }
 
 export const eventRoutes = createApiApp();
-eventRoutes.onError((error, c) => problemJson(c, eventError(error)));
+eventRoutes.onError((error, c) => {
+  if (error instanceof HostedWriteError && error.code === 'provider-unavailable' && error.retryAfterMs !== undefined) c.header('Retry-After', String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
+  return problemJson(c, eventError(error));
+});
 eventRoutes.use('/api/v1/calendars/:id/import', bodyLimit({ maxSize: 8 * 1024 * 1024, onError: () => { throw new ProblemError(413, 'Calendar import exceeds 8 MiB'); } }));
 eventRoutes
   .openapi(list, async (c) => {
@@ -171,31 +206,35 @@ eventRoutes
     return c.json(apiEvent(result.row.data), 200, { ETag: etag, 'Cache-Control': 'no-store' });
   })
   .openapi(create, async (c) => {
-    const result = await withTenant(c.var.principal.tenantId, async (tx) => {
+    const checked = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true);
       const now = Temporal.Now.instant(), event = { ...c.req.valid('json'), uid: c.req.valid('json').uid ?? crypto.randomUUID() };
-      const result = await store(tx, calendar, fromJSCalendar(serverEvent(event, null, now), null, now), { createOnly: true });
+      const result = await storeEvent(tx, c.var.sync, c.var.principal, calendar, fromJSCalendar(serverEvent(event, null, now), null, now), { createOnly: true });
+      if ('deferred' in result) return result;
       await audit(tx, c.var.principal, 'event.create', { type: 'calendar', id: calendar.id }, { uid: result.uid });
       return result;
     });
+    const result = 'deferred' in checked ? await checked.deferred() : checked;
     return c.json(result.event, 201, { ETag: result.etag, Location: `/api/v1/calendars/${c.req.valid('param').id}/events/${encodeURIComponent(result.uid)}` });
   })
   .openapi(put, async (c) => {
-    const result = await withTenant(c.var.principal.tenantId, async (tx) => {
+    const checked = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true);
       const event = sameUid(c.req.valid('param').uid, c.req.valid('json'));
       const previous = await findEvent(tx, calendar, event.uid);
       if (previous) requireIfMatch(c, tag(previous, 'owner'));
       else if (c.req.header('if-match')) throw new ProblemError(412, 'No current event matches If-Match');
       const now = Temporal.Now.instant();
-      const result = await store(tx, calendar, fromJSCalendar(serverEvent(event, previous?.data ?? null, now), null, now));
+      const result = await storeEvent(tx, c.var.sync, c.var.principal, calendar, fromJSCalendar(serverEvent(event, previous?.data ?? null, now), null, now), { ...(previous && { resourceIfMatch: tag(previous, 'owner') }) });
+      if ('deferred' in result) return result;
       await audit(tx, c.var.principal, previous ? 'event.update' : 'event.create', { type: 'calendar', id: calendar.id }, { uid: event.uid });
       return result;
     });
+    const result = 'deferred' in checked ? await checked.deferred() : checked;
     return c.json(result.event, result.created ? 201 : 200, { ETag: result.etag, Location: c.req.path });
   })
   .openapi(patch, async (c) => {
-    const result = await withTenant(c.var.principal.tenantId, async (tx) => {
+    const checked = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true);
       const previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
       requireIfMatch(c, tag(previous, 'owner'));
@@ -204,25 +243,32 @@ eventRoutes
       if (old['@type'] !== 'Event') throw new Error('Master must convert to Event');
       const event = sameUid(previous.uid, applyPatch(old, c.req.valid('json')));
       const now = Temporal.Now.instant();
-      const result = await store(tx, calendar, fromJSCalendar(serverEvent(event, previous.data, now), previous.data, now));
+      const result = await storeEvent(tx, c.var.sync, c.var.principal, calendar, fromJSCalendar(serverEvent(event, previous.data, now), previous.data, now), { resourceIfMatch: tag(previous, 'owner') });
+      if ('deferred' in result) return result;
       await audit(tx, c.var.principal, 'event.update', { type: 'calendar', id: calendar.id }, { uid: result.uid });
       return result;
     });
+    const result = 'deferred' in checked ? await checked.deferred() : checked;
     return c.json(result.event, 200, { ETag: result.etag });
   })
   .openapi(remove, async (c) => {
-    await withTenant(c.var.principal.tenantId, async (tx) => {
+    const checked = await withTenant(c.var.principal.tenantId, async (tx) => {
       const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true), previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
       requireIfMatch(c, tag(previous, 'owner'));
+      if (!await isHosted(tx, calendar)) {
+        const objectName = await importedName(tx, calendar, previous.uid);
+        return { deferred: () => deleteImported(c.var.sync, c.var.principal, calendar.id, { objectName, resourceIfMatch: tag(previous, 'owner') }) };
+      }
       if (!previous.objectName) throw new NotFound('No stored object');
       await deleteObject(tx, calendar, { objectName: previous.objectName });
       await audit(tx, c.var.principal, 'event.delete', { type: 'calendar', id: calendar.id }, { uid: previous.uid });
     });
+    if (checked) await checked.deferred();
     return c.body(null, 204);
   })
   .openapi(split, async (c) => {
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
-      const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true), previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
+      const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, 'hosted'), previous = await loadEvent(tx, calendar, c.req.valid('param').uid);
       requireIfMatch(c, tag(previous, 'owner'));
       const input = c.req.valid('json'), now = Temporal.Now.instant();
       const parts = splitEvent(previous.data, input.at, input.uid ?? crypto.randomUUID(), now);
@@ -293,7 +339,7 @@ eventRoutes
     const parsed = parseCalendar(raw);
     if (!parsed.resources.length && !parsed.errors.some((e) => e.component === 'vevent')) throw new ProblemError(422, 'Calendar contains no VEVENT');
     const result = await withTenant(c.var.principal.tenantId, async (tx) => {
-      const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, true);
+      const calendar = await calendarOf(tx, c.var.principal, c.req.valid('param').id, 'hosted');
       const result = { created: 0, updated: 0, skipped: 0, failed: parsed.errors.map((e) => ({ uid: e.uid ?? '', reason: e.message })) };
       const invalidUids = new Set(parsed.errors.flatMap((e) => e.uid ? [e.uid] : []));
       for (const data of parsed.resources) {

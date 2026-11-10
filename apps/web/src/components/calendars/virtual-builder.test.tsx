@@ -6,7 +6,7 @@ import { NEEDS_TWO, VirtualBuilder } from './virtual-builder.tsx';
 
 const calendar = (id: string, accountId: string, name: string): Extract<Calendar, { kind: 'connected' }> => ({
   id,
-  kind: 'connected',
+  kind: 'connected', writable: false,
   access: 'owner',
   owner: { id: 'user_1', name: 'Owner' },
   description: null,
@@ -18,7 +18,7 @@ const calendar = (id: string, accountId: string, name: string): Extract<Calendar
   color: '#2f80ed',
   timezone: null,
   state: 'active',
-  capabilities: { incremental: 'none', push: false },
+  capabilities: { incremental: 'none', push: false, write: false },
   freshness: { lastSuccessAt: null, pushActive: false, expectedLatency: null, stale: false },
   publicationIds: [],
 });

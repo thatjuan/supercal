@@ -8,7 +8,7 @@ import { pollHint } from '../src/ics/index.ts';
 import { collect, davContext } from './dav-fixture.ts';
 
 const URL_ = 'webcal://feeds.example.test/s3cret.ics';
-const ref: SourceCalendarRef = { id: 'cal_1', providerCalendarId: 'feed', capabilities: { incremental: 'conditional-get', push: false } };
+const ref: SourceCalendarRef = { id: 'cal_1', providerCalendarId: 'feed', capabilities: { incremental: 'conditional-get', push: false, write: false } };
 
 const FEED = [
   'BEGIN:VCALENDAR',
@@ -73,7 +73,7 @@ async function sync(ctx: ReturnType<typeof davContext>, cursor: IcsCursor | null
 describe('listCalendars', () => {
   test('one calendar named from X-WR-CALNAME, falling back to the host', async () => {
     expect(await icsAdapter.listCalendars(feed(() => ({ body: FEED })).ctx)).toEqual([
-      { providerCalendarId: 'feed', name: 'Team holidays', color: null, timezone: 'Europe/Berlin', capabilities: { incremental: 'conditional-get', push: false } },
+      { providerCalendarId: 'feed', name: 'Team holidays', color: null, timezone: 'Europe/Berlin', capabilities: { incremental: 'conditional-get', push: false, write: false } },
     ]);
     const [unnamed] = await icsAdapter.listCalendars(feed(() => ({ body: 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n' })).ctx);
     expect(unnamed?.name).toBe('feeds.example.test');

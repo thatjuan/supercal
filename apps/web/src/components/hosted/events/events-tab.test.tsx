@@ -128,7 +128,7 @@ test('attendees are shown read-only, with the note, and stay out of the patch', 
   expect(requests('PATCH')[0]?.headers.get('if-match')).toBe(ETAG);
 });
 
-test('a 412 keeps what was typed, and Reload brings the latest event', async () => {
+test.each([false, true])('a 412 on connected=%s keeps the draft, refreshes the event and offers Reload', async (connected) => {
   let version = 'Standup';
   respondWith({}, (request) => {
     const { pathname } = new URL(request.url);
@@ -136,7 +136,8 @@ test('a 412 keeps what was typed, and Reload brings the latest event', async () 
     if (request.method === 'GET') return Response.json(event({ title: version }), { headers: { etag: `"${version}"` } });
     return Response.json({ type: 'about:blank', title: 'Precondition failed', status: 412 }, { status: 412, headers: { 'content-type': 'application/problem+json' } });
   });
-  await renderTab();
+  const calendar = connected ? { ...hosted(CAL), kind: 'connected' as const, accountId: 'acc_1' } : hosted(CAL);
+  await renderApp(<EventsTab loaded={{ calendar, etag: '"c"' }} mine reload={() => Promise.resolve(undefined)} />);
   await open();
   fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
   const title = () => screen.getByLabelText<HTMLInputElement>('Title');
@@ -147,6 +148,7 @@ test('a 412 keeps what was typed, and Reload brings the latest event', async () 
 
   expect((await screen.findByRole('alert')).textContent).toContain('This event changed elsewhere');
   expect(title().value).toBe('My typing');
+  await waitFor(() => expect(requests('GET').filter((request) => request.url.includes('/events/')).length).toBeGreaterThanOrEqual(2));
 
   fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
   await waitFor(() => expect(title().value).toBe('Renamed elsewhere'));
@@ -169,4 +171,26 @@ test('a truncated week says the view is incomplete, and a cancelled event is str
   await renderTab();
   expect((await screen.findByRole('status')).textContent).toContain('incomplete');
   expect(screen.getByText('Standup').className).toContain('line-through');
+});
+
+test.each([true, false])('connected calendar editor actions follow writable=%s', async (writable) => {
+  serve([occurrence()], event());
+  const calendar = { ...hosted(CAL, { access: 'write', writable }), kind: 'connected' as const, accountId: 'acc_1' };
+  await renderApp(<EventsTab loaded={{ calendar, etag: '"c"' }} mine reload={() => Promise.resolve(undefined)} />);
+  expect(Boolean(screen.queryByRole('button', { name: 'New event' }))).toBe(writable);
+  await open();
+  await screen.findByText('When');
+  expect(Boolean(screen.queryByRole('button', { name: 'Edit' }))).toBe(writable);
+  expect(Boolean(screen.queryByRole('button', { name: 'Delete' }))).toBe(writable);
+});
+
+test('a connected provider refusal displays the problem detail', async () => {
+  serve([occurrence()], event(), () => Response.json({ type: 'about:blank', title: 'Unprocessable content', status: 422, detail: 'Provider cannot store this reminder' }, { status: 422, headers: { 'content-type': 'application/problem+json' } }));
+  const calendar = { ...hosted(CAL), kind: 'connected' as const, accountId: 'acc_1' };
+  await renderApp(<EventsTab loaded={{ calendar, etag: '"c"' }} mine reload={() => Promise.resolve(undefined)} />);
+  await open();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+  fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'Changed' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Provider cannot store this reminder');
 });

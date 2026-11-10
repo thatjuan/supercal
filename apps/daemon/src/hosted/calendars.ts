@@ -2,7 +2,7 @@ import { calendarAccount, newId, sourceCalendar, type SourceCalendar, type Sourc
 import { and, count, eq, sql } from 'drizzle-orm';
 import { NotFound, ProblemError } from '../api/kit/problem.ts';
 import type { FeedService } from '../feeds/service.ts';
-import { lockHostedCalendar } from './objects.ts';
+import { lockCalendarWrites } from './objects.ts';
 
 export const HOSTED_ACCOUNT_LOCK = 1937011299;
 export const MAX_CALENDARS_PER_USER = 100;
@@ -38,7 +38,7 @@ export async function createCalendar(tx: TenantTx, feeds: FeedService, userId: s
     providerCalendarId: id,
     ...input,
     timezone: input.timezone ?? 'UTC',
-    capabilities: { incremental: 'hosted', push: false },
+    capabilities: { incremental: 'hosted', push: false, write: false },
   }).returning();
   if (!calendar) throw new Error('Calendar insert returned no row');
   await feeds.ensurePassthroughPublication(tx, calendar, account);
@@ -47,7 +47,7 @@ export async function createCalendar(tx: TenantTx, feeds: FeedService, userId: s
 
 /** Soft deletion retains authoritative raw objects for 30 days. */
 export async function deleteCalendar(tx: TenantTx, feeds: FeedService, id: SourceCalendarId): Promise<void> {
-  await lockHostedCalendar(tx, id);
+  await lockCalendarWrites(tx, id);
   await tx.update(sourceCalendar)
     .set({ state: 'gone', goneAt: sql`coalesce(${sourceCalendar.goneAt}, now())`, updatedAt: new Date() })
     .where(eq(sourceCalendar.id, id));
@@ -56,7 +56,7 @@ export async function deleteCalendar(tx: TenantTx, feeds: FeedService, id: Sourc
 
 /** Restores data; publication settings and virtual memberships stay as deletion left them. */
 export async function restoreCalendar(tx: TenantTx, id: SourceCalendarId): Promise<SourceCalendar> {
-  await lockHostedCalendar(tx, id);
+  await lockCalendarWrites(tx, id);
   const [calendar] = await tx.select().from(sourceCalendar).where(eq(sourceCalendar.id, id));
   if (!calendar) throw new NotFound('No such calendar');
   if (calendar.state !== 'gone') throw new ProblemError(409, 'Calendar is not deleted');

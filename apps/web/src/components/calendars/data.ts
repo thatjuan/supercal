@@ -5,6 +5,7 @@
  */
 import type { components } from '@supercal/api-client';
 import { useQueryClient } from '@tanstack/react-query';
+import { EDITING_CONSENT_PROVIDERS } from '../accounts/data.ts';
 import { $api, client, keyPath } from '../../api.ts';
 
 export type Feed = components['schemas']['Feed'];
@@ -22,14 +23,14 @@ export type FeedSearch = { feed?: string };
 export const feedSearch = (search: Record<string, unknown>): FeedSearch => (typeof search.feed === 'string' ? { feed: search.feed } : {});
 
 /** A source calendar in a feed: its passthrough publication (when the feed has one) and the virtual publications it feeds. */
-export type CalendarRow = { calendar: Calendar; passthrough: Publication | undefined; virtuals: VirtualPublication[] };
+export type CalendarRow = { calendar: Calendar; passthrough: Publication | undefined; virtuals: VirtualPublication[]; account?: Account | undefined };
 /** A section of the Calendars screen: one connected account, or the feed owner's hosted calendars. */
 export type AccountGroup = { id: string; title: string; subtitle: string; rows: CalendarRow[] };
 
 /** The `id` of the group of hosted calendars, which have no account the API lists. */
 export const HOSTED_GROUP = 'hosted';
 
-const PROVIDER = { google: 'Google', microsoft: 'Microsoft 365', icloud: 'iCloud', caldav: 'CalDAV', ics: 'ICS link' } as const satisfies Record<Account['provider'], string>;
+export const PROVIDER = { google: 'Google', microsoft: 'Microsoft 365', icloud: 'iCloud', caldav: 'CalDAV', ics: 'ICS link' } as const satisfies Record<Account['provider'], string>;
 
 /** The user's feeds and the one selected by `?feed=` (falling back to the default feed). */
 export function useFeeds(selected: string | undefined) {
@@ -53,6 +54,7 @@ export function useFeedCalendars(feed: Feed | undefined) {
   const everyCalendar = calendars.data?.items ?? [];
   const toRow = (calendar: Calendar): CalendarRow => ({
     calendar,
+    account: accounts.data?.items.find((account) => account.id === calendar.accountId),
     passthrough: items.find((p) => p.kind === 'passthrough' && p.sourceCalendarId === calendar.id),
     virtuals: items.filter((p): p is VirtualPublication => p.kind === 'virtual' && p.sources.some((s) => s.calendarId === calendar.id)),
   });
@@ -75,6 +77,7 @@ export function useFeedCalendars(feed: Feed | undefined) {
     publications: items,
     groups,
     calendars: calendarById,
+    shared: everyCalendar.filter((calendar) => calendar.owner.id !== feed?.ownerUserId),
     colorOf,
     error: publications.error ?? accounts.error ?? calendars.error,
     isPending: !enabled || publications.isPending || accounts.isPending || calendars.isPending,
@@ -100,4 +103,11 @@ export async function hidePassthroughs(publications: Publication[], calendarIds:
     const { error } = await client.PATCH('/api/v1/publications/{id}', { params: { path: { id: target.id } }, body: { enabled: false } });
     if (error) throw error;
   }
+}
+
+/** Explain whether editing needs account consent or is refused by the provider calendar. */
+export function readOnlyReason({ calendar, account }: CalendarRow) {
+  if (calendar.kind !== 'connected' || calendar.writable) return null;
+  if (account?.canWrite === false && EDITING_CONSENT_PROVIDERS.has(account.provider)) return 'Read-only. Allow editing in Accounts';
+  return `Read-only in ${account ? PROVIDER[account.provider] : 'provider'}`;
 }

@@ -378,6 +378,41 @@
           "key"
         ]
       },
+      "NeedsConsentProblem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Problem"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "authorizationUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "authorizationUrl"
+            ]
+          }
+        ],
+        "description": "`type` …/problems/needs-consent: send the browser to `authorizationUrl`, then retry the operation"
+      },
+      "OAuthStart": {
+        "type": "object",
+        "properties": {
+          "returnTo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "A path (or URL) on this server to send the browser back to",
+            "example": "/accounts"
+          }
+        },
+        "required": [
+          "returnTo"
+        ]
+      },
       "AccountList": {
         "type": "object",
         "properties": {
@@ -444,6 +479,10 @@
               "null"
             ]
           },
+          "canWrite": {
+            "type": "boolean",
+            "description": "The account holds its provider’s write scope; individual calendars may still be read-only"
+          },
           "autoPublish": {
             "type": "boolean",
             "description": "Newly discovered calendars are published enabled"
@@ -458,6 +497,7 @@
           "serverUrl",
           "status",
           "statusDetail",
+          "canWrite",
           "autoPublish"
         ]
       },
@@ -556,12 +596,20 @@
               },
               "push": {
                 "type": "boolean"
+              },
+              "write": {
+                "type": "boolean"
               }
             },
             "required": [
               "incremental",
-              "push"
+              "push",
+              "write"
             ]
+          },
+          "writable": {
+            "type": "boolean",
+            "description": "Calendar supports event writes through its provider"
           },
           "access": {
             "type": "string",
@@ -645,6 +693,7 @@
           "color",
           "timezone",
           "state",
+          "writable",
           "access",
           "owner",
           "freshness",
@@ -712,12 +761,20 @@
               },
               "push": {
                 "type": "boolean"
+              },
+              "write": {
+                "type": "boolean"
               }
             },
             "required": [
               "incremental",
-              "push"
+              "push",
+              "write"
             ]
+          },
+          "writable": {
+            "type": "boolean",
+            "description": "Calendar supports event writes through its provider"
           },
           "access": {
             "type": "string",
@@ -803,6 +860,7 @@
           "color",
           "timezone",
           "state",
+          "writable",
           "access",
           "owner",
           "freshness",
@@ -1001,21 +1059,6 @@
         },
         "required": [
           "authorizationUrl"
-        ]
-      },
-      "OAuthStart": {
-        "type": "object",
-        "properties": {
-          "returnTo": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
-            "description": "A path (or URL) on this server to send the browser back to",
-            "example": "/accounts"
-          }
-        },
-        "required": [
-          "returnTo"
         ]
       },
       "CalendarList": {
@@ -4153,26 +4196,6 @@
           "createdAt"
         ]
       },
-      "NeedsConsentProblem": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Problem"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "authorizationUrl": {
-                "type": "string",
-                "format": "uri"
-              }
-            },
-            "required": [
-              "authorizationUrl"
-            ]
-          }
-        ],
-        "description": "`type` …/problems/needs-consent: send the browser to `authorizationUrl`, then create the sink again. Any other 409: the sink exists already"
-      },
       "NewSink": {
         "type": "object",
         "properties": {
@@ -4986,6 +5009,111 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{id}/allow-editing": {
+      "post": {
+        "operationId": "allowAccountEditing",
+        "tags": [
+          "Accounts"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^acc_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+              "example": "acc_01h455vb4pex5vsknk084sn02q"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthStart"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The account already has editing permission"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Editing requires incremental consent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedsConsentProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable content",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7049,7 +7177,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -7237,7 +7365,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -7360,6 +7488,26 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Bad gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       }
@@ -7370,7 +7518,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -7402,7 +7550,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Event; ETag is shared with writable CalDAV",
+            "description": "Event; ETag is the stored resource revision",
             "content": {
               "application/json": {
                 "schema": {
@@ -7511,7 +7659,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -7663,6 +7811,26 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Bad gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       },
@@ -7671,7 +7839,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -7813,6 +7981,26 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Bad gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       },
@@ -7821,7 +8009,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -7946,6 +8134,26 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Bad gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       }
@@ -7956,7 +8164,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -8160,7 +8368,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {
@@ -8358,7 +8566,7 @@
         "tags": [
           "Events"
         ],
-        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar.",
+        "description": "Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar.",
         "parameters": [
           {
             "schema": {

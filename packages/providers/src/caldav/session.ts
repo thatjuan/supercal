@@ -132,8 +132,26 @@ export function createDavSession(ctx: AdapterContext, { username, password, host
     return { url: http.finalUrl, entries, syncToken };
   }
 
+  /** A conditional object request through the same credential and egress guard as discovery. */
+  async function request(url: string, method: 'GET' | 'PUT' | 'DELETE', headers: Record<string, string> = {}, body?: string, handled: number[] = []): Promise<GuardedResponse> {
+    const target = new URL(url);
+    if (!credentialTarget(target, origins, hosts)) throw new ProviderUnavailableError(`the server referred to ${target.host}, which is not one of this account's hosts`);
+    const response = await guarded({ url, method, headers, ...(body !== undefined && { body }),
+      credentials: { kind: 'basic', username, password }, credentialHosts: hosts, credentialOrigins: origins, signal: ctx.signal,
+    }).catch((error: unknown) => {
+      if (error instanceof EgressBlockedError || ctx.signal.aborted) throw error;
+      throw new ProviderUnavailableError(`could not reach ${target.host}`, { cause: error });
+    });
+    if (response.status < 200 || response.status >= 300) {
+      if (handled.includes(response.status)) throw new DavStatusError(response.status, new TextDecoder().decode(response.body));
+      throw statusError(response);
+    }
+    return response;
+  }
+
   return {
     log: ctx.log,
+    request,
     /** PROPFIND for `props` (prefixed names such as `d:displayname`, `c:calendar-home-set`). */
     propfind: (url: string, props: string[], depth: '0' | '1', handled?: number[]) =>
       exchange(url, (shim) => propfind({ url, props: Object.fromEntries(props.map((p) => [p, {}])), depth, fetch: shim }), handled),

@@ -116,6 +116,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{id}/allow-editing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["allowAccountEditing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts": {
         parameters: {
             query?: never;
@@ -349,10 +365,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["listEvents"];
         put?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         post: operations["createEvent"];
         delete?: never;
         options?: never;
@@ -367,16 +383,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["getEvent"];
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         put: operations["putEvent"];
         post?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         delete: operations["deleteEvent"];
         options?: never;
         head?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         patch: operations["patchEvent"];
         trace?: never;
     };
@@ -389,7 +405,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         post: operations["splitEvent"];
         delete?: never;
         options?: never;
@@ -404,7 +420,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["calendarOccurrences"];
         put?: never;
         post?: never;
@@ -421,7 +437,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["calendarChanges"];
         put?: never;
         post?: never;
@@ -883,6 +899,18 @@ export interface components {
             /** @description The secret; shown only in this response */
             key: string;
         };
+        /** @description `type` …/problems/needs-consent: send the browser to `authorizationUrl`, then retry the operation */
+        NeedsConsentProblem: components["schemas"]["Problem"] & {
+            /** Format: uri */
+            authorizationUrl: string;
+        };
+        OAuthStart: {
+            /**
+             * @description A path (or URL) on this server to send the browser back to
+             * @example /accounts
+             */
+            returnTo: string;
+        };
         AccountList: {
             items: components["schemas"]["Account"][];
         };
@@ -899,6 +927,8 @@ export interface components {
             /** @enum {string} */
             status: "active" | "reauth_required" | "error" | "disabled";
             statusDetail: string | null;
+            /** @description The account holds its provider’s write scope; individual calendars may still be read-only */
+            canWrite: boolean;
             /** @description Newly discovered calendars are published enabled */
             autoPublish: boolean;
         };
@@ -928,7 +958,10 @@ export interface components {
             capabilities?: {
                 incremental: string;
                 push: boolean;
+                write: boolean;
             };
+            /** @description Calendar supports event writes through its provider */
+            writable: boolean;
             /** @enum {string} */
             access: "free-busy" | "read" | "write" | "manage" | "owner";
             owner: {
@@ -974,7 +1007,10 @@ export interface components {
             capabilities?: {
                 incremental: string;
                 push: boolean;
+                write: boolean;
             };
+            /** @description Calendar supports event writes through its provider */
+            writable: boolean;
             /** @enum {string} */
             access: "free-busy" | "read" | "write" | "manage" | "owner";
             owner: {
@@ -1064,13 +1100,6 @@ export interface components {
         AuthorizationUrl: {
             /** Format: uri */
             authorizationUrl: string;
-        };
-        OAuthStart: {
-            /**
-             * @description A path (or URL) on this server to send the browser back to
-             * @example /accounts
-             */
-            returnTo: string;
         };
         CalendarList: {
             items: components["schemas"]["Calendar"][];
@@ -2016,11 +2045,6 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        /** @description `type` …/problems/needs-consent: send the browser to `authorizationUrl`, then create the sink again. Any other 409: the sink exists already */
-        NeedsConsentProblem: components["schemas"]["Problem"] & {
-            /** Format: uri */
-            authorizationUrl: string;
-        };
         NewSink: {
             /** @example pub_01h455vb4pex5vsknk084sn02q */
             publicationId: string;
@@ -2634,6 +2658,93 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    allowAccountEditing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthStart"];
+            };
+        };
+        responses: {
+            /** @description The account already has editing permission */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Editing requires incremental consent */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["NeedsConsentProblem"];
+                };
+            };
+            /** @description Unprocessable content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4464,6 +4575,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     getEvent: {
@@ -4480,7 +4609,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Event; ETag is shared with writable CalDAV */
+            /** @description Event; ETag is the stored resource revision */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4697,6 +4826,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     deleteEvent: {
@@ -4795,6 +4942,24 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4906,6 +5071,24 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

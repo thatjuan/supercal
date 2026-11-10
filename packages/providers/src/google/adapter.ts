@@ -12,14 +12,17 @@
  *   cancelled instance is an upsert the normaliser turns into an EXDATE.
  * - Push: `events.watch` per calendar and `calendarList.watch` for discovery, when enabled.
  */
+import { Temporal } from '@js-temporal/polyfill';
+import { validateObject } from '@supercal/core';
+import { googleWriteOps, googleSlot, googleInstanceId, StoredGoogleEvent, googleSendUpdates, type GoogleWriteOp } from './write.ts';
 import { z } from 'zod';
-import type { AdapterContext, JsonValue, ProviderAdapter, PushLeaseInfo, PushRequest, RawObject, SyncEnd, SyncPage } from '../adapter.ts';
-import { ProviderUnavailableError } from '../adapter.ts';
-import { createGoogleApi, GoogleHttpError, type GoogleClientOptions } from './api.ts';
+import type { AdapterContext, JsonValue, ProviderAdapter, PushLeaseInfo, PushRequest, RawObject, SyncEnd, SyncPage, StoredObject, WriteResult, SourceCalendarRef } from '../adapter.ts';
+import { ProviderUnavailableError, ProviderPartialWriteError, ProviderWriteRejectedError } from '../adapter.ts';
+import { createGoogleApi, GoogleHttpError, hasScope, GOOGLE_EVENTS_WRITE_SCOPE, type GoogleClientOptions } from './api.ts';
 
 const CalendarList = z.object({
   items: z
-    .array(z.object({ id: z.string(), summary: z.string().optional(), summaryOverride: z.string().optional(), description: z.string().optional(), backgroundColor: z.string().optional(), timeZone: z.string().optional() }))
+    .array(z.object({ id: z.string(), accessRole: z.string().optional(), summary: z.string().optional(), summaryOverride: z.string().optional(), description: z.string().optional(), backgroundColor: z.string().optional(), timeZone: z.string().optional() }))
     .default([]),
   nextPageToken: z.string().optional(),
 });
@@ -53,6 +56,28 @@ export const SINK_CALENDAR_MARKER = 'Managed by Supercal';
 
 const calendarPath = (id: string) => `/calendars/${encodeURIComponent(id)}`;
 
+/** Route returned Google JSON exactly as sync pages, including sparse cancellations. */
+export async function toPage(items: JsonValue[], masterUids: Map<string, string | null>, masterUid: (id: string) => Promise<string | null>): Promise<SyncPage> {
+  const heads = items.map((payload) => ({ head: EventHead.parse(payload), payload }));
+  for (const { head } of heads) if (!head.recurringEventId && head.iCalUID) masterUids.set(head.id, head.iCalUID);
+  const cancelledMasters = new Set(heads.filter(({ head }) => head.status === 'cancelled' && !head.recurringEventId).map(({ head }) => head.id));
+  const page: SyncPage = { kind: 'page', upserts: [], deletes: [], deleteGroupsOf: [...cancelledMasters] };
+  for (const { head, payload } of heads) {
+    if (head.status === 'cancelled' && !head.recurringEventId) {
+      continue;
+    }
+    if (head.recurringEventId && cancelledMasters.has(head.recurringEventId)) continue;
+    const groupUid = head.iCalUID ?? (head.recurringEventId ? await masterUid(head.recurringEventId) : `${head.id}@google.com`);
+    // An instance of a master Google no longer has: nothing to attach it to.
+    if (!groupUid) continue;
+    const originalStart = head.originalStartTime?.dateTime ?? head.originalStartTime?.date;
+    const object: RawObject = { id: head.id, etag: head.etag ?? '', groupUid, payload, ...(originalStart && { originalStart }) };
+    page.upserts.push(object);
+  }
+  return page;
+}
+
+/** A Google adapter whose reads and writes share one account request budget. */
 export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdapter<GoogleCursor> {
   const api = createGoogleApi(options);
 
@@ -72,6 +97,63 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
     };
   }
 
+  /** Execute a UID group in order and retain every accepted response if a later request fails. */
+  async function execute(ctx: AdapterContext, calendar: SourceCalendarRef, operations: GoogleWriteOp[], existing: StoredObject[]): Promise<WriteResult> {
+    if (!hasScope(ctx, GOOGLE_EVENTS_WRITE_SCOPE)) throw new ProviderWriteRejectedError('read-only', 'Google account has not granted calendar.events');
+    const result: WriteResult = { upserts: [], deletes: [] };
+    const path = `${calendarPath(calendar.providerCalendarId)}/events`;
+    const masterUids = new Map<string, string | null>();
+    for (const object of existing) {
+      const event = EventHead.parse(object.payload);
+      if (!event.recurringEventId) masterUids.set(event.id, event.iCalUID ?? null);
+    }
+    let importedId = '';
+    try {
+      for (const operation of operations) {
+        if (operation.op === 'delete') {
+          await api.call(ctx, z.unknown(), `${path}/${encodeURIComponent(operation.eventId)}`, { method: 'DELETE', forbidden: 'reject', headers: { 'If-Match': operation.etag }, query: { sendUpdates: operation.sendUpdates } });
+          const head = existing.find((object) => object.id === operation.eventId);
+          const ids = head && !EventHead.parse(head.payload).recurringEventId ? existing.map((object) => object.id) : [operation.eventId];
+          result.deletes.push(...ids);
+          continue;
+        }
+        let payload: JsonValue;
+        if (operation.op === 'import') {
+          payload = await api.call(ctx, z.json(), `${path}/import`, { method: 'POST', forbidden: 'reject', body: operation.body });
+          importedId = EventHead.parse(payload).id;
+        } else if (operation.op === 'patch') {
+          payload = await api.call(ctx, z.json(), `${path}/${encodeURIComponent(operation.eventId)}`, { method: 'PATCH', forbidden: 'reject', body: operation.body, headers: { 'If-Match': operation.etag }, query: { sendUpdates: operation.sendUpdates } });
+        } else {
+          const masterId = operation.masterId || importedId;
+          const eventId = googleInstanceId(masterId, operation.originalStart);
+          /** A newly overridden instance has no stored ETag; a lookup supplies one for the fallback id. */
+          const patch = (id: string, etag?: string) => api.call(ctx, z.json(), `${path}/${encodeURIComponent(id)}`, { method: 'PATCH', forbidden: 'reject', body: operation.body, ...(etag && { headers: { 'If-Match': etag } }), query: { sendUpdates: operation.sendUpdates } });
+          payload = await patch(eventId).catch(async (error: unknown) => {
+            if (!(error instanceof ProviderWriteRejectedError && error.reason === 'not-found')) throw error;
+            const key = googleSlot(operation.originalStart);
+            const at = key.length === 10 ? Temporal.PlainDate.from(key).toZonedDateTime('UTC').toInstant() : Temporal.Instant.from(key);
+            let pageToken: string | undefined;
+            do {
+              const page = await api.call(ctx, EventsPage, `${path}/${encodeURIComponent(masterId)}/instances`, { forbidden: 'reject', query: { timeMin: at.subtract({ hours: 24 }).toString(), timeMax: at.add({ hours: 24 }).toString(), showDeleted: 'true', ...(pageToken && { pageToken }) } });
+              const match = page.items.map((item) => EventHead.parse(item)).find((head) => head.originalStartTime && googleSlot(head.originalStartTime) === key);
+              if (match) return patch(match.id, match.etag);
+              pageToken = page.nextPageToken;
+            } while (pageToken);
+            throw new ProviderWriteRejectedError('not-found', 'Google recurrence instance no longer exists');
+          });
+        }
+
+        const page = await toPage([payload], masterUids, async (id) => masterUids.get(id) ?? null);
+        result.upserts.push(...page.upserts);
+        result.deletes.push(...page.deletes, ...existing.filter((object) => page.deleteGroupsOf?.includes(object.id)).flatMap(() => existing.map((object) => object.id)));
+      }
+      return result;
+    } catch (error) {
+      if (result.upserts.length || result.deletes.length) throw new ProviderPartialWriteError(result, error);
+      throw error;
+    }
+  }
+
   return {
     provider: 'google',
     format: 'google',
@@ -89,7 +171,7 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
             name: item.summaryOverride ?? item.summary ?? item.id,
             color: item.backgroundColor ?? null,
             timezone: item.timeZone ?? null,
-            capabilities: { incremental: 'delta', push: options.push },
+            capabilities: { incremental: 'delta', push: options.push, write: (item.accessRole === 'owner' || item.accessRole === 'writer') && hasScope(ctx, GOOGLE_EVENTS_WRITE_SCOPE) },
           });
         }
         pageToken = page.nextPageToken;
@@ -113,26 +195,6 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
         return masterUids.get(masterId) ?? null;
       }
 
-      async function toPage(items: JsonValue[]): Promise<SyncPage> {
-        const heads = items.map((payload) => ({ head: EventHead.parse(payload), payload }));
-        for (const { head } of heads) if (!head.recurringEventId && head.iCalUID) masterUids.set(head.id, head.iCalUID);
-        const cancelledMasters = new Set(heads.filter(({ head }) => head.status === 'cancelled' && !head.recurringEventId).map(({ head }) => head.id));
-        const page: SyncPage = { kind: 'page', upserts: [], deletes: [], deleteGroupsOf: [...cancelledMasters] };
-        for (const { head, payload } of heads) {
-          if (head.status === 'cancelled' && !head.recurringEventId) {
-            continue;
-          }
-          if (head.recurringEventId && cancelledMasters.has(head.recurringEventId)) continue;
-          const groupUid = head.iCalUID ?? (head.recurringEventId ? await masterUid(head.recurringEventId) : `${head.id}@google.com`);
-          // An instance of a master Google no longer has: nothing to attach it to.
-          if (!groupUid) continue;
-          const originalStart = head.originalStartTime?.dateTime ?? head.originalStartTime?.date;
-          const object: RawObject = { id: head.id, etag: head.etag ?? '', groupUid, payload, ...(originalStart && { originalStart }) };
-          page.upserts.push(object);
-        }
-        return page;
-      }
-
       let syncToken = GoogleCursor.safeParse(cursor).data?.syncToken ?? null;
       for (;;) {
         const seen = new Set<string>();
@@ -141,7 +203,7 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
           for (;;) {
             const query = { singleEvents: 'false', showDeleted: 'true', maxResults: '2500', ...(syncToken && { syncToken }), ...(pageToken && { pageToken }) };
             const page = await api.call(ctx, EventsPage, path, { query });
-            yield await toPage(page.items);
+            yield await toPage(page.items, masterUids, masterUid);
             if (page.nextPageToken) {
               if (seen.has(page.nextPageToken)) throw new ProviderUnavailableError('Google repeated a page token');
               seen.add(page.nextPageToken);
@@ -162,6 +224,22 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
           throw error;
         }
       }
+    },
+
+    writes: {
+      async put(ctx, calendar, ics, existing) {
+        const parsed = validateObject(ics);
+        if (!parsed.ok) throw new ProviderWriteRejectedError('invalid-data', parsed.detail);
+        return execute(ctx, calendar, googleWriteOps(parsed.resource, existing, calendar.timezone ?? 'UTC'), existing);
+      },
+      async delete(ctx, calendar, existing) {
+        const masters = existing.filter((object) => !EventHead.parse(object.payload).recurringEventId);
+        const objects = masters.length ? masters : existing;
+        return execute(ctx, calendar, objects.map((object) => {
+          const event = StoredGoogleEvent.parse(object.payload);
+          return { op: 'delete', eventId: object.id, etag: object.etag, sendUpdates: googleSendUpdates(event, { status: 'cancelled' }) };
+        }), existing);
+      },
     },
 
     push: {

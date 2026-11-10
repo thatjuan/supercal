@@ -14,6 +14,7 @@ const many = <T extends z.ZodType>(schema: T) => z.union([z.array(schema), schem
 const Href = z.object({ href: many(Text) }).transform((p) => p.href[0]);
 const ResourceType = z.record(z.string(), z.unknown());
 const Components = z.object({ comp: many(z.object({ _attributes: z.object({ name: z.string() }) })) }).transform((s) => s.comp.map((c) => c._attributes.name.toUpperCase()));
+const Privileges = z.object({ privilege: many(z.record(z.string(), z.unknown())) }).transform((s) => s.privilege.flatMap((p) => Object.keys(p)));
 const Reports = z.object({ supportedReport: many(z.object({ report: z.record(z.string(), z.unknown()) })) }).transform((s) => s.supportedReport.flatMap((r) => Object.keys(r.report)));
 
 /** The value of an optional property, or null when it is absent or unreadable. */
@@ -70,7 +71,7 @@ export async function discoverHome(dav: DavSession, serverUrl: string): Promise<
 export async function listCollections(dav: DavSession, home: string): Promise<SourceCalendarInfo[]> {
   const result = await dav.propfind(
     home,
-    ['d:resourcetype', 'd:displayname', 'ca:calendar-color', 'c:calendar-timezone', 'd:sync-token', 'c:supported-calendar-component-set', 'd:supported-report-set'],
+    ['d:resourcetype', 'd:displayname', 'ca:calendar-color', 'c:calendar-timezone', 'd:sync-token', 'c:supported-calendar-component-set', 'd:supported-report-set', 'd:current-user-privilege-set'],
     '1',
   );
   return result.entries.flatMap((entry): SourceCalendarInfo[] => {
@@ -88,7 +89,7 @@ export async function listCollections(dav: DavSession, home: string): Promise<So
         name: name || decodeURIComponent(new URL(entry.href).pathname.split('/').filter(Boolean).at(-1) ?? 'Calendar'),
         color: normalizeColor(read(Text, props.calendarColor)),
         timezone: ianaZone(read(Text, props.calendarTimezone)),
-        capabilities: { incremental, push: false },
+        capabilities: { incremental, push: false, write: (read(Privileges, props.currentUserPrivilegeSet) ?? []).some((p) => ['write', 'writeContent', 'all'].includes(p)) },
       },
     ];
   });

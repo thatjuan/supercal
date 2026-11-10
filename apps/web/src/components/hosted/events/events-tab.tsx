@@ -1,5 +1,5 @@
 /**
- * A hosted calendar's Events tab: the week or agenda of its occurrences, and the sheets that show,
+ * A writable calendar's Events tab: the week or agenda of its occurrences, and the sheets that show,
  * create and edit them. Without write access, or on a deleted calendar, it is read-only. Calendar
  * apps edit the same events over CalDAV, and the live stream brings their changes in.
  */
@@ -17,7 +17,7 @@ import { WeekGrid } from '../../preview/week-grid.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Icon } from '../../ui/icon.tsx';
 import { ProblemAlert, toProblem } from '../../ui/problem-alert.tsx';
-import { atLeast, type CalendarTabProps, type HostedCalendar } from '../data.ts';
+import { atLeast, type CalendarTabProps, type Calendar } from '../data.ts';
 import { EventEditor } from './event-editor.tsx';
 import { OccurrenceSheet } from './occurrence-sheet.tsx';
 import { newEventBody, newEventForm, type EventForm } from './form.ts';
@@ -25,7 +25,7 @@ import { createEvent, useRefreshEvents, type CalendarOccurrence } from './writes
 
 export function EventsTab({ loaded: { calendar } }: CalendarTabProps) {
   const id = calendar.id;
-  const canWrite = atLeast(calendar.access, 'write') && calendar.state === 'active';
+  const canWrite = calendar.writable && atLeast(calendar.access, 'write') && calendar.state === 'active';
   const [view, setView] = useState<View>('week');
   const [zone, setZone] = useState(browserZone);
   const [anchor, setAnchor] = useState(() => Temporal.Now.plainDateISO(browserZone));
@@ -62,7 +62,7 @@ export function EventsTab({ loaded: { calendar } }: CalendarTabProps) {
   );
 }
 
-function NewEventSheet({ calendar, draft, onClose }: { calendar: HostedCalendar; draft: EventForm; onClose: () => void }) {
+function NewEventSheet({ calendar, draft, onClose }: { calendar: Calendar; draft: EventForm; onClose: () => void }) {
   const refresh = useRefreshEvents();
   return (
     <Sheet open onOpenChange={onClose} title="New event">

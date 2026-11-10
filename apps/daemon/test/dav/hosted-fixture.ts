@@ -1,9 +1,12 @@
-/** A device login and an empty hosted calendar for protocol and real-client write tests. */
-import { davLogin, member, organization, user, withTenant, type TenantId } from '@supercal/db';
+/** Device logins with hosted and imported calendars for protocol and real-client tests. */
+import { normalizeIcal, revisionOf, spanOf } from '@supercal/core';
+import { calendarAccount, davLogin, member, organization, publication, recordChanges, sourceCalendar, user, withTenant, type CalendarAccount, type SourceCalendar, type TenantId } from '@supercal/db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
+import { eq } from 'drizzle-orm';
 import { createFeedService } from '../../src/feeds/service.ts';
 import { createCalendar } from '../../src/hosted/calendars.ts';
 import { testSecrets } from '../auth-fixture.ts';
+import { eventIcs } from './fixture.ts';
 
 export const DEVICE = { username: 'writer-dav-abcdefgh', password: 'device-password', userId: 'user_hosted_dav', tenantId: 'org_hosted_dav' as TenantId };
 export async function seedHosted() {
@@ -16,6 +19,29 @@ export async function seedHosted() {
   if (!login) throw new Error('No device login');
   const calendar = await withTenant(DEVICE.tenantId, (tx) => createCalendar(tx, createFeedService(testSecrets), DEVICE.userId, { name: 'Hosted' }));
   return { login, calendar };
+}
+
+/** An imported account, its default-feed toggle and a private all-day event with full details. */
+export async function seedImported(options: { name?: string; email?: string | null; provider?: Exclude<CalendarAccount['provider'], 'hosted'>; enabled?: boolean; state?: SourceCalendar['state'] } = {}) {
+  return withTenant(DEVICE.tenantId, async (tx) => {
+    const [account] = await tx.insert(calendarAccount).values({ tenantId: DEVICE.tenantId, ownerUserId: DEVICE.userId,
+      provider: options.provider ?? 'google', displayName: 'Imported', email: options.email === undefined ? 'imported@example.test' : options.email,
+      autoPublish: options.enabled ?? true }).returning();
+    if (!account) throw new Error('No imported account');
+    const [calendar] = await tx.insert(sourceCalendar).values({ tenantId: DEVICE.tenantId, accountId: account.id,
+      providerCalendarId: 'provider-calendar', name: options.name ?? 'Imported', timezone: 'UTC', state: options.state ?? 'active' }).returning();
+    if (!calendar) throw new Error('No imported calendar');
+    const pub = await createFeedService(testSecrets).ensurePassthroughPublication(tx, calendar, account);
+    await tx.update(publication).set({ privacy: 'busy-only', filters: { hideAllDay: true, hideCancelled: true, hideDeclined: true } }).where(eq(publication.id, pub.id));
+    const uid = `private-${calendar.id}`;
+    const { resource, completeness } = normalizeIcal([{ id: 'private.ics', etag: '1', groupUid: uid, payload: eventIcs(uid,
+      ['DTSTART;VALUE=DATE:20261110', 'DTEND;VALUE=DATE:20261111', 'CLASS:PRIVATE', 'SUMMARY:Private appointment', 'LOCATION:Secret place', 'DESCRIPTION:Confidential notes']) }]);
+    const span = spanOf(resource, 'UTC');
+    await recordChanges(tx, [{ op: 'upsert', sourceCalendarId: calendar.id, uid, resource, completeness, revision: revisionOf(resource),
+      sequence: 0, lastModified: null, organizer: null,
+      span: { start: new Date(span.start.epochMilliseconds), end: span.end === 'infinity' ? 'infinity' : new Date(span.end.epochMilliseconds) } }]);
+    return { account, calendar, publication: pub, uid };
+  });
 }
 
 /** Two colleagues exercise shared device collections through real clients. */

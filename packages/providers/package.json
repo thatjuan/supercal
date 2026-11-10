@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@js-temporal/polyfill": "0.5.1",
     "@supercal/core": "workspace:*",
     "@supercal/db": "workspace:*",
     "ipaddr.js": "2.5.0",

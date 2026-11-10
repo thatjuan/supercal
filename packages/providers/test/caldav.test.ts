@@ -8,12 +8,12 @@ import { syncCollection } from '../src/caldav/sync.ts';
 import { createGuardedFetch, credentialTarget, type GuardedRequest } from '../src/transport/index.ts';
 import { icloudLogin } from '../src/caldav/index.ts';
 import { describe, expect, spyOn, test } from 'bun:test';
-import { AuthFailedError, caldavAdapter, ProviderUnavailableError, UnsupportedAuthError, type SourceCalendarRef, type SyncEnd, type SyncPage } from '../src/index.ts';
+import { AuthFailedError, caldavAdapter, ProviderConflictError, ProviderWriteRejectedError, ProviderUnavailableError, UnsupportedAuthError, type SourceCalendarRef, type SyncEnd, type SyncPage } from '../src/index.ts';
 import type { CaldavCursor } from '../src/caldav/index.ts';
 import { collect, davContext, DavFixture, event } from './dav-fixture.ts';
 
 const WORK = '/u/cals/work/';
-const ref = (incremental: 'sync-collection' | 'etag'): SourceCalendarRef => ({ id: 'cal_1', providerCalendarId: `https://dav.test${WORK}`, capabilities: { incremental, push: false } });
+const ref = (incremental: 'sync-collection' | 'etag'): SourceCalendarRef => ({ id: 'cal_1', providerCalendarId: `https://dav.test${WORK}`, capabilities: { incremental, push: false, write: true } });
 
 function setup({ sync = true } = {}) {
   const server = new DavFixture().collection(WORK, { name: 'Work', color: '#48aaffff', sync });
@@ -47,8 +47,8 @@ describe('discovery', () => {
     server.collection('/u/cals/tasks/', { components: ['VTODO'] }).collection('/u/cals/old/', { name: 'Old', sync: false });
     const calendars = await caldavAdapter.listCalendars(ctx);
     expect(calendars).toEqual([
-      { providerCalendarId: `https://dav.test${WORK}`, name: 'Work', color: '#48AAFF', timezone: 'Europe/Berlin', capabilities: { incremental: 'sync-collection', push: false } },
-      { providerCalendarId: 'https://dav.test/u/cals/old/', name: 'Old', color: null, timezone: 'Europe/Berlin', capabilities: { incremental: 'etag', push: false } },
+      { providerCalendarId: `https://dav.test${WORK}`, name: 'Work', color: '#48AAFF', timezone: 'Europe/Berlin', capabilities: { incremental: 'sync-collection', push: false, write: true } },
+      { providerCalendarId: 'https://dav.test/u/cals/old/', name: 'Old', color: null, timezone: 'Europe/Berlin', capabilities: { incremental: 'etag', push: false, write: true } },
     ]);
     expect(server.requests.slice(0, 3)).toEqual(['PROPFIND /.well-known/caldav', 'PROPFIND /u/', 'PROPFIND /u/cals/']);
   });
@@ -394,4 +394,80 @@ test.each(['', ':443', ':8443'])('iCloud redirect to HTTPS partition port "%s" k
   } finally {
     fetch.mockRestore();
   }
+});
+
+
+describe('writes', () => {
+  test('create is conditional, GETs rewritten bytes even without a PUT ETag, then updates and deletes conditionally', async () => {
+    const { server, ctx } = setup();
+    const writes = caldavAdapter.writes!;
+    server.quirks.noPutEtag = true;
+    server.quirks.rewrite = (body) => body.replace('SUMMARY:new', 'SUMMARY:Stored by provider');
+    const created = await writes.put(ctx, ref('sync-collection'), event('new'), []);
+    const object = created.upserts[0]!;
+    expect(object.id).toMatch(/^\/u\/cals\/work\/[0-9a-f-]+\.ics$/);
+    expect(object.payload).toContain('SUMMARY:Stored by provider');
+    expect(server.wire[0]?.headers.get('if-none-match')).toBe('*');
+    expect(server.requests).toEqual([`PUT ${object.id}`, `GET ${object.id}`]);
+    const existing = [{ id: object.id, etag: object.etag, payload: String(object.payload) }];
+    const updated = await writes.put(ctx, ref('sync-collection'), event('new').replace('SUMMARY:new', 'SUMMARY:Edited'), existing);
+    expect(server.wire[2]?.headers.get('if-match')).toBe(object.etag);
+    expect(updated.upserts[0]?.payload).toContain('SUMMARY:Edited');
+    await expect(writes.put(ctx, ref('sync-collection'), event('new'), existing)).rejects.toBeInstanceOf(ProviderConflictError);
+    const latest = updated.upserts[0]!;
+    expect(await writes.delete(ctx, ref('sync-collection'), [{ id: latest.id, etag: latest.etag, payload: String(latest.payload) }])).toEqual({ upserts: [], deletes: [latest.id] });
+    expect(server.wire.at(-1)?.headers.get('if-match')).toBe(latest.etag);
+    expect(server.collections.get(WORK)?.objects.has(latest.id)).toBe(false);
+  });
+
+  test('a missing collection on create is unavailable, while an upstream delete conflict is conditional', async () => {
+    const { server, ctx } = setup();
+    server.quirks.writeStatus = 404;
+    await expect(caldavAdapter.writes!.put(ctx, ref('etag'), event('new'), [])).rejects.toBeInstanceOf(ProviderUnavailableError);
+    server.quirks.writeStatus = 412;
+    await expect(caldavAdapter.writes!.delete(ctx, ref('etag'), [{ id: `${WORK}a.ics`, etag: '"stale"', payload: event('a') }])).rejects.toBeInstanceOf(ProviderConflictError);
+  });
+
+  test('mutating redirects cannot escape the account credential origins', async () => {
+    let calls = 0;
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async () => {
+      calls++;
+      return Response.redirect('https://elsewhere.test/object.ics');
+    }, { preconnect() {} }));
+    try {
+      const guarded = createGuardedFetch({ allow: [] }, { resolve: async () => [{ address: '1.1.1.1', family: 4 }] });
+      await expect(caldavAdapter.writes!.put(davContext(guarded), ref('etag'), event('new'), [])).rejects.toBeInstanceOf(ProviderUnavailableError);
+      expect(calls).toBe(1);
+    } finally { fetch.mockRestore(); }
+  });
+
+  test('split objects refuse PUT and DELETE without a request', async () => {
+    const { server, ctx } = setup();
+    const existing = [{ id: `${WORK}multi.ics#one`, etag: '"1"', payload: event('one') }];
+    await expect(caldavAdapter.writes!.put(ctx, ref('etag'), event('one'), existing)).rejects.toMatchObject({ reason: 'read-only' });
+    await expect(caldavAdapter.writes!.delete(ctx, ref('etag'), existing)).rejects.toMatchObject({ reason: 'read-only' });
+    expect(server.requests).toEqual([]);
+  });
+
+  test.each([[403, 'read-only'], [405, 'read-only'], [415, 'invalid-data'], [400, 'invalid-data'], [507, 'quota'], [404, 'not-found']] as const)('HTTP %i rejects only the object (%s)', async (status, reason) => {
+    const { server, ctx } = setup();
+    server.quirks.writeStatus = status;
+    await expect(caldavAdapter.writes!.put(ctx, ref('etag'), event('a'), [{ id: `${WORK}a.ics`, etag: '"2"', payload: event('a') }]))
+      .rejects.toBeInstanceOf(ProviderWriteRejectedError);
+    await expect(caldavAdapter.writes!.delete(ctx, ref('etag'), [{ id: `${WORK}a.ics`, etag: '"2"', payload: event('a') }])).rejects.toMatchObject({ reason });
+  });
+
+  test('discovery requires write, write-content or all, and only event calendars are listed', async () => {
+    const server = new DavFixture();
+    server.collection(WORK, { privileges: ['read'] })
+      .collection('/u/cals/content/', { privileges: ['write-content'] })
+      .collection('/u/cals/all/', { privileges: ['all'] })
+      .collection('/u/cals/absent/', { privileges: [] })
+      .collection('/u/cals/tasks/', { privileges: ['all'], components: ['VTODO'] });
+    const listed = await caldavAdapter.listCalendars(davContext(server.asGuardedFetch()));
+    expect(listed.map((calendar) => [calendar.providerCalendarId, calendar.capabilities.write])).toEqual([
+      [`https://dav.test${WORK}`, false], ['https://dav.test/u/cals/content/', true], ['https://dav.test/u/cals/all/', true], ['https://dav.test/u/cals/absent/', false],
+    ]);
+    expect(server.wire.at(-1)?.body).toContain('current-user-privilege-set');
+  });
 });

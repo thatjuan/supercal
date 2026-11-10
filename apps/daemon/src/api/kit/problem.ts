@@ -34,6 +34,7 @@ const PROBLEMS = {
   428: { slug: 'precondition-required', title: 'Precondition required' },
   429: { slug: 'too-many-requests', title: 'Too many requests' },
   500: { slug: 'internal', title: 'Internal error' },
+  502: { slug: 'bad-gateway', title: 'Bad gateway' },
   503: { slug: 'unavailable', title: 'Service unavailable' },
 } as const;
 

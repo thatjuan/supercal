@@ -237,7 +237,10 @@ Google accounts need an OAuth client of your own. These steps use the Google Clo
    - `openid`
    - `.../auth/userinfo.email`
    - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
-   - `https://www.googleapis.com/auth/calendar.events.readonly`
+   - `https://www.googleapis.com/auth/calendar.events`
+
+   Existing OAuth apps must add `calendar.events` under **Data access** too. Existing accounts grant it with **Allow editing** on the Accounts page; accounts that grant only the read scope keep syncing read-only.
+
 5. Under **Clients**, create an OAuth client of type **Web application**. Add one authorized redirect URI: your `SUPERCAL_PUBLIC_URL` followed by `/api/v1/oauth/google/callback`, for example `https://cal.example.com/api/v1/oauth/google/callback`. It must match exactly, with no trailing slash.
 6. Copy the client ID and secret into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` and restart Supercal. Users can now connect Google accounts from the dashboard.
 7. **Publish the app.** Under **Audience**, click **Publish app** to move it from Testing to In production. An app left in Testing issues refresh tokens that expire after seven days, so every connected Google account would stop syncing each week and need reconnecting. The dashboard marks such accounts as needing reauthorization.
@@ -256,7 +259,7 @@ Microsoft 365 and Outlook.com accounts need an app registration in Microsoft Ent
 2. Enter a name. Under **Supported account types**, choose **Accounts in any organizational directory and personal Microsoft accounts**, so both work accounts and Outlook.com accounts can connect.
 3. Under **Redirect URI**, choose the **Web** platform and enter your `SUPERCAL_PUBLIC_URL` followed by `/api/v1/oauth/microsoft/callback`, for example `https://cal.example.com/api/v1/oauth/microsoft/callback`. Register the app.
 4. Copy the **Application (client) ID** from the overview page into `MICROSOFT_CLIENT_ID`.
-5. Open **API permissions → Add a permission → Microsoft Graph → Delegated permissions** and add `Calendars.Read`, `offline_access` and `User.Read` (`User.Read` is usually there already; `openid` and `email` are requested at sign-in and need no entry). Admin consent is not required for these, although some organizations require it for any app; their admins can grant it from the same page.
+5. Open **API permissions → Add a permission → Microsoft Graph → Delegated permissions** and add `Calendars.ReadWrite`, `offline_access` and `User.Read` (`User.Read` is usually there already; `openid` and `email` are requested at sign-in and need no entry). Admin consent is not required for these, although some organizations require it for any app; their admins can grant it from the same page.
 6. Open **Certificates & secrets → Client secrets → New client secret**, pick an expiry, and copy the secret's **Value** (not its ID) into `MICROSOFT_CLIENT_SECRET`. Restart Supercal.
 
 Client secrets expire, after at most 24 months. When one expires, every Microsoft account stops syncing until you create a new secret and restart Supercal, so put a reminder in your calendar a few weeks before the expiry date. You can create the new secret while the old one is still valid and switch over with no downtime.
@@ -289,8 +292,11 @@ Revoke a device under **Settings → Calendar apps**, or list them with `GET /ap
 revoke one with `DELETE /api/v1/dav-logins/<id>`. It stops authenticating immediately without
 affecting other devices. A tenant admin can revoke a member's device login too. Each user may have at most
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
-Feed usernames and passwords continue to provide read-only publications; use a DAV login to
-edit hosted calendars. Device credentials cannot open the management API or ICS feeds.
+Feed usernames and passwords continue to provide read-only publications. A DAV login lists your
+hosted calendars, imported calendars enabled on the Calendars page, and calendars shared with you.
+You can edit hosted calendars and your writable Google, iCloud and CalDAV calendars; read-only imported calendars show full event details,
+regardless of feed privacy and filters. Hosted calendars stay listed even when their feed publication
+is disabled. Device credentials cannot open the management API or ICS feeds.
 
 ### Observed client coverage
 

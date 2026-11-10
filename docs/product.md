@@ -32,24 +32,42 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   Create, edit and delete events from calendar apps through read-write CalDAV; create and rename
   calendars there too. Each device gets its own named DAV login with a password shown once and
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
+  One device login also lists connected calendars enabled on the Calendars page with full event
+  details, alongside shared calendars. It can create, edit and delete events in your connected
+  Google, Microsoft, iCloud or CalDAV calendars when the provider allows it, including calendars shared with a write grant. Edits use the owner’s account, and the audit log names the person editing.
+  Google editing needs `calendar.events` consent and an owner or writer calendar role. Existing accounts can grant it with **Allow editing** on the Accounts page. Google events created from a device preserve the client's UID through `events.import`, which adds a private copy and does not send invitations to attendees. Editing the event later in Google sends invitations. This invitation behavior has not been verified with a live account.
+
+  Microsoft calendar editing requires `Calendars.ReadWrite` and Outlook's per-calendar edit permission.
+  Existing read-only accounts can grant it through **Allow editing** without reconnecting a different
+  account. Graph assigns its own UID on creation; the event stays at the device's chosen href, and a
+  refetch learns the new UID. Outlook sends attendee notifications when the organizer changes an
+  event with attendees, including cancellations; Graph has no switch to suppress them.
+
+  Microsoft recurrence editing is limited to Graph's daily, weekly, monthly and yearly patterns.
+  Multiple RRULEs, RDATEs, frequencies finer than daily, multiple BYMONTHDAY values, COUNT with
+  UNTIL, and BYSETPOS outside relative monthly/yearly patterns are refused before saving. Other
+  rules that cannot map exactly to Graph are refused as well.
+
+  Edits go through to the provider immediately, and conflicts ask the calendar app to refetch. Feed privacy and filters do not apply to the
+  owner's device login; hosted calendars stay listed even when their feed publication is disabled.
   The dashboard also shows each hosted calendar's events and creates, edits and deletes them,
   including one occurrence or this and following. The REST API supports JSCalendar event reads and
-  writes, and calendar apps stay fully supported.
+  writes on writable connected calendars too, and returns revision ETags after provider acceptance. Atomic series splits and bulk imports require a hosted calendar, so connected event editors offer this occurrence or all occurrences.
 - Keep at most 100 retained hosted calendars per user, with up to 50,000 objects per calendar and
   1 MiB per object. Attendees are stored as data; Supercal sends no invitations.
 
 ### Calendar sharing and free-busy
 
-- Share a calendar with a colleague or everyone in the tenant from the Hosted screen or through the API. Free-busy grants
+- Share a calendar with a colleague or everyone in the tenant from its Sharing tab or through the API. Free-busy grants
   expose busy time; read adds event details; write adds event editing; manage adds calendar
   metadata, shares and published links. Only owners and tenant admins can grant or remove
-  manage access, delete a calendar or restore it. Imported calendars support free-busy and read.
+  manage access, delete a calendar or restore it. Imported calendars also support write when the provider allows editing.
 - Read grants show private and confidential events as “Busy”. Write and manage grants show
   those events in full so editors can edit them. Shared calendar listings include the owner's
   name; publication membership remains visible only to the owner and tenant admins.
 - Readable shared calendars appear in the recipient's device CalDAV home, named with the owner
   in parentheses. Tenant admin status adds no device collections by itself; an admin needs an
-  explicit read-or-higher grant for a colleague's calendar. Writable hosted shares support event creation, editing and deletion. Calendar
+  explicit read-or-higher grant for a colleague's calendar. Writable hosted and connected shares support event creation, editing and deletion. Connected calendars accept write grants only while writable; existing write grants act as read while provider access is lost and resume after it returns. Manage grants remain hosted-only. Calendar
   apps cannot delete a shared calendar, even with manage access. Changing between read and
   write requires a client resync because object addresses and ETags change.
 - See one calendar's busy time, week by week, on its Availability tab on the Hosted screen. Query up to 50 calendars for a window of at most 62 days through `POST /api/v1/free-busy`.
@@ -119,7 +137,7 @@ Screens, in the order a new user meets them:
 1. Sign up / sign in (email + password). With email configured, confirm your address, then sign in. If the link opens on another device, reset the password to finish setting up access. Password reset signs out existing sessions and revokes API keys and device logins; automation and calendar apps need new credentials. Read-only feed credentials stay valid so subscribers keep working.
 2. Onboarding: connect the first account, watch calendars appear, get the subscribe step.
 3. Accounts: list with health badges, add, reconnect, remove.
-4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy.
+4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy, and an Events link. Read-only connected calendars show a lock with the provider name, or direct users to Allow editing in Accounts when consent is missing. Shared calendars link to their events and availability. The event editor opens on writable connected calendars, shows provider error details, and reloads the backing event after a conflict while preserving the draft until Reload is chosen.
 5. Hosted: create, edit, reorder, delete and restore hosted calendars; a week and agenda view of each calendar's events, with create, edit and delete; import and export `.ics` files; calendars shared with you.
 6. Virtual calendars: create by picking calendars; see the merged result.
 7. Preview: week/agenda view of exactly what the feed publishes, updating live.

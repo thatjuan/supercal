@@ -1,5 +1,5 @@
-import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
-import type { AccountId } from '../ids.ts';
+import { boolean, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import type { AccountId, SourceCalendarId } from '../ids.ts';
 import { apikey, user } from './auth.ts';
 import { idColumn, tenantId } from './columns.ts';
 
@@ -49,8 +49,8 @@ export const calendarAccount = pgTable('calendar_account', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** What a source calendar supports, as its adapter reports it. */
-export type CalendarCapabilities = { incremental: string; push: boolean };
+/** What a source calendar supports; a missing `write` key in older JSON rows means false. */
+export type CalendarCapabilities = { incremental: string; push: boolean; write: boolean };
 
 /**
  * How current a source calendar's data is, as observed (never promised). `stale` is set while its
@@ -85,7 +85,7 @@ export const sourceCalendar = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     goneAt: timestamp('gone_at', { withTimezone: true }),
     timezone: text('timezone'),
-    capabilities: jsonb('capabilities').$type<CalendarCapabilities>().notNull().default({ incremental: 'snapshot', push: false }),
+    capabilities: jsonb('capabilities').$type<CalendarCapabilities>().notNull().default({ incremental: 'snapshot', push: false, write: false }),
     state: calendarState('state').notNull().default('active'),
     freshness: jsonb('freshness').$type<Freshness>().notNull().default(NO_FRESHNESS),
   },
@@ -127,3 +127,12 @@ export const oauthFlow = pgTable('oauth_flow', {
   verifier: text('verifier').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
+
+/** Stable client-chosen object names shared by every device reading an imported calendar. */
+export const davObjectName = pgTable('dav_object_name', {
+  tenantId: tenantId(),
+  sourceCalendarId: text('source_calendar_id').$type<SourceCalendarId>().notNull().references(() => sourceCalendar.id, { onDelete: 'cascade' }),
+  uid: text('uid').notNull(),
+  objectName: text('object_name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.sourceCalendarId, t.uid] }), unique().on(t.sourceCalendarId, t.objectName)]);

@@ -1,4 +1,4 @@
-/** One hosted calendar: tabs from `TABS`, each shown only at or above its access level. A `free-busy` grantee has one tab, Availability. */
+/** One calendar: tabs from `TABS`, each shown only at or above its access level. A `free-busy` grantee has one tab, Availability. */
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
@@ -6,7 +6,7 @@ import { isProblem, meQuery } from '../../../api.ts';
 import { ToastProvider } from '../../../components/accounts/toast.tsx';
 import { AvailabilityTab } from '../../../components/hosted/availability.tsx';
 import { EventsTab } from '../../../components/hosted/events/events-tab.tsx';
-import { atLeast, RESTORE_NOTE, useHostedCalendar, useRestoreCalendar, type Access, type CalendarTabProps, type HostedCalendar } from '../../../components/hosted/data.ts';
+import { atLeast, RESTORE_NOTE, useHostedCalendar, useRestoreCalendar, type Access, type CalendarTabProps, type Calendar } from '../../../components/hosted/data.ts';
 import { LinksTab } from '../../../components/hosted/links.tsx';
 import { SettingsTab } from '../../../components/hosted/settings-tab.tsx';
 import { SharingTab } from '../../../components/hosted/sharing.tsx';
@@ -52,7 +52,6 @@ function CalendarDetail() {
     if (isProblem(query.error) && [400, 403, 404].includes(query.error.status)) return <NoAccess />;
     return <ProblemAlert problem={toProblem(query.error)} className="max-w-2xl" />;
   }
-  // Connected calendars are managed on Calendars, not here.
   if (query.data === null) return <NoAccess />;
   if (!query.data || !me.data) return null;
   return <Detail loaded={query.data} mine={query.data.calendar.owner.id === me.data.user.id} reload={() => query.refetch().then((result) => result.data)} />;
@@ -75,14 +74,14 @@ function Detail({ loaded, mine, reload }: CalendarTabProps) {
   const { calendar } = loaded;
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const available = TABS.filter((tab) => atLeast(calendar.access, tab.min));
+  const available = TABS.filter((tab) => atLeast(calendar.access, tab.min) && (calendar.kind === 'hosted' || (tab.id !== 'settings' && tab.id !== 'links')));
   const active = available.find((tab) => tab.id === search.tab) ?? available[0];
 
   return (
     <div className="max-w-3xl">
       <p className="mbe-1 text-sm">
-        <Link to="/hosted" className="text-ink-2 hover:underline">
-          Hosted
+        <Link to={calendar.kind === 'hosted' ? '/hosted' : '/calendars'} className="text-ink-2 hover:underline">
+          {calendar.kind === 'hosted' ? 'Hosted' : 'Calendars'}
         </Link>
       </p>
       <PageHeader title={calendar.name} />
@@ -111,7 +110,7 @@ function Detail({ loaded, mine, reload }: CalendarTabProps) {
   );
 }
 
-function DeletedNotice({ calendar, mine }: { calendar: HostedCalendar; mine: boolean }) {
+function DeletedNotice({ calendar, mine }: { calendar: Calendar; mine: boolean }) {
   const { restore, isPending } = useRestoreCalendar();
   return (
     <div role="status" className="mbe-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-soft px-3.5 py-2.5 text-sm text-warning">

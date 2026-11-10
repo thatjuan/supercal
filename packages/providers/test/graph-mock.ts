@@ -17,6 +17,7 @@ type Json = Record<string, unknown>;
 /** Credentials for `subject` whose access token is valid for an hour (or already expired). */
 export const microsoftCredentials = (subject = 'tid-1:oid-1', { expired = false } = {}): MicrosoftCredentials => ({
   provider: 'microsoft',
+  scopes: ['openid', 'email', 'offline_access', 'Calendars.ReadWrite', 'User.Read'],
   subject,
   email: 'ann@example.test',
   accessToken: 'access-1',
@@ -38,7 +39,16 @@ export function mockGraph({ pageSize = 100 }: { pageSize?: number } = {}) {
     token: (_form: URLSearchParams): Response => Response.json({ access_token: 'access-refreshed', expires_in: 3600, refresh_token: 'refresh-rotated' }),
   };
 
-  const find = (id: string) => [...events.values()].map((m) => m.get(id)).find(Boolean);
+  const find = (id: string): Json | undefined => {
+    for (const calendar of events.values()) for (const event of calendar.values()) {
+      if (event.id === id) return event;
+      const exceptions = event.exceptionOccurrences;
+      if (Array.isArray(exceptions)) { const found = exceptions.find((e: Json) => e.id === id); if (found) return found; }
+      const slot = instances.get(String(event.id))?.find((i) => i.id === id);
+      if (slot) return { ...event, id, changeKey: `instance-${id}`, type: 'occurrence', seriesMasterId: event.id, originalStart: slot.originalStart, recurrence: null, start: { dateTime: slot.originalStart.replace(/Z$/, ''), timeZone: 'UTC' }, end: { dateTime: new Date(Date.parse(slot.originalStart) + 3600000).toISOString().slice(0, 19), timeZone: 'UTC' } };
+    }
+    return undefined;
+  };
 
   /** One page of `items` starting at `$skip`, with a nextLink when more remain. */
   function paged(url: URL, items: unknown[]): Response {
@@ -53,6 +63,19 @@ export function mockGraph({ pageSize = 100 }: { pageSize?: number } = {}) {
     if (req.path === '/v1.0/me/calendars') return paged(url, calendars);
     let match = req.path.match(/^\/v1\.0\/me\/calendars\/([^/]+)\/events$/);
     if (match) {
+      const calendarId = decodeURIComponent(match[1] ?? '');
+      if (req.method === 'POST') {
+        if (calendars.find((c) => c.id === calendarId)?.canEdit === false) return Response.json({ error: { code: 'ErrorAccessDenied' } }, { status: 403 });
+        const body: Json = JSON.parse(req.body);
+        const calendar = events.get(calendarId) ?? new Map<string, Json>();
+        events.set(calendarId, calendar);
+        const previous = [...calendar.values()].find((e) => e.transactionId === body.transactionId);
+        if (previous) return Response.json(previous);
+        const id = `created-${++created}`;
+        const event = { ...body, id, changeKey: `key-${created}`, iCalUId: `${id}@outlook.test`, originalStartTimeZone: (body.start as { timeZone: string }).timeZone, type: body.recurrence ? 'seriesMaster' : 'singleInstance', exceptionOccurrences: [], cancelledOccurrences: [] };
+        calendar.set(id, event);
+        return Response.json(event, { status: 201 });
+      }
       const items = [...(events.get(decodeURIComponent(match[1] ?? '')) ?? new Map<string, Json>()).values()];
       return paged(url, items.map(({ id, changeKey, type, seriesMasterId }) => ({ id, changeKey, type, seriesMasterId: seriesMasterId ?? null })));
     }
@@ -61,7 +84,25 @@ export function mockGraph({ pageSize = 100 }: { pageSize?: number } = {}) {
     match = req.path.match(/^\/v1\.0\/me\/events\/([^/]+)$/);
     if (match) {
       const event = find(decodeURIComponent(match[1] ?? ''));
-      return event ? Response.json(event) : Response.json({ error: { code: 'ErrorItemNotFound' } }, { status: 404 });
+      if (!event) return Response.json({ error: { code: 'ErrorItemNotFound' } }, { status: 404 });
+      if (req.method === 'GET') return Response.json(event);
+      if (req.headers.get('if-match') !== `W/"${event.changeKey}"`) return Response.json({ error: { code: 'ErrorIrresolvableConflict' } }, { status: 412 });
+      const master = event.seriesMasterId ? find(String(event.seriesMasterId)) : undefined;
+      if (req.method === 'DELETE') {
+        if (master) {
+          master.cancelledOccurrences = [...(master.cancelledOccurrences as string[] ?? []), event.id];
+          master.exceptionOccurrences = (master.exceptionOccurrences as Json[] ?? []).filter((e) => e.id !== event.id);
+          master.changeKey = `key-${++created}`;
+        } else for (const calendar of events.values()) calendar.delete(String(event.id));
+        return new Response(null, { status: 204 });
+      }
+      Object.assign(event, JSON.parse(req.body), { changeKey: `key-${++created}` });
+      if (master) {
+        event.type = 'exception';
+        master.exceptionOccurrences = [...(master.exceptionOccurrences as Json[] ?? []).filter((e) => e.id !== event.id), event];
+        master.changeKey = `key-${++created}`;
+      }
+      return Response.json(event);
     }
     if (req.path === '/v1.0/subscriptions' && req.method === 'POST') {
       const subscription = { ...(JSON.parse(req.body) as Json), id: `sub-${++created}` };

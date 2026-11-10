@@ -5,7 +5,7 @@ import { client } from '../../api.ts';
 import { buttonClass, Button } from '../ui/button.tsx';
 import { Panel } from '../ui/panel.tsx';
 import { ProblemAlert, toProblem } from '../ui/problem-alert.tsx';
-import { atLeast, type HostedCalendar } from './data.ts';
+import { atLeast, type Calendar } from './data.ts';
 
 type OnConflict = NonNullable<NonNullable<operations['importCalendar']['parameters']['query']>['onConflict']>;
 type ImportResult = operations['importCalendar']['responses'][200]['content']['application/json'];
@@ -13,7 +13,7 @@ type ImportResult = operations['importCalendar']['responses'][200]['content']['a
 /** The same limit as the server's 413, so a too-large file fails before it is uploaded. */
 export const MAX_IMPORT_BYTES = 8 * 1024 * 1024;
 
-export function ImportExport({ calendar }: { calendar: HostedCalendar }) {
+export function ImportExport({ calendar }: { calendar: Calendar }) {
   const canImport = atLeast(calendar.access, 'write') && calendar.state === 'active';
   return (
     <Panel title="Import and export" description="Move events in and out as an iCalendar (.ics) file.">

@@ -13,6 +13,7 @@ type Collection = {
   name: string;
   color?: string;
   components: string[];
+  privileges: string[];
   reports: string[];
   objects: Map<string, { etag: string; data: string }>;
   /** Paths by the version that last changed them. */
@@ -40,11 +41,12 @@ export class DavFixture {
   version = 1;
   /** Every request, as `METHOD path [report]`. */
   readonly requests: string[] = [];
+  readonly wire: { method: string; path: string; headers: Headers; body: string }[] = [];
   /** Knobs: answer every request with this status; omit ctags; truncate sync answers after N entries; drop these paths from multigets. */
-  readonly quirks: { status?: number; challenge?: string; noCtag?: boolean; truncateAfter?: number; dropFromMultiget?: Set<string>; syncStatus?: number; malformed?: boolean } = {};
+  readonly quirks: { status?: number; challenge?: string; noCtag?: boolean; truncateAfter?: number; dropFromMultiget?: Set<string>; syncStatus?: number; malformed?: boolean; rewrite?: (body: string) => string; noPutEtag?: boolean; writeStatus?: number } = {};
 
-  collection(path: string, { name = path, color, components = ['VEVENT'], sync = true }: { name?: string; color?: string; components?: string[]; sync?: boolean } = {}): this {
-    this.collections.set(path, { name, ...(color && { color }), components, reports: sync ? ['sync-collection', 'calendar-multiget'] : ['calendar-multiget'], objects: new Map(), log: [] });
+  collection(path: string, { name = path, color, components = ['VEVENT'], sync = true, privileges = ['write'] }: { name?: string; color?: string; components?: string[]; sync?: boolean; privileges?: string[] } = {}): this {
+    this.collections.set(path, { name, ...(color && { color }), components, privileges, reports: sync ? ['sync-collection', 'calendar-multiget'] : ['calendar-multiget'], objects: new Map(), log: [] });
     return this;
   }
 
@@ -69,12 +71,28 @@ export class DavFixture {
     return this;
   }
 
-  handle(method: string, url: URL, depth: string | null, body: string): DavReply {
+  handle(method: string, url: URL, depth: string | null, body: string, headers = new Headers()): DavReply {
+    this.wire.push({ method, path: url.pathname, headers, body });
     const report = /<[\w:]*(sync-collection|calendar-multiget|calendar-query)\b/.exec(body)?.[1];
     this.requests.push([method, url.pathname, report].filter(Boolean).join(' '));
     if (this.quirks.status) return { status: this.quirks.status, body: 'no', headers: this.quirks.challenge ? { 'www-authenticate': this.quirks.challenge } : {} };
     if (this.quirks.malformed) return xml('<d:multistatus xmlns:d="DAV:"><d:response><d:href>');
     const path = url.pathname;
+    if (['GET', 'PUT', 'DELETE'].includes(method)) {
+      if (this.quirks.writeStatus) return { status: this.quirks.writeStatus, body: 'write refused' };
+      const [, collection] = this.of(path);
+      const object = collection.objects.get(path);
+      if (method === 'GET') return object ? { status: 200, body: object.data, headers: { etag: object.etag } } : { status: 404, body: '' };
+      if ((headers.has('if-match') && headers.get('if-match') !== object?.etag) || (headers.get('if-none-match') === '*' && object)) return { status: 412, body: '' };
+      if (method === 'DELETE') {
+        if (!object) return { status: 404, body: '' };
+        this.remove(path);
+        return { status: 204, body: '' };
+      }
+      this.put(path, this.quirks.rewrite?.(body) ?? body);
+      return { status: object ? 204 : 201, body: '', headers: this.quirks.noPutEtag ? {} : { etag: collection.objects.get(path)!.etag } };
+    }
+
 
     if (method === 'PROPFIND') {
       if (path === '/.well-known/caldav') return xml(multistatus([ok('/', '<d:current-user-principal><d:href>/u/</d:href></d:current-user-principal>')]));
@@ -89,6 +107,7 @@ export class DavFixture {
                 `<d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:displayname>${escape(c.name)}</d:displayname>${c.color ? `<ca:calendar-color>${c.color}</ca:calendar-color>` : ''}` +
                   `<c:calendar-timezone>BEGIN:VCALENDAR&#13;\nBEGIN:VTIMEZONE&#13;\nTZID:Europe/Berlin&#13;\nEND:VTIMEZONE&#13;\nEND:VCALENDAR</c:calendar-timezone>` +
                   `<c:supported-calendar-component-set>${c.components.map((n) => `<c:comp name="${n}"/>`).join('')}</c:supported-calendar-component-set>` +
+                  `<d:current-user-privilege-set>${c.privileges.map((p) => `<d:privilege><d:${p}/></d:privilege>`).join('')}</d:current-user-privilege-set>` +
                   `<d:supported-report-set>${c.reports.map((r) => `<d:supported-report><d:report><${r.startsWith('sync') ? 'd' : 'c'}:${r}/></d:report></d:supported-report>`).join('')}</d:supported-report-set>`,
               ),
             ),
@@ -140,7 +159,7 @@ export class DavFixture {
   asGuardedFetch(): GuardedFetch {
     return async (req) => {
       const url = new URL(req.url);
-      const reply = this.handle(req.method ?? 'GET', url, req.headers?.depth ?? null, req.body ?? '');
+      const reply = this.handle(req.method ?? 'GET', url, new Headers(req.headers).get('depth'), req.body ?? '', new Headers(req.headers));
       return { status: reply.status, headers: new Headers(reply.headers), body: new TextEncoder().encode(reply.body), finalUrl: url.href };
     };
   }
