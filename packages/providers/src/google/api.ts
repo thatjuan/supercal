@@ -5,9 +5,14 @@
  * contract. Google is a fixed host, so these use plain `fetch`, not the guarded transport.
  */
 import { z } from 'zod';
-import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type AdapterContext } from '../adapter.ts';
+import { AuthFailedError, ProviderConflictError, ProviderWriteRejectedError, ProviderThrottledError, ProviderUnavailableError, type AdapterContext } from '../adapter.ts';
 import type { GoogleCredentials } from '../credentials.ts';
 import { OAuthError, tokenRequest } from '../oauth.ts';
+
+export const GOOGLE_EVENTS_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
+/** Whether the account granted a Google scope, including granular consent. */
+export const hasScope = (ctx: AdapterContext, scope: string): boolean => ctx.credentials.provider === 'google' && ctx.credentials.scopes.includes(scope);
 
 export const GOOGLE_API = 'https://www.googleapis.com/calendar/v3';
 export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -115,14 +120,15 @@ export function createGoogleApi({ clientId, clientSecret, apiBase = GOOGLE_API, 
 
   /**
    * Calls `path` (relative to the API base) and parses the JSON answer with `schema`. A 401 refreshes
-   * the token and retries once; throttling becomes `ProviderThrottledError`, missing scopes
-   * `AuthFailedError`, and any other failure a `GoogleHttpError`.
+   * the token and retries once; throttling becomes `ProviderThrottledError`. Write callers use
+   * `forbidden: 'reject'` for object refusals and `headers` for If-Match: only refresh authentication
+   * failures can park their account. Read callers retain the missing-scope authentication error.
    */
   async function call<S extends z.ZodType>(
     ctx: AdapterContext,
     schema: S,
     path: string,
-    { method = 'GET', query, body }: { method?: string; query?: Record<string, string>; body?: unknown } = {},
+    { method = 'GET', query, body, headers, forbidden = 'auth' }: { method?: string; query?: Record<string, string>; body?: unknown; headers?: Record<string, string>; forbidden?: 'auth' | 'reject' } = {},
   ): Promise<z.infer<S>> {
     const url = new URL(apiBase + path);
     for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value);
@@ -132,17 +138,26 @@ export function createGoogleApi({ clientId, clientSecret, apiBase = GOOGLE_API, 
       const token = await accessToken(ctx, attempt > 0);
       const res = await fetch(url, {
         method,
-        headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(body !== undefined && { 'content-type': 'application/json' }) },
+        headers: { ...headers, authorization: `Bearer ${token}`, accept: 'application/json', ...(body !== undefined && { 'content-type': 'application/json' }) },
         ...(body !== undefined && { body: JSON.stringify(body) }),
         signal: ctx.signal,
       });
       if (res.ok) return schema.parse(res.status === 204 ? null : await res.json());
       if (res.status === 401 && attempt === 0) continue;
-      if (res.status === 401) throw new AuthFailedError('Google rejected the access token');
+      if (res.status === 401) throw forbidden === 'reject' ? new ProviderWriteRejectedError('read-only', 'Google rejected the access token') : new AuthFailedError('Google rejected the access token');
       if (res.status === 429) throw new ProviderThrottledError(retryAfterMs(res.headers.get('retry-after')), 'Google throttled the request');
+      if (res.status === 412) throw new ProviderConflictError('Google event ETag does not match');
+      if (forbidden === 'reject') {
+        if (res.status === 404 || res.status === 410) throw new ProviderWriteRejectedError('not-found', 'Google event no longer exists');
+        if (res.status === 400) {
+          const body = z.object({ error: z.object({ message: z.string() }) }).safeParse(await res.json().catch(() => null));
+          throw new ProviderWriteRejectedError('invalid-data', body.success ? body.data.error.message : 'Google rejected the event data');
+        }
+      }
       if (res.status === 403) {
         const reason = await errorReason(res);
         if (reason && RATE_LIMIT_REASONS.has(reason)) throw new ProviderThrottledError(retryAfterMs(res.headers.get('retry-after')), `Google throttled the request (${reason})`);
+        if (forbidden === 'reject') throw new ProviderWriteRejectedError('read-only', 'Google refused this event write');
         if (reason && PERMISSION_REASONS.has(reason)) throw new AuthFailedError('Supercal lacks the Google Calendar permissions it needs; reconnect and grant them');
       }
       throw new GoogleHttpError(res.status, `Google answered ${res.status} for ${method} ${url.pathname}`);

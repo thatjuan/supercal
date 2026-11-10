@@ -1,6 +1,6 @@
 /**
  * The Accounts screen's list: one row per account with its health, freshness and actions (Sync
- * now, Rename, Reconnect, Remove), and a detail drawer with the auto-publish toggle and its
+ * now, Rename, Reconnect, Allow editing, Remove), and a detail drawer with the auto-publish toggle and its
  * calendars. Reconnecting is the screen's: it differs per provider (`onReconnect`).
  */
 import { Dialog as Primitive } from 'radix-ui';
@@ -12,7 +12,7 @@ import { cx } from '../ui/cx.ts';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../ui/menu.tsx';
 import { Switch } from '../ui/switch.tsx';
 import { RemoveDialog, RenameDialog } from './account-dialogs.tsx';
-import { useUpdateAccount } from './data.ts';
+import { EDITING_CONSENT_PROVIDERS, useAllowEditing, useUpdateAccount } from './data.ts';
 import { accountFreshness, accountHealth, SYNC_COOLDOWN_MS, timeAgo, type Account, type Calendar } from './health.ts';
 import { PROVIDERS, ProviderMark } from './providers.tsx';
 import { StatusBadge, StatusMessage } from './status.tsx';
@@ -62,6 +62,7 @@ type RowProps = { account: Account; calendars: Calendar[]; onReconnect: (account
 
 export function AccountRow({ account, calendars, onReconnect }: RowProps) {
   const toast = useToast();
+  const editing = useAllowEditing((error) => toast({ tone: 'error', message: isProblem(error) ? (error.detail ?? error.title) : 'Supercal could not be reached' }));
   const now = useNow(1_000);
   const [syncRequestedAt, setSyncRequestedAt] = useState<number>();
   const [dialog, setDialog] = useState<'rename' | 'remove' | 'details' | null>(null);
@@ -99,6 +100,11 @@ export function AccountRow({ account, calendars, onReconnect }: RowProps) {
           <Button size="sm" disabled={coolingDown || account.status === 'disabled' || account.status === 'reauth_required'} onClick={() => sync.mutate({ params: { path: { id: account.id } } })}>
             {coolingDown ? `Sync again in ${Math.ceil((SYNC_COOLDOWN_MS - (now - (syncRequestedAt ?? now))) / 1000)} s` : 'Sync now'}
           </Button>
+          {!account.canWrite && EDITING_CONSENT_PROVIDERS.has(account.provider) && (
+            <Button size="sm" disabled={editing.isPending} onClick={() => editing.mutate({ params: { path: { id: account.id } }, body: { returnTo: '/accounts' } })}>
+              Allow editing
+            </Button>
+          )}
           <Menu>
             <MenuTrigger asChild>
               <Button size="sm" aria-label={`More actions for ${account.displayName}`} className="w-8 px-0">

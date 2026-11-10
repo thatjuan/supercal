@@ -42,10 +42,10 @@ import { accountContext, type SyncDeps } from '../sync/context.ts';
 import { wakeTargets } from '../sync/scheduler.ts';
 import { INITIAL_SINK_CURSOR, SINK_SCOPE, SinkCursor, type GoogleSinkClient } from './google.ts';
 
-/** 409 `needs-consent`: the account has not granted the sink scope yet; send the browser to `authorizationUrl`. */
+/** 409 `needs-consent`: the account needs an extra scope; send the browser to `authorizationUrl`. */
 export class NeedsConsent extends ProblemError {
-  constructor(readonly authorizationUrl: string) {
-    super(409, 'Mirroring needs permission to create a calendar in this Google account', undefined, 'needs-consent');
+  constructor(readonly authorizationUrl: string, detail = 'Mirroring needs permission to create a calendar in this Google account') {
+    super(409, detail, undefined, 'needs-consent');
   }
 
   override toProblem(instance: string): Problem & { authorizationUrl: string } {

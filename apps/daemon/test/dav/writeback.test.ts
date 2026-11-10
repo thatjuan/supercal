@@ -2,7 +2,7 @@
 import { calendarAccount, closeDb, connectDb, davObjectName, migrate, resource, sourceCalendar, sourceObject, syncTarget, withTenant } from '@supercal/db';
 import { scratchDatabase, sqlState, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { AuthFailedError, createGuardedFetch, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError } from '@supercal/providers';
+import { AuthFailedError, createGuardedFetch, ProviderConflictError, ProviderPartialWriteError, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError } from '@supercal/providers';
 import { createFakeAdapter, fakeEvent } from '@supercal/providers/test/fake';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq, sql } from 'drizzle-orm';
@@ -113,6 +113,22 @@ describe.skipIf(!testDatabaseUrl)('imported DAV write-through', () => {
     expect(await tombstone.text()).toContain(`<d:href>${path}client%20chosen.ics</d:href><d:status>HTTP/1.1 404`);
     expect(calls).toBe(4);
     expect((await target()).wakeGeneration).toBeGreaterThan(0);
+  });
+
+  test('a partial provider result is published before its cause returns to the device', async () => {
+    const { fake, account, calendar, request } = await setup();
+    const writes = fake.adapter.writes!;
+    const put = writes.put;
+    writes.put = async (...args) => {
+      const partial = await put(...args);
+      throw new ProviderPartialWriteError(partial, new ProviderConflictError('Later operation conflicted'));
+    };
+    expect((await request('PUT', 'partial.ics', body('partial-accepted'))).status).toBe(412);
+    const get = await request('GET', 'partial.ics');
+    expect(get.status).toBe(200);
+    expect(await get.text()).toContain('UID:partial-accepted');
+    expect((await unsafeDb().select().from(sourceObject).where(eq(sourceObject.sourceCalendarId, calendar.id)))[0]?.dirty).toBe(false);
+    expect((await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, account.id)))[0]?.status).toBe('active');
   });
 
   test('a snapshot started before create cannot sweep it or publish an unrelated partial group', async () => {

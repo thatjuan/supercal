@@ -4,3 +4,7 @@
  */
 export { createGoogleAdapter, SINK_CALENDAR_MARKER, type GoogleAdapterOptions, type GoogleCursor } from './adapter.ts';
 export { createGoogleApi, GOOGLE_API, GOOGLE_INVALID_GRANT_DETAIL, GOOGLE_TOKEN_URL, GoogleHttpError, type GoogleApi, type GoogleClientOptions } from './api.ts';
+
+export * from './write.ts';
+
+export { GOOGLE_EVENTS_WRITE_SCOPE, hasScope } from './api.ts';

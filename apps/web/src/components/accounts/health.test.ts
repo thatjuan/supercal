@@ -10,7 +10,7 @@ const account = (patch: Partial<Account> = {}): Account => ({
   serverUrl: 'https://dav.example/',
   status: 'active',
   statusDetail: null,
-  autoPublish: true,
+  autoPublish: true, canWrite: false,
   ...patch,
 });
 

@@ -39,8 +39,8 @@ const NewSink = z
   })
   .openapi('NewSink');
 
-const NeedsConsentProblem = Problem.extend({ authorizationUrl: z.url() }).openapi('NeedsConsentProblem', {
-  description: '`type` …/problems/needs-consent: send the browser to `authorizationUrl`, then create the sink again. Any other 409: the sink exists already',
+export const NeedsConsentProblem = Problem.extend({ authorizationUrl: z.url() }).openapi('NeedsConsentProblem', {
+  description: '`type` …/problems/needs-consent: send the browser to `authorizationUrl`, then retry the operation',
 });
 
 const json = <T extends z.ZodType>(description: string, schema: T) => ({ description, content: { 'application/json': { schema } } });

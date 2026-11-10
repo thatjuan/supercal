@@ -1,7 +1,7 @@
 /** Synchronous provider writes: check in a short transaction, call upstream, then apply its result. */
 import { normalizers, validateObject } from '@supercal/core';
 import { calendarAccount, davObjectName, recordChanges, sourceObject, syncTarget, withTenant, type SourceCalendarId } from '@supercal/db';
-import { AuthFailedError, ProviderConflictError, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError, type StoredObject, type WriteResult } from '@supercal/providers';
+import { AuthFailedError, ProviderConflictError, ProviderPartialWriteError, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError, type StoredObject, type WriteResult } from '@supercal/providers';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { audit, ProblemError } from '../api/kit/index.ts';
@@ -63,13 +63,15 @@ async function check(deps: WriteDeps, principal: Principal, calendarId: SourceCa
 type Checked = Awaited<ReturnType<typeof check>>;
 
 /** Translate provider outcomes without confusing one object's refusal with invalid account credentials. */
-async function providerWrite(deps: WriteDeps, checked: Checked, call: (ctx: Awaited<ReturnType<typeof accountContext>>) => Promise<WriteResult>) {
+async function providerWrite(deps: WriteDeps, checked: Checked, applyPartial: (result: WriteResult) => Promise<void>, call: (ctx: Awaited<ReturnType<typeof accountContext>>) => Promise<WriteResult>) {
   const signal = AbortSignal.timeout(20_000);
   try {
     const result = await call(await accountContext(deps, checked.account, signal));
     signal.throwIfAborted();
     return result;
-  } catch (error) {
+  } catch (caught) {
+    const error = caught instanceof ProviderPartialWriteError ? caught.cause : caught;
+    if (caught instanceof ProviderPartialWriteError) await applyPartial(caught.partial);
     if (error instanceof AuthFailedError) {
       await requireReauth(checked.account, error.message);
       throw new HostedWriteError('read-only', 'Account needs to reconnect');
@@ -116,7 +118,7 @@ export async function putImported(deps: WriteDeps, principal: Principal, calenda
   const validated = validateObject(input.ics);
   if (!validated.ok) throw new HostedWriteError(validated.code, validated.detail);
   const checked = await check(deps, principal, calendarId, input, validated.resource.uid);
-  const result = await providerWrite(deps, checked, (ctx) => checked.writes.put(ctx, checked.calendar, input.ics, checked.existing));
+  const result = await providerWrite(deps, checked, (partial) => apply(deps, principal, checked, input, partial, false), (ctx) => checked.writes.put(ctx, checked.calendar, input.ics, checked.existing));
   await apply(deps, principal, checked, input, result, false);
   return { created: checked.created };
 }
@@ -125,6 +127,6 @@ export async function putImported(deps: WriteDeps, principal: Principal, calenda
 export async function deleteImported(deps: WriteDeps, principal: Principal, calendarId: SourceCalendarId,
   input: { objectName: string; ifMatch?: string }): Promise<void> {
   const checked = await check(deps, principal, calendarId, input);
-  const result = await providerWrite(deps, checked, (ctx) => checked.writes.delete(ctx, checked.calendar, checked.existing));
+  const result = await providerWrite(deps, checked, (partial) => apply(deps, principal, checked, input, partial, false), (ctx) => checked.writes.delete(ctx, checked.calendar, checked.existing));
   await apply(deps, principal, checked, input, result, true);
 }

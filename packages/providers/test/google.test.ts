@@ -1,3 +1,4 @@
+import { z } from 'zod';
 /**
  * The Google adapter against a mocked Google: terminal-page pagination, the 410 reset, a failure on
  * page 2 that yields no cursor, sparse cancellations, throttling and token refresh. Ported from
@@ -8,6 +9,13 @@ import {
   AuthFailedError,
   createGoogleAdapter,
   GOOGLE_INVALID_GRANT_DETAIL,
+  GOOGLE_EVENTS_WRITE_SCOPE,
+  ProviderConflictError,
+  ProviderPartialWriteError,
+  ProviderWriteRejectedError,
+  createGoogleApi,
+  StoredGoogleEvent,
+  type StoredObject,
   ProviderThrottledError,
   ProviderUnavailableError,
   SINK_CALENDAR_MARKER,
@@ -16,7 +24,7 @@ import {
   type SyncEnd,
   type SyncPage,
 } from '../src/index.ts';
-import { googleCredentials, mockGoogle, type MockRequest } from './google-mock.ts';
+import { googleCredentials, mockGoogle, googleEventStore, type MockRequest } from './google-mock.ts';
 
 let mock: ReturnType<typeof mockGoogle> | undefined;
 afterEach(() => mock?.stop());
@@ -157,5 +165,92 @@ describe('Google adapter', () => {
     const error = await adapter.listCalendars(ctx).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(AuthFailedError);
     expect(error instanceof Error && error.message).toBe(GOOGLE_INVALID_GRANT_DETAIL);
+  });
+});
+
+/** Device-authored recurring group, optionally carrying a single moved occurrence. */
+const writeIcs = (summary = 'Master', withOverride = false) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:device@example.test', 'DTSTAMP:20261101T000000Z', 'DTSTART;VALUE=DATE:20261101', 'DTEND;VALUE=DATE:20261102', `SUMMARY:${summary}`, 'RRULE:FREQ=DAILY;COUNT=10', 'END:VEVENT', ...(withOverride ? ['BEGIN:VEVENT', 'UID:device@example.test', 'DTSTAMP:20261101T000000Z', 'RECURRENCE-ID;VALUE=DATE:20261103', 'DTSTART;VALUE=DATE:20261104', 'DTEND;VALUE=DATE:20261105', 'SUMMARY:Moved', 'END:VEVENT'] : []), 'END:VCALENDAR', ''].join('\r\n');
+
+/** Mock-backed write setup with granular-consent credentials. */
+function writeSetup() {
+  const store = googleEventStore();
+  const credentials = { ...googleCredentials(), scopes: [GOOGLE_EVENTS_WRITE_SCOPE] };
+  return { ...setup((req) => store.handle(req) ?? new Response(null, { status: 404 }), credentials), store };
+}
+
+/** Keep the full returned payload, just as the daemon stores it. */
+function asStored(objects: Awaited<ReturnType<NonNullable<ReturnType<typeof createGoogleAdapter>['writes']>['put']>>['upserts']): StoredObject[] {
+  return objects.map((object) => {
+    if (object.payload === null) throw new Error('write returned a touch');
+    return { id: object.id, etag: object.etag, payload: object.payload, ...(object.originalStart && { originalStart: object.originalStart }) };
+  });
+}
+
+describe('Google writes', () => {
+  test('owner/writer calendars require the write scope; readers stay read-only', async () => {
+    const { adapter, ctx } = setup(() => Response.json({ items: ['owner', 'writer', 'reader'].map((accessRole) => ({ id: accessRole, accessRole })) }), { ...googleCredentials(), scopes: [GOOGLE_EVENTS_WRITE_SCOPE] });
+    expect((await adapter.listCalendars(ctx)).map((item) => item.capabilities.write)).toEqual([true, true, false]);
+    ctx.credentials = { ...googleCredentials(), scopes: ['https://www.googleapis.com/auth/calendar.events.readonly'] };
+    expect((await adapter.listCalendars(ctx)).map((item) => item.capabilities.write)).toEqual([false, false, false]);
+    await expect(adapter.writes!.put(ctx, calendar, writeIcs(), [])).rejects.toBeInstanceOf(ProviderWriteRejectedError);
+  });
+  test('imports the client UID, patches only changed fields, reuses sync grouping and deletes the whole series', async () => {
+    const { adapter, ctx, store, requests } = writeSetup();
+    const created = await adapter.writes!.put(ctx, calendar, writeIcs(), []);
+    const first = created.upserts[0]!;
+    const event = store.events.get(first.id)!;
+    expect(event.iCalUID).toBe('device@example.test');
+    expect(requests[0]).toMatchObject({ method: 'POST', path: `${eventsPath}/import` });
+    store.events.set(first.id, StoredGoogleEvent.parse({ ...event, conferenceData: { entryPoints: [{ uri: 'https://meet.test' }] }, attachments: [{ fileId: 'file' }], colorId: '5', extendedProperties: { private: { keep: 'yes' } } }));
+    const enriched = { ...first, payload: z.json().parse(store.events.get(first.id)) };
+    const edited = await adapter.writes!.put(ctx, calendar, writeIcs('Edited', true), asStored([enriched]));
+    const patch = requests.find((req) => req.method === 'PATCH');
+    expect(JSON.parse(patch!.body)).toEqual({ summary: 'Edited' });
+    expect(patch?.headers.get('if-match')).toBe(first.etag);
+    expect(store.events.get(first.id)).toMatchObject({ colorId: '5', attachments: [{ fileId: 'file' }], extendedProperties: { private: { keep: 'yes' } } });
+    const sync = await collect(adapter.sync(ctx, calendar, null));
+    const page = sync[0];
+    if (page?.kind !== 'page') throw new Error('page');
+    for (const object of edited.upserts) expect(page.upserts).toContainEqual(object);
+    const existing = asStored(page.upserts);
+    expect(existing).toHaveLength(2);
+    expect((await adapter.writes!.put(ctx, calendar, writeIcs('Edited', true), existing)).upserts).toEqual([]);
+    const deleted = await adapter.writes!.delete(ctx, calendar, existing);
+    expect(deleted.deletes.sort()).toEqual(existing.map((o) => o.id).sort());
+    expect(store.events.size).toBe(0);
+  });
+  test('finds nonstandard instance ids through the bounded instances endpoint', async () => {
+    const { adapter, ctx, store, requests } = writeSetup();
+    const created = await adapter.writes!.put(ctx, calendar, writeIcs(), []);
+    const id = created.upserts[0]!.id;
+    store.instanceIds.set(`${id}_20261103`, 'alternate');
+    const edited = await adapter.writes!.put(ctx, calendar, writeIcs('Master', true), asStored(created.upserts));
+    expect(edited.upserts.at(-1)?.id).toBe('alternate');
+    const instances = requests.find((req) => req.path.endsWith('/instances'));
+    expect(instances?.query.get('timeMin')).toBe('2026-11-02T00:00:00Z');
+    expect(instances?.query.get('timeMax')).toBe('2026-11-04T00:00:00Z');
+    expect(requests.at(-1)?.headers.get('if-match')).toMatch(/^"instance-/);
+  });
+  test('412 midway stops the write and carries the master accepted earlier', async () => {
+    const { adapter, ctx, store } = writeSetup();
+    const created = await adapter.writes!.put(ctx, calendar, writeIcs('Master', true), []);
+    const existing = asStored(created.upserts);
+    const instance = existing.find((o) => o.originalStart)!;
+    store.events.set(instance.id, StoredGoogleEvent.parse({ ...store.events.get(instance.id), etag: '"concurrent"' }));
+    const error = await adapter.writes!.put(ctx, calendar, writeIcs('Changed'), existing).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ProviderPartialWriteError);
+    if (!(error instanceof ProviderPartialWriteError)) throw error;
+    expect(error.cause).toBeInstanceOf(ProviderConflictError);
+    expect(error.partial.upserts).toHaveLength(1);
+    expect(error.partial.upserts[0]?.payload).toMatchObject({ summary: 'Changed' });
+    expect(store.events.get(instance.id)?.summary).toBe('Moved');
+  });
+  test.each([403, 400, 404, 410])('write HTTP %s rejects one object without failing authentication', async (status) => {
+    const { ctx } = setup(() => Response.json({ error: { message: 'Google detail', errors: [{ reason: 'insufficientPermissions' }] } }, { status }));
+    const api = createGoogleApi(mock!.options);
+    const error = await api.call(ctx, StoredGoogleEvent, '/test', { method: 'PATCH', forbidden: 'reject' }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ProviderWriteRejectedError);
+    expect(error).not.toBeInstanceOf(AuthFailedError);
+    if (status === 400) expect(error).toMatchObject({ reason: 'invalid-data', message: 'Google detail' });
   });
 });
