@@ -5,7 +5,7 @@ import { compileAllow, EgressBlockedError, type EgressPolicy, normalizeUrl, type
 export type GuardedRequest = {
   /** http(s) or webcal; webcal becomes https. */
   url: string;
-  method?: 'GET' | 'PROPFIND' | 'REPORT' | 'OPTIONS';
+  method?: 'GET' | 'PROPFIND' | 'REPORT' | 'OPTIONS' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
   body?: string;
   credentials?: { kind: 'basic'; username: string; password: string } | { kind: 'bearer'; token: string };
@@ -35,7 +35,7 @@ export type GuardedFetchOptions = {
 const MiB = 1024 * 1024;
 const PROXY_VARIABLES = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']);
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
-const ORIGIN_BOUND_HEADERS = ['authorization', 'cookie', 'if-none-match', 'if-modified-since'];
+const ORIGIN_BOUND_HEADERS = ['authorization', 'cookie', 'if-match', 'if-none-match', 'if-modified-since'];
 const DECODERS = { gzip: gunzipSync, deflate: inflateSync, br: brotliDecompressSync };
 
 const isDecodable = (encoding: string): encoding is keyof typeof DECODERS => Object.hasOwn(DECODERS, encoding);
@@ -110,6 +110,7 @@ export function createGuardedFetch(policy: EgressPolicy, { resolve = systemResol
       if (current.protocol === 'https:' && next.protocol !== 'https:') throw new EgressBlockedError('downgrade', `HTTPS downgrade from ${current.host}`);
       if (response.status === 303 && method !== 'GET') throw new Error(`Unexpected method-changing redirect from ${current.host}`);
       if (next.origin !== current.origin && !credentialTarget(next, credentialOrigins, credentialHosts)) {
+        if (method === 'PUT' || method === 'DELETE') throw new Error(`Refused a write redirect outside the account's credential origins from ${current.host}`);
         for (const key of ORIGIN_BOUND_HEADERS) headers.delete(key);
       }
       current = next;

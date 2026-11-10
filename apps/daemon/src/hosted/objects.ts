@@ -6,18 +6,20 @@ import { normalizeDirtyGroups, upsertOf } from '../sync/changes.ts';
 
 export const HOSTED_WRITE_LOCK = 1937011298;
 export const MAX_OBJECTS_PER_CALENDAR = 50_000;
-export type HostedWriteCode = ObjectRejection | 'uid-conflict' | 'quota' | 'precondition-failed' | 'not-found';
+/** Rejections shared by hosted writes and provider write-through, mapped by DAV and REST. */
+export type HostedWriteCode = ObjectRejection | 'uid-conflict' | 'quota' | 'precondition-failed' | 'not-found' | 'read-only' | 'provider-unavailable';
+/** A protocol-safe write rejection; unavailable providers may supply a retry hint in milliseconds. */
 export class HostedWriteError extends Error {
-  constructor(readonly code: HostedWriteCode, detail: string, readonly conflictObjectName?: string) { super(detail); }
+  constructor(readonly code: HostedWriteCode, detail: string, readonly conflictObjectName?: string, readonly retryAfterMs?: number) { super(detail); }
 }
 
 /** Calendar locks always precede recordChanges' tenant lock. */
-export async function lockHostedCalendar(tx: TenantTx, calendarId: SourceCalendarId): Promise<void> {
+export async function lockCalendarWrites(tx: TenantTx, calendarId: SourceCalendarId): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(${HOSTED_WRITE_LOCK}, hashtext(${calendarId}))`);
 }
 
 export async function writeObject(tx: TenantTx, calendar: SourceCalendar, input: { objectName: string; payload: string; ifMatch?: string; ifNoneMatch?: '*' }): Promise<{ created: boolean; uid: string; etag: string }> {
-  await lockHostedCalendar(tx, calendar.id);
+  await lockCalendarWrites(tx, calendar.id);
   const validated = validateObject(input.payload);
   if (!validated.ok) throw new HostedWriteError(validated.code, validated.detail);
   const uid = validated.resource.uid;
@@ -49,7 +51,7 @@ export async function writeObject(tx: TenantTx, calendar: SourceCalendar, input:
 }
 
 export async function deleteObject(tx: TenantTx, calendar: SourceCalendar, input: { objectName: string; ifMatch?: string }): Promise<void> {
-  await lockHostedCalendar(tx, calendar.id);
+  await lockCalendarWrites(tx, calendar.id);
   const [row] = await tx.select({ object: sourceObject, revision: resource.revision }).from(sourceObject)
     .leftJoin(resource, and(eq(resource.sourceCalendarId, sourceObject.sourceCalendarId), eq(resource.uid, sourceObject.groupUid)))
     .where(and(eq(sourceObject.sourceCalendarId, calendar.id), eq(sourceObject.providerObjectId, input.objectName)));
@@ -61,7 +63,7 @@ export async function deleteObject(tx: TenantTx, calendar: SourceCalendar, input
 
 /** Rebuilds hosted data directly because it has no scheduler target. */
 export async function rebuildHostedCalendar(tx: TenantTx, calendarId: SourceCalendarId): Promise<void> {
-  await lockHostedCalendar(tx, calendarId);
+  await lockCalendarWrites(tx, calendarId);
   const [calendar] = await tx.select().from(sourceCalendar).where(eq(sourceCalendar.id, calendarId));
   const normalizer = normalizers.ical;
   if (!calendar) return; // Retention may have purged it after maintenance selected it.

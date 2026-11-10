@@ -223,6 +223,9 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
     const rows = await unsafeDb().select().from(resource).where(eq(resource.sourceCalendarId, calendarId));
     for (const uid of ['null@test', 'surrogate@test']) expect(rows.find((r) => r.uid === uid)).toMatchObject({ completeness: 'incomplete', completenessReason: 'Object contains a string PostgreSQL cannot store' });
     expect(rows.find((r) => r.uid === 'honest@test')?.completeness).toBe('complete');
+    // A caught normalization failure must not leave the provider write guard stuck at 412.
+    const raw = await unsafeDb().select({ dirty: sourceObject.dirty }).from(sourceObject).where(eq(sourceObject.sourceCalendarId, calendarId));
+    expect(raw.every((row) => !row.dirty)).toBe(true);
   });
 
   test('a snapshot that no longer lists an object deletes it only at end', async () => {

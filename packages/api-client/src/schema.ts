@@ -928,6 +928,7 @@ export interface components {
             capabilities?: {
                 incremental: string;
                 push: boolean;
+                write: boolean;
             };
             /** @enum {string} */
             access: "free-busy" | "read" | "write" | "manage" | "owner";
@@ -974,6 +975,7 @@ export interface components {
             capabilities?: {
                 incremental: string;
                 push: boolean;
+                write: boolean;
             };
             /** @enum {string} */
             access: "free-busy" | "read" | "write" | "manage" | "owner";

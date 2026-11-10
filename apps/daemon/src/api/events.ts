@@ -10,7 +10,7 @@ import { stream } from 'hono/streaming';
 import { type Principal } from '../auth/principal.ts';
 import { requireAccess, type Access } from '../hosted/access.ts';
 import { readResources } from '../hosted/read.ts';
-import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
+import { deleteObject, HostedWriteError, lockCalendarWrites, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import { expandCalendarResources, Occurrence, occurrenceWindow } from './occurrences.ts';
 import { audit, BadRequest, createApiApp, Forbidden, ifMatchHeaders, NotFound, ProblemError, problemJson, problemResponses, requireIfMatch, typeId } from './kit/index.ts';
 
@@ -58,7 +58,8 @@ const hostedErrors = {
   'invalid-calendar-data': { status: 422, slug: 'invalid-calendar-data' }, 'unsupported-component': { status: 422, slug: 'unsupported-component' },
   'invalid-object': { status: 422, slug: 'invalid-object' }, 'too-large': { status: 413, slug: 'too-large' }, 'uid-conflict': { status: 409, slug: 'uid-conflict' },
   quota: { status: 409, slug: 'event-quota' }, 'precondition-failed': { status: 412, slug: 'precondition-failed' }, 'not-found': { status: 404, slug: 'not-found' },
-} satisfies Record<HostedWriteCode, { status: 404 | 409 | 412 | 413 | 422; slug: string }>;
+  'read-only': { status: 403, slug: 'read-only' }, 'provider-unavailable': { status: 503, slug: 'provider-unavailable' },
+} satisfies Record<HostedWriteCode, { status: 403 | 404 | 409 | 412 | 413 | 422 | 503; slug: string }>;
 function eventError(error: Error): ProblemError {
   if (error instanceof ProblemError) return error;
   if (error instanceof HostedWriteError) { const mapped = hostedErrors[error.code]; return new ProblemError(mapped.status, error.message, undefined, mapped.slug); }
@@ -68,7 +69,7 @@ function eventError(error: Error): ProblemError {
   throw error;
 }
 async function calendarOf(tx: TenantTx, principal: Principal, id: SourceCalendar['id'], write = false) {
-  if (write) await lockHostedCalendar(tx, id);
+  if (write) await lockCalendarWrites(tx, id);
   const { calendar, access } = await requireAccess(tx, principal, id, write ? 'write' : 'read');
   if (!write && calendar.state !== 'active' && access !== 'owner') throw new NotFound('No such calendar');
   const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));

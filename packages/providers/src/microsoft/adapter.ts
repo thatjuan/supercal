@@ -200,7 +200,7 @@ export function createMicrosoftAdapter(options: MicrosoftAdapterOptions): Provid
           name: calendar.name || calendar.id,
           color: calendar.hexColor || PALETTE[calendar.color ?? ''] || null,
           timezone: null,
-          capabilities: { incremental: 'reconcile', push: false },
+          capabilities: { incremental: 'reconcile', push: false, write: false },
         });
       }
       return calendars;

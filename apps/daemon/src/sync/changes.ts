@@ -46,11 +46,12 @@ export function upsertOf(calendar: SourceCalendar, uid: string, data: EventResou
   };
 }
 
-/** Rebuilds dirty UID groups, retaining last good data when normalization fails. */
-export async function normalizeDirtyGroups(tx: TenantTx, calendar: SourceCalendar, normalizer: Normalizer, log: Logger, { objectNames }: { objectNames: boolean }): Promise<ResourceChange[]> {
+/** Rebuild dirty groups and orphan deletes, optionally limited to `groups`; retain last good data on normalization failure. */
+export async function normalizeDirtyGroups(tx: TenantTx, calendar: SourceCalendar, normalizer: Normalizer, log: Logger, { objectNames, groups: onlyGroups }: { objectNames: boolean; groups?: string[] }): Promise<ResourceChange[]> {
+  if (onlyGroups?.length === 0) return [];
   const ofCalendar = eq(sourceObject.sourceCalendarId, calendar.id);
   const changes: ResourceChange[] = [];
-  const dirty = (await tx.selectDistinct({ groupUid: sourceObject.groupUid }).from(sourceObject).where(and(ofCalendar, eq(sourceObject.dirty, true)))).map((d) => d.groupUid);
+  const dirty = (await tx.selectDistinct({ groupUid: sourceObject.groupUid }).from(sourceObject).where(and(ofCalendar, eq(sourceObject.dirty, true), onlyGroups ? inArray(sourceObject.groupUid, onlyGroups) : undefined))).map((d) => d.groupUid);
   for (const groups of chunks(dirty)) {
     const objects = await tx.select().from(sourceObject).where(and(ofCalendar, inArray(sourceObject.groupUid, groups)));
     const stored = new Map(
@@ -74,6 +75,7 @@ export async function normalizeDirtyGroups(tx: TenantTx, calendar: SourceCalenda
         const last = stored.get(uid);
         change = last?.data && last.span ? upsertOf(calendar, uid, last.data, { incomplete: reason }, last.span) : null;
       }
+      if (change && !objectNames && before?.objectName) change.objectName = before.objectName;
       if (change && objectNames && members[0]) change.objectName = members[0].providerObjectId;
       if (change && (!before || before.deleted || before.revision !== change.revision || !before.span || !sameSpan(before.span, change.span))) changes.push(change);
     }
@@ -91,6 +93,7 @@ export async function normalizeDirtyGroups(tx: TenantTx, calendar: SourceCalenda
       and(
         eq(resource.sourceCalendarId, calendar.id),
         eq(resource.deleted, false),
+        onlyGroups ? inArray(resource.uid, onlyGroups) : undefined,
         notExists(tx.select({ one: sql`1` }).from(sourceObject).where(and(ofCalendar, eq(sourceObject.groupUid, resource.uid)))),
       ),
     );

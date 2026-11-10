@@ -556,11 +556,15 @@
               },
               "push": {
                 "type": "boolean"
+              },
+              "write": {
+                "type": "boolean"
               }
             },
             "required": [
               "incremental",
-              "push"
+              "push",
+              "write"
             ]
           },
           "access": {
@@ -712,11 +716,15 @@
               },
               "push": {
                 "type": "boolean"
+              },
+              "write": {
+                "type": "boolean"
               }
             },
             "required": [
               "incremental",
-              "push"
+              "push",
+              "write"
             ]
           },
           "access": {

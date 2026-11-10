@@ -100,7 +100,7 @@ export const icsAdapter: ProviderAdapter<IcsCursor> = {
         name: calendarProp(calendarProps, 'x-wr-calname') ?? calendarProp(calendarProps, 'name') ?? new URL(urlOf(ctx).replace(/^webcal:/i, 'https:')).host,
         color: normalizeColor(calendarProp(calendarProps, 'x-apple-calendar-color') ?? calendarProp(calendarProps, 'color')),
         timezone: timezone && validZone(timezone) ? timezone : null,
-        capabilities: { incremental: 'conditional-get', push: false },
+        capabilities: { incremental: 'conditional-get', push: false, write: false },
       },
     ];
   },

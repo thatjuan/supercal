@@ -40,7 +40,7 @@ function setup(credentials: ProviderCredentials = microsoftCredentials(), pageSi
 const calendar = (occurrences?: Record<string, Record<string, string>>): SourceCalendarRef => ({
   id: 'cal_1',
   providerCalendarId: 'cal-a',
-  capabilities: { incremental: 'reconcile', push: false },
+  capabilities: { incremental: 'reconcile', push: false, write: false },
   ...(occurrences && { occurrences: async (masterId: string) => new Map(Object.entries(occurrences[masterId] ?? {})) }),
 });
 

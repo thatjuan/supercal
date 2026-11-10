@@ -1,7 +1,7 @@
 /**
  * The provider adapter contract (architecture §8). An adapter only talks to its provider: it lists
- * calendars and yields raw pages, and the daemon's sync runner owns every database write, the
- * normalisation and the cursor. Adapters register themselves in `registry`.
+ * calendars, yields raw pages and optionally writes UID groups. The daemon owns persistence,
+ * normalisation and cursors. Adapters register themselves in `registry`.
  *
  *   for await (const item of adapter.sync(ctx, calendar, cursor)) …   // page, page, …, end
  */
@@ -24,6 +24,12 @@ export type RawObject = {
   /** iCalendar text (`ical`) or provider JSON (`google`, `graph`). */
   payload: string | JsonValue | null;
 };
+
+/** A stored raw object of the UID group being written, as the sync runner stored it. */
+export type StoredObject = { id: ProviderObjectId; etag: string; payload: string | JsonValue; originalStart?: string };
+
+/** What the provider holds after a write, in the same shape a sync page has. */
+export type WriteResult = { upserts: RawObject[]; deletes: ProviderObjectId[] };
 
 /**
  * A recurrence instance's id and original start, for providers whose cancellations name only the
@@ -108,6 +114,16 @@ export interface ProviderAdapter<Cursor> {
    * validate it (it is versioned JSON) and start a snapshot when it is unusable.
    */
   sync(ctx: AdapterContext, calendar: SourceCalendarRef, cursor: Cursor | null): AsyncIterable<SyncPage | SyncEnd<Cursor>>;
+  writes?: {
+    /**
+     * Makes the provider hold exactly `ics` (one VCALENDAR, one UID: a master and/or overrides).
+     * `existing` is the group's stored objects, empty for a create. Every request that changes
+     * an existing object is conditional on its stored etag.
+     */
+    put(ctx: AdapterContext, calendar: SourceCalendarRef, ics: string, existing: StoredObject[]): Promise<WriteResult>;
+    /** Deletes the whole UID group, conditional on the stored etags. */
+    delete(ctx: AdapterContext, calendar: SourceCalendarRef, existing: StoredObject[]): Promise<WriteResult>;
+  };
   /**
    * Push subscriptions. `renew` may return a new subscription (Google: a new channel) or extend
    * the old one (Graph); the daemon stores the result before tearing down a replaced lease.
@@ -144,3 +160,11 @@ export type AdapterRegistry = { readonly [P in Provider]?: ProviderAdapter<unkno
 
 /** Every adapter, by provider. The provider issues register theirs here. */
 export const registry: AdapterRegistry = {};
+
+/** The provider's copy changed since we stored it; the client must refetch. */
+export class ProviderConflictError extends Error {}
+
+/** A refusal for this object, without affecting the account's authentication status. */
+export class ProviderWriteRejectedError extends Error {
+  constructor(readonly reason: 'read-only' | 'invalid-data' | 'quota' | 'not-found', message: string) { super(message); }
+}

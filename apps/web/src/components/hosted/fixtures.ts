@@ -26,7 +26,7 @@ export const hosted = (id: string, overrides: Partial<HostedCalendar> = {}): Hos
   sortOrder: 0,
   updatedAt: '2026-11-08T00:00:00Z',
   goneAt: null,
-  capabilities: { incremental: 'hosted', push: false },
+  capabilities: { incremental: 'hosted', push: false, write: false },
   freshness: { lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false },
   publicationIds: [],
   ...overrides,

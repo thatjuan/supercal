@@ -78,7 +78,7 @@ export const credentialsContext = (account: Pick<CalendarAccount, 'id' | 'tenant
  * a newer master key) compare-and-swap on the ciphertext read here, so two workers refreshing one
  * token cannot clobber each other: the later write is dropped and the stored credentials win.
  */
-export async function accountContext(deps: SyncDeps, account: CalendarAccount, signal: AbortSignal): Promise<AdapterContext> {
+export async function accountContext(deps: Pick<SyncDeps, 'secrets' | 'fetch' | 'log'>, account: CalendarAccount, signal: AbortSignal): Promise<AdapterContext> {
   if (!account.credentials) throw new AuthFailedError('no credentials are stored for this account');
   const where = credentialsContext(account);
   const opened = await deps.secrets.decryptJson(ProviderCredentials, account.credentials, where);
@@ -128,7 +128,7 @@ export const accountTargets = (account: Pick<CalendarAccount, 'id'>) =>
   );
 
 /** `reauth_required`: parks the account's targets until reconnect, and marks its calendars stale. Published data stays. */
-async function requireReauth(account: CalendarAccount, detail: string) {
+export async function requireReauth(account: CalendarAccount, detail: string) {
   await withTenant(account.tenantId, async (tx) => {
     await transition(tx, account, 'reauth_required', detail, ['disabled']);
     await tx.update(syncTarget).set({ nextRunAt: sql`'infinity'::timestamptz` }).where(accountTargets(account));

@@ -28,7 +28,7 @@ const calendar = (lastSuccessAt: number | null, state: Calendar['state'] = 'acti
   color: null,
   timezone: null,
   state,
-  capabilities: { incremental: 'sync-token', push: false },
+  capabilities: { incremental: 'sync-token', push: false, write: false },
   freshness: { lastSuccessAt: lastSuccessAt === null ? null : new Date(lastSuccessAt).toISOString(), pushActive: false, expectedLatency: 900, stale: false },
   publicationIds: [],
 });

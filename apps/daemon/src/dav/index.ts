@@ -1,11 +1,14 @@
 /**
- * CalDAV for published feeds and hosted calendars. Credentials resolve through the control role;
- * each request then uses one tenant transaction. Shared handlers read CollectionView; only device
- * logins can enter the hosted write path. Listings fetch metadata without rendering payloads.
+ * CalDAV for published feeds, hosted calendars and writable imported calendars. Credentials resolve through the control role;
+ * handlers use a short tenant transaction and defer provider writes until it commits. Shared
+ * handlers read CollectionView; only device logins can enter a write path. Listings fetch metadata
+ * without rendering payloads.
  */
 import { assertIanaZone, freeBusy, freeBusyWindowProblem, MAX_OBJECT_BYTES, propertyLine, vtimezoneFor, type JCalComponent } from '@supercal/core';
 import { Temporal } from '@js-temporal/polyfill';
 import { sourceCalendar, sourceObject, resourcesIn, withTenant, type SecretBox, type TenantTx } from '@supercal/db';
+import { createGuardedFetch, registry, type AdapterRegistry, type GuardedFetch } from '@supercal/providers';
+import { deleteImported, putImported } from '../writeback/index.ts';
 import { Hono, type Context } from 'hono';
 import { clientIp } from '../client-ip.ts';
 import { bodyLimit } from 'hono/body-limit';
@@ -15,7 +18,7 @@ import { requireAccess, atLeast } from '../hosted/access.ts';
 import { membership, type Principal } from '../auth/principal.ts';
 import { createFeedService } from '../feeds/service.ts';
 import { createCalendar, deleteCalendar, getOrCreateHostedAccount } from '../hosted/calendars.ts';
-import { deleteObject, HostedWriteError, lockHostedCalendar, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
+import { deleteObject, HostedWriteError, lockCalendarWrites, writeObject, type HostedWriteCode } from '../hosted/objects.ts';
 import type { Bus } from '../bus.ts';
 import { createLogger } from '../log.ts';
 import { createFeedAuth } from './auth.ts';
@@ -27,6 +30,8 @@ const log = createLogger({ component: 'dav' });
 
 export type DavDeps = {
   secrets: SecretBox;
+  adapters?: AdapterRegistry;
+  fetch?: GuardedFetch;
   clientIpHeader?: string | undefined;
   /** Invalidates cached feed and device credentials across replicas. */
   bus: Pick<Bus, 'on'>;
@@ -116,6 +121,8 @@ const WRITE_ERRORS = {
   quota: { status: 507, condition: 'd:quota-not-exceeded' },
   'precondition-failed': { status: 412, condition: null },
   'not-found': { status: 404, condition: null },
+  'read-only': { status: 403, condition: 'd:need-privileges' },
+  'provider-unavailable': { status: 502, condition: null },
 } as const satisfies Record<HostedWriteCode, { status: number; condition: string | null }>;
 
 /** Calendar metadata uses VTIMEZONE, generated once per zone and year without loading events. */
@@ -131,6 +138,9 @@ function calendarTimezone(zone: string): string {
   timezoneCache.set(key, text);
   return text;
 }
+
+/** A provider write runs only after the authenticated handler transaction has committed. */
+export type DeferredResponse = { deferred: () => Promise<Response> };
 
 type Metadata = { name?: string; color?: string | null; sortOrder?: number; description?: string | null; timezone?: string };
 /** Validate the entire property instruction before any changes; PROPPATCH sets are atomic. */
@@ -163,15 +173,16 @@ function metadataProperties(body: XmlEl | undefined, creating: boolean) {
 }
 
 /** Builds the CalDAV routes. */
-export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) {
+export function createDav({ secrets, bus, publicUrl, clientIpHeader, adapters = registry, fetch = createGuardedFetch({ allow: [] }) }: DavDeps) {
   const feedAuth = createFeedAuth(loginByUsername);
   bus.on('feed-credentials-rotated', ({ feedId }) => feedAuth.forget(feedId));
   bus.on('dav-login-revoked', ({ loginId }) => feedAuth.forget(loginId));
   const feeds = createFeedService(secrets);
+  const writeDeps = { secrets, adapters, fetch, log };
   const tokenHost = publicUrl ? new URL(publicUrl).host : undefined;
 
-  /** Authenticates, opens the tenant transaction, resolves the path and runs `handle`. */
-  async function inLogin(c: Context, handle: (r: Request) => Promise<Response>): Promise<Response> {
+  /** Resolve the authenticated request in a tenant transaction, then run any deferred provider action. */
+  async function inLogin(c: Context, handle: (r: Request) => Promise<Response | DeferredResponse>): Promise<Response> {
     const result = await feedAuth.authenticate(c.req.header('Authorization'), clientIp(c, clientIpHeader));
     const unauthorized = () => c.body('authentication required', 401, { 'WWW-Authenticate': 'Basic realm="Supercal", charset="UTF-8"' });
     if (!result.ok)
@@ -204,7 +215,7 @@ export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) 
         email = account.ownerEmail;
       } else {
         principal = current ? { kind: 'user', via: 'davLogin', userId: login.userId, tenantId: login.tenantId, ...current } : null;
-        const account = principal && await loadUserAccount(tx, login.id, host, principal);
+        const account = principal && await loadUserAccount(tx, login.id, host, principal, adapters);
         if (!account || account.login.passwordHash !== login.passwordHash || account.login.userId !== login.userId) {
           feedAuth.forget(login.id);
           return unauthorized();
@@ -221,9 +232,11 @@ export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) 
       const path = `/dav/${username}/`;
       const dav: Account = { principal: path, home: `${path}cal/`, displayName, email, writable: principal !== null };
       return handle({ tx, principal, collections, dav, node, collectionPath: (view) => `${dav.home}${encodeURIComponent(view.segment)}/` });
-    }).catch((error: unknown) => {
+    }).then((result) => result instanceof Response ? result : result.deferred()).catch((error: unknown) => {
       if (error instanceof HostedWriteError) {
         const mapped = WRITE_ERRORS[error.code];
+        if (error.code === 'provider-unavailable') return new Response(null, { status: error.retryAfterMs !== undefined ? 503 : 502,
+          headers: error.retryAfterMs !== undefined ? { 'Retry-After': String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))) } : {} });
         if (!mapped.condition) return new Response(null, { status: mapped.status });
         const conflict = error.code === 'uid-conflict' && error.conflictObjectName ? `<d:href>${esc(c.req.path.slice(0, c.req.path.lastIndexOf('/') + 1) + encodeURIComponent(error.conflictObjectName))}</d:href>` : '';
         return new Response(xmlWriter().document('d:error', `<${mapped.condition}>${conflict}</${mapped.condition}>`), { status: mapped.status, headers: XML_HEADERS });
@@ -392,11 +405,11 @@ export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) 
     return c.req.method === 'HEAD' ? c.body(null, 200, headers) : c.body(object.ics, 200, headers);
   }
 
-  async function write(c: Context, r: Request): Promise<Response> {
+  async function write(c: Context, r: Request): Promise<Response | DeferredResponse> {
     const { node, tx, principal } = r;
     if (!principal) return davError(403, 'd:need-privileges');
     if (c.req.method === 'MKCALENDAR') {
-      if (node.kind === 'collection') return davError(403, 'd:resource-must-be-null');
+      if (node.kind === 'collection') return davError(403, node.view.kind === 'imported' ? 'd:need-privileges' : 'd:resource-must-be-null');
       if (node.kind !== 'missing-collection' || !c.req.path.endsWith('/')) return davError(403, 'd:need-privileges');
       if (node.segment.startsWith('cal_')) return davError(403, 'd:need-privileges');
       const raw = await c.req.text();
@@ -417,8 +430,27 @@ export function createDav({ secrets, bus, publicUrl, clientIpHeader }: DavDeps) 
     if (node.kind !== 'object' && node.kind !== 'collection') return davError(403, 'd:need-privileges');
     const calendar = node.view.calendar;
     if (!calendar || node.view.privileges === 'read') return davError(403, 'd:need-privileges');
+    if (node.view.kind === 'imported') {
+      if (node.kind !== 'object' || !node.name.endsWith('.ics') || node.name.includes('/') || Buffer.byteLength(node.name) > 255) return davError(403, 'd:need-privileges');
+      const ifMatch = c.req.header('If-Match');
+      const input = { objectName: node.name, ...(ifMatch !== undefined && { ifMatch }) };
+      if (c.req.method === 'PUT') {
+        if (c.req.header('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'text/calendar') return davError(403, 'cal:supported-calendar-data');
+        const ics = await c.req.text();
+        const ifNoneMatch = c.req.header('If-None-Match');
+        return { deferred: async () => {
+          const result = await putImported(writeDeps, principal, calendar.id, { ...input, ics, ...(ifNoneMatch === '*' && { ifNoneMatch: '*' }) });
+          return new Response(null, { status: result.created ? 201 : 204 });
+        } };
+      }
+      if (c.req.method === 'DELETE') return { deferred: async () => {
+        await deleteImported(writeDeps, principal, calendar.id, input);
+        return new Response(null, { status: 204 });
+      } };
+      return davError(403, 'd:need-privileges');
+    }
     // Recheck the grant after the write lock, including concurrent revocation and deletion.
-    await lockHostedCalendar(tx, calendar.id);
+    await lockCalendarWrites(tx, calendar.id);
     const { calendar: active, access } = await requireAccess(tx, principal, calendar.id, 'write');
     if (active.state !== 'active') return notFound();
     const ifMatch = c.req.header('If-Match');
