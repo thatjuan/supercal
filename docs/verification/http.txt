@@ -1,0 +1,55 @@
+GET /readyz: HTTP 200
+PROPFIND /dav/: HTTP 207
+PUT /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/http-event.ics: HTTP 201; ETag "6012f44056cca40d590ac4a50ade2e04ca2c8d4f6882ec10d60bc3f0ac89304a"
+GET /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/events/verify-http-001: HTTP 200; ETag "6012f44056cca40d590ac4a50ade2e04ca2c8d4f6882ec10d60bc3f0ac89304a"
+GET /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/http-event.ics: HTTP 200; ETag "6012f44056cca40d590ac4a50ade2e04ca2c8d4f6882ec10d60bc3f0ac89304a"
+ETAG: REST and CalDAV equal after DAV create: "6012f44056cca40d590ac4a50ade2e04ca2c8d4f6882ec10d60bc3f0ac89304a"
+PATCH /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/events/verify-http-001: HTTP 200; ETag "0f56d24c63476337f74c08a459c37ed2d07de61ceba7833ba974eb9342cfa932"
+GET /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/http-event.ics: HTTP 200; ETag "0f56d24c63476337f74c08a459c37ed2d07de61ceba7833ba974eb9342cfa932"
+X-PROPERTY: X-VERIFY-PROPERTY:survives retained after REST title PATCH
+PUT /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/http-event.ics: HTTP 412
+GET /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/http-event.ics: HTTP 200; ETag "0f56d24c63476337f74c08a459c37ed2d07de61ceba7833ba974eb9342cfa932"
+CONFLICT: stale DAV PUT rejected; REST changed and current ETag retained
+REPORT /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/: HTTP 200
+FREEBUSY: FREEBUSY;FBTYPE=BUSY:20261112T090000Z/20261112T100000Z
+POST /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/events: HTTP 201; ETag "766d90339b265f7dabf0c4bef9f84e3ed908b3f913effa61a7169ebb1534c3a5"
+POST /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/shares: HTTP 201; ETag W/"shr_01m6yb3020ecgtdr3gs6rqmpcj.1794167111738"
+PROPFIND /dav/<dav-user>/cal/: HTTP 207
+GET /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/events/verify-private: HTTP 200; ETag "766d90339b265f7dabf0c4bef9f84e3ed908b3f913effa61a7169ebb1534c3a5"
+READ SHARE HTTP: listed in recipient DAV home; private event title is Busy over REST
+POST /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/links: HTTP 201
+GET /ics/l/<redacted>.ics: HTTP 200; ETag W/"lnk.lnk_01m6yb30jqfr2rsq5sb1nmdhkt.0.4.1794167078736.1"
+full feed: CALSCALE;VALUE=UNKNOWN:GREGORIAN; METHOD;VALUE=UNKNOWN:PUBLISH; SUMMARY:REST changed; SUMMARY:Busy
+POST /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/links: HTTP 201
+GET /ics/l/<redacted>.ics: HTTP 200; ETag W/"lnk.lnk_01m6yb30vheekvct35z5v9db2x.0.4.1794167078736.1"
+busy-only feed: CALSCALE;VALUE=UNKNOWN:GREGORIAN; METHOD;VALUE=UNKNOWN:PUBLISH; SUMMARY:Busy; SUMMARY:Busy
+POST /api/v1/dav-logins: HTTP 201
+PROPFIND /dav/: HTTP 207
+DELETE /api/v1/dav-logins/dvl_01m6yb317ke4yacgbnazzcvmwr: HTTP 204
+PROPFIND /dav/: HTTP 401
+POST /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/links: HTTP 201
+GET /ics/l/<redacted>.ics: HTTP 200; ETag W/"lnk.lnk_01m6yb31q3era8sra3xf4fc78y.0.4.1794167078736.1"
+DELETE /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/links/lnk_01m6yb31q3era8sra3xf4fc78y: HTTP 204
+GET /ics/l/<redacted>.ics: HTTP 404
+REVOCATION: login 207 -> 401; published link 200 -> empty 404
+GET /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/shares: HTTP 200
+PATCH /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/shares/shr_01m6yb3020ecgtdr3gs6rqmpcj: HTTP 200; ETag W/"shr_01m6yb3020ecgtdr3gs6rqmpcj.1794167242590"
+PUT /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/recipient-event.ics: HTTP 201; ETag "ec890b353c57d264ed7956153b3300387c3981db0469ce8204992479625ed48a"
+GET /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/events/recipient-http: HTTP 200; ETag "ec890b353c57d264ed7956153b3300387c3981db0469ce8204992479625ed48a"
+PATCH /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/events/recipient-http: HTTP 200; ETag "b6a06c7f0dd0596ca7ba01ca2cece9e16b9eb169982fd7cc4be31637e84cae96"
+GET /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/recipient-event.ics: HTTP 200; ETag "b6a06c7f0dd0596ca7ba01ca2cece9e16b9eb169982fd7cc4be31637e84cae96"
+WRITE SHARE HTTP: recipient PUT -> owner REST; owner PATCH -> recipient DAV GET
+DELETE /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/shares/shr_01m6yb3020ecgtdr3gs6rqmpcj: HTTP 204
+PROPFIND /dav/<dav-user>/cal/: HTTP 207
+GET /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/recipient-event.ics: HTTP 404
+SHARE REMOVAL HTTP: absent from recipient home after revoke; old event href 404
+POST /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/shares: HTTP 201; ETag W/"shr_01m6yb70pnfr49vt4esfmp79va.1794167243468"
+PROPPATCH /dav/<dav-user>/cal/cal_01m6yb1ztnf24aqqf73pbcm6ze/: HTTP 207
+MKCALENDAR through public quick tunnel: HTTP 501, empty response; direct isolated-network origin: HTTP 201.
+GET /api/v1/calendars: HTTP 200
+DELETE /api/v1/calendars/cal_01m6yb70vyfkf9w74rxzhr1w26: HTTP 204
+GET /api/v1/calendars/cal_01m6yb70vyfkf9w74rxzhr1w26: HTTP 200; ETag W/"cal_01m6yb70vyfkf9w74rxzhr1w26.1794167597391"
+POST /api/v1/calendars/cal_01m6yb70vyfkf9w74rxzhr1w26/restore: HTTP 200; ETag W/"cal_01m6yb70vyfkf9w74rxzhr1w26.1794167597649"
+DELETE /api/v1/calendars/cal_01m6yb1ztnf24aqqf73pbcm6ze/links/lnk_01m6yb30jqfr2rsq5sb1nmdhkt: HTTP 204
+GET /ics/l/<redacted>.ics: HTTP 404
+Calendar REST DELETE -> gone; restore -> active.

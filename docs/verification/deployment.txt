@@ -1,0 +1,29 @@
+Public HTTPS readiness from verification worktree on Mac; URL redacted as <test instance>.
+{"status":"ready"}
+HTTPS HTTP 200; TLS verification 0
+supercal cd836a2029fb supercal:f9d5b3b Up 7 minutes
+supercal-verify-thunderbird 6a592c00f792 debian:13 Up 10 minutes
+supercal-verify ae209afd58b6 supercal-verify:f9d5b3b Up 10 minutes
+supercal-verify-tunnel 078cb80668da cloudflare/cloudflared:latest Up 10 minutes
+supercal-verify-postgres 19b56fa0b5d0 postgres:18 Up 10 minutes
+supercal-tunnel cd8bfd4392e8 cloudflare/cloudflared:latest Up 2 hours
+supercal-postgres 3165bf84d871 postgres:18 Up 2 hours (healthy)
+supercal-spike-radicale 046659622b2c tomsquest/docker-radicale Up 22 hours (healthy)
+supercal-spike-pg d4626456f3b9 postgres:18 Up 22 hours
+
+{"supercal-verify":{"IPAMConfig":null,"Links":null,"Aliases":null,"MacAddress":"be:dd:c2:bb:46:21","DriverOpts":null,"GwPriority":0,"NetworkID":"3fd51c0e4ce5da94784a6cf1d27acaf4daa71dd7dae16a311cabbdaabef717a8","EndpointID":"876058c8a17707a86b28444b518a4b0f37694624ff032ed67afdfe996e554104","Gateway":"192.168.224.1","IPAddress":"192.168.224.4","IPPrefixLen":20,"IPv6Gateway":"","GlobalIPv6Address":"","GlobalIPv6PrefixLen":0,"DNSNames":["supercal-verify","ae209afd58b6"]}} {}
+
+PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+supercal_owner|f|f
+supercal_app|f|f
+supercal_control|f|f
+supercal_runtime|f|f
+0
+
+Baseline at 19:42 UTC: supercal b89edf949cc9 supercal:1b07abd; supercal-postgres 3165bf84d871; supercal-tunnel cd8bfd4392e8.
+Later docker ps: live app container changed externally to cd836a2029fb supercal:f9d5b3b; database and tunnel IDs unchanged. No task command operated on the live containers; unchanged-live acceptance cannot be asserted.
+{"level":"info","msg":"email is off (RESEND_API_KEY and MAIL_FROM unset); invitation and reset links are shown in the dashboard instead","time":"2026-11-08T19:44:15.602Z"}
+
+After test-only schema-owner credential refresh and app recreation from the same image:
+{"status":"ready"}
+Final HTTPS HTTP 200; TLS verification 0
