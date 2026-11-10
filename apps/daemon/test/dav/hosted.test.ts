@@ -1,5 +1,5 @@
 import { MAX_OBJECT_BYTES } from '@supercal/core';
-import { apikey, apiKeyTenant, auditLog, closeDb, connectDb, davLogin, feed, member, migrate, organization, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
+import { apikey, apiKeyTenant, auditLog, closeDb, connectDb, davLogin, feed, member, migrate, organization, publication, resource, sourceCalendar, sourceObject, user, withControl, withTenant, type SourceCalendar, type TenantId } from '@supercal/db';
 import { scratchDatabase, sqlState, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -17,7 +17,7 @@ import { createCalendar } from '../../src/hosted/calendars.ts';
 import { testAuth, testSecrets } from '../auth-fixture.ts';
 import { eventIcs } from './fixture.ts';
 import { departureActors, basicCredentials } from '../departure-fixture.ts';
-import { DEVICE, seedHosted } from './hosted-fixture.ts';
+import { DEVICE, seedHosted, seedImported } from './hosted-fixture.ts';
 
 const principal: Principal = { kind: 'user', via: 'session', userId: DEVICE.userId, tenantId: DEVICE.tenantId, role: 'member', isOperator: false };
 let caller = principal;
@@ -66,6 +66,105 @@ describe.skipIf(!testDatabaseUrl)('hosted CalDAV', () => {
     const lookup = await withControl((tx) => tx.select({ id: davLogin.id, username: davLogin.username, passwordHash: davLogin.passwordHash }).from(davLogin).where(eq(davLogin.id, login.id)));
     expect(lookup[0]?.id).toBe(login.id);
     expect(await sqlState(withControl((tx) => tx.select({ name: davLogin.name }).from(davLogin)))).toBe('42501');
+  });
+
+  test('the device home lists enabled own Google calendars once with read-only privileges', async () => {
+    const imported = await seedImported();
+    const res = await request('PROPFIND', home, xml('d:propfind', '<d:prop><d:displayname/><d:current-user-privilege-set/></d:prop>'), { Depth: '1' });
+    expect(res.status).toBe(207);
+    const href = `<d:href>${home}${imported.calendar.id}/</d:href>`;
+    const entries = res.text.split('<d:response>').filter((entry) => entry.startsWith(href));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toContain('<d:displayname>Imported</d:displayname>');
+    expect(entries[0]).toContain('<d:current-user-privilege-set><d:privilege><d:read/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege></d:current-user-privilege-set>');
+    // Hosted calendars remain listed even though their default-feed publication starts disabled.
+    expect(res.text).toContain(`<d:href>${path}</d:href>`);
+    expect(res.text).not.toContain(`${home}${imported.calendar.providerCalendarId}/`);
+  });
+
+  test('the next home PROPFIND reflects enabled, disabled and re-enabled publication toggles', async () => {
+    const imported = await seedImported({ enabled: false });
+    const href = `<d:href>${home}${imported.calendar.id}/</d:href>`;
+    for (const enabled of [false, true, false, true]) {
+      const update = await call(`/publications/${imported.publication.id}`, 'PATCH', { enabled });
+      expect(update.status).toBe(200);
+      const res = await request('PROPFIND', home, undefined, { Depth: '1' });
+      expect(res.status).toBe(207);
+      expect(res.text.includes(href)).toBe(enabled);
+    }
+  });
+
+  test('device collections exclude virtual-only, unpublished, gone and non-default-feed calendars', async () => {
+    const virtualOnly = await seedImported({ enabled: false });
+    const unpublished = await seedImported();
+    const gone = await seedImported({ state: 'gone' });
+    const extra = await seedImported();
+    await withTenant(DEVICE.tenantId, async (tx) => {
+      const feeds = createFeedService(testSecrets);
+      const target = await feeds.getOrCreateDefaultFeed(tx, DEVICE.userId);
+      await tx.delete(publication).where(eq(publication.id, unpublished.publication.id));
+      await feeds.createPublication(tx, principal, target.id, { kind: 'virtual', name: 'Device merge',
+        sources: [{ calendarId: virtualOnly.calendar.id, priority: 0 }, { calendarId: unpublished.calendar.id, priority: 1 }] });
+      const other = await feeds.createFeed(tx, principal, 'Extra feed');
+      await tx.update(publication).set({ feedId: other.feed.id }).where(eq(publication.id, extra.publication.id));
+    });
+    const res = await request('PROPFIND', home, undefined, { Depth: '1' });
+    expect(res.status).toBe(207);
+    for (const imported of [virtualOnly, unpublished, gone, extra]) expect(res.text).not.toContain(`<d:href>${home}${imported.calendar.id}/</d:href>`);
+    expect(res.text).not.toContain(`${home}device-merge/`);
+  });
+
+  test('multiget and sync return full private event details despite busy-only privacy and feed filters', async () => {
+    const imported = await seedImported();
+    const collection = `${home}${imported.calendar.id}/`;
+    const listing = await request('REPORT', collection, sync());
+    expect(listing.status).toBe(207);
+    const hrefs = [...listing.text.matchAll(/<d:href>([^<]+\.ics)<\/d:href>/g)].map((match) => match[1]);
+    expect(hrefs).toHaveLength(1);
+    const multiget = xml('cal:calendar-multiget', `<d:prop><cal:calendar-data/></d:prop><d:href>${hrefs[0]}</d:href>`);
+    const syncWithData = sync().replace('<d:getetag/>', '<d:getetag/><cal:calendar-data/>');
+    for (const body of [multiget, syncWithData]) {
+      const res = await request('REPORT', collection, body);
+      expect(res.status).toBe(207);
+      for (const detail of [`UID:${imported.uid}`, 'CLASS:PRIVATE', 'SUMMARY:Private appointment', 'LOCATION:Secret place', 'DESCRIPTION:Confidential notes']) expect(res.text).toContain(detail);
+    }
+  });
+
+  test('PUT and DELETE on own imported collections and objects return need-privileges', async () => {
+    const imported = await seedImported();
+    const collection = `${home}${imported.calendar.id}/`;
+    const listing = await request('REPORT', collection, sync());
+    const href = /<d:href>([^<]+\.ics)<\/d:href>/.exec(listing.text)?.[1];
+    expect(href).toBeDefined();
+    for (const url of [collection, href!]) for (const method of ['PUT', 'DELETE']) {
+      const res = await request(method, url, method === 'PUT' ? ics(imported.uid, 'Attempted edit') : undefined);
+      expect(res.status).toBe(403);
+      expect(res.text).toContain('<d:need-privileges');
+    }
+    expect((await request('GET', href!)).text).toContain('SUMMARY:Private appointment');
+  });
+
+  test('colliding imported names get stable account email suffixes', async () => {
+    const first = await seedImported({ name: 'Holidays in Canada', email: 'first@example.test' });
+    const second = await seedImported({ name: 'Holidays in Canada', email: 'second@example.test', provider: 'microsoft' });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await request('PROPFIND', home, xml('d:propfind', '<d:prop><d:displayname/></d:prop>'), { Depth: '1' });
+      expect(res.status).toBe(207);
+      for (const imported of [first, second]) {
+        const entry = res.text.split('<d:response>').find((item) => item.startsWith(`<d:href>${home}${imported.calendar.id}/</d:href>`));
+        expect(entry).toContain(`<d:displayname>Holidays in Canada (${imported.account.email})</d:displayname>`);
+      }
+    }
+  });
+
+  test('imports colliding with hosted names use email when available and keep names without email', async () => {
+    const imported = await seedImported({ name: calendar.name });
+    const noEmail = await seedImported({ name: calendar.name, email: null, provider: 'ics' });
+    const res = await request('PROPFIND', home, xml('d:propfind', '<d:prop><d:displayname/></d:prop>'), { Depth: '1' });
+    for (const [url, name] of [[path, calendar.name], [`${home}${imported.calendar.id}/`, `${calendar.name} (${imported.account.email})`], [`${home}${noEmail.calendar.id}/`, calendar.name]]) {
+      const entry = res.text.split('<d:response>').find((item) => item.startsWith(`<d:href>${url}</d:href>`));
+      expect(entry).toContain(`<d:displayname>${name}</d:displayname>`);
+    }
   });
 
   test('PUT and GET preserve bytes and share one ETag with REST', async () => {
