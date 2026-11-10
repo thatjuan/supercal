@@ -34,8 +34,20 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
   One device login also lists connected calendars enabled on the Calendars page with full event
   details, alongside shared calendars. It can create, edit and delete events in your connected
-  Google, iCloud or CalDAV calendars when the provider allows it; shared connected calendars stay read-only.
+  Google, Microsoft, iCloud or CalDAV calendars when the provider allows it; shared connected calendars stay read-only.
   Google editing needs `calendar.events` consent and an owner or writer calendar role. Existing accounts can grant it with **Allow editing** on the Accounts page. Google events created from a device preserve the client's UID through `events.import`, which adds a private copy and does not send invitations to attendees. Editing the event later in Google sends invitations. This invitation behavior has not been verified with a live account.
+
+  Microsoft calendar editing requires `Calendars.ReadWrite` and Outlook's per-calendar edit permission.
+  Existing read-only accounts can grant it through **Allow editing** without reconnecting a different
+  account. Graph assigns its own UID on creation; the event stays at the device's chosen href, and a
+  refetch learns the new UID. Outlook sends attendee notifications when the organizer changes an
+  event with attendees, including cancellations; Graph has no switch to suppress them.
+
+  Microsoft recurrence editing is limited to Graph's daily, weekly, monthly and yearly patterns.
+  Multiple RRULEs, RDATEs, frequencies finer than daily, multiple BYMONTHDAY values, COUNT with
+  UNTIL, and BYSETPOS outside relative monthly/yearly patterns are refused before saving. Other
+  rules that cannot map exactly to Graph are refused as well.
+
   Edits go through to the provider immediately, and conflicts ask the calendar app to refetch. Feed privacy and filters do not apply to the
   owner's device login; hosted calendars stay listed even when their feed publication is disabled.
   The dashboard also shows each hosted calendar's events and creates, edits and deletes them,

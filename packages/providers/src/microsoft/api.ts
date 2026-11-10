@@ -6,7 +6,7 @@
  * host, so these use plain `fetch`, not the guarded transport.
  */
 import { z } from 'zod';
-import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type AdapterContext } from '../adapter.ts';
+import { AuthFailedError, ProviderConflictError, ProviderWriteRejectedError, ProviderThrottledError, ProviderUnavailableError, type AdapterContext } from '../adapter.ts';
 import type { MicrosoftCredentials } from '../credentials.ts';
 import { OAuthError, tokenRequest } from '../oauth.ts';
 
@@ -14,7 +14,7 @@ export const GRAPH_API = 'https://graph.microsoft.com/v1.0';
 /** The `common` authority: personal (Outlook.com) and work or school accounts. */
 export const MICROSOFT_AUTHORITY = 'https://login.microsoftonline.com/common/oauth2/v2.0';
 export const MICROSOFT_TOKEN_URL = `${MICROSOFT_AUTHORITY}/token`;
-export const MICROSOFT_SCOPES = ['openid', 'email', 'offline_access', 'https://graph.microsoft.com/Calendars.Read', 'https://graph.microsoft.com/User.Read'];
+export const MICROSOFT_SCOPES = ['openid', 'email', 'offline_access', 'https://graph.microsoft.com/Calendars.ReadWrite', 'https://graph.microsoft.com/User.Read'];
 
 /** Shown as the account's `status_detail` when Microsoft refuses the refresh token. */
 export const MICROSOFT_REAUTH_DETAIL = 'Microsoft rejected the refresh token, so the account needs to be reconnected.';
@@ -94,7 +94,7 @@ export function createGraphApi({ clientId, clientSecret, apiBase = GRAPH_API, to
     try {
       token = await tokenRequest(
         tokenUrl,
-        { grant_type: 'refresh_token', refresh_token: credentials.refreshToken, client_id: clientId, client_secret: clientSecret, scope: MICROSOFT_SCOPES.join(' ') },
+        { grant_type: 'refresh_token', refresh_token: credentials.refreshToken, client_id: clientId, client_secret: clientSecret, scope: (credentials.scopes ?? ['Calendars.Read', 'User.Read', 'offline_access']).join(' ') },
         ctx.signal,
       );
     } catch (error) {
@@ -126,13 +126,14 @@ export function createGraphApi({ clientId, clientSecret, apiBase = GRAPH_API, to
   /**
    * Calls `path` (relative to the API base, or an `@odata.nextLink` on the API's origin) and parses
    * the JSON answer with `schema`. A 401 refreshes the token and retries once; 429 and 503 become
-   * `ProviderThrottledError`, and any other failure a `GraphHttpError`.
+   * `ProviderThrottledError`. Event writes map object refusals and conflicts separately;
+   * other failures become `GraphHttpError`. Only a rejected refresh token requires reauthentication.
    */
   async function call<S extends z.ZodType>(
     ctx: AdapterContext,
     schema: S,
     path: string,
-    { method = 'GET', query, body }: { method?: string; query?: Record<string, string>; body?: unknown } = {},
+    { method = 'GET', query, body, ifMatch, write = false }: { method?: string; query?: Record<string, string>; body?: unknown; ifMatch?: string; write?: boolean } = {},
   ): Promise<z.infer<S>> {
     const url = new URL(path.startsWith('https://') || path.startsWith('http://') ? path : apiBase + path);
     // Never send the token anywhere but Graph, whatever a nextLink says.
@@ -144,33 +145,43 @@ export function createGraphApi({ clientId, clientSecret, apiBase = GRAPH_API, to
       const res = await slot(key, () =>
         fetch(url, {
           method,
-          headers: { authorization: `Bearer ${token}`, accept: 'application/json', prefer: PREFER, ...(body !== undefined && { 'content-type': 'application/json' }) },
+          headers: { authorization: `Bearer ${token}`, accept: 'application/json', prefer: PREFER, ...(ifMatch && { 'If-Match': `W/"${ifMatch}"` }), ...(body !== undefined && { 'content-type': 'application/json' }) },
           ...(body !== undefined && { body: JSON.stringify(body) }),
           signal: ctx.signal,
         }),
       );
       if (res.ok) return schema.parse(res.status === 204 ? null : await res.json());
-      await res.body?.cancel();
+      const failure = z.object({ error: z.object({ code: z.string().optional(), message: z.string().optional() }) }).safeParse(await res.json().catch(() => null));
+      const message = failure.success ? failure.data.error.message : undefined;
       if (res.status === 401 && attempt === 0) continue;
-      if (res.status === 401) throw new AuthFailedError('Microsoft rejected the access token');
+      if (res.status === 401) throw new ProviderUnavailableError('Microsoft rejected the refreshed access token');
       if (res.status === 429 || res.status === 503) throw new ProviderThrottledError(retryAfterMs(res.headers.get('retry-after')), `Graph throttled the request (${res.status})`);
+      if (write && res.status === 412) throw new ProviderConflictError(message ?? 'Graph event changed');
+      if (write && res.status === 403) throw new ProviderWriteRejectedError('read-only', message ?? 'Graph denied editing');
+      if (write && res.status === 404) throw new ProviderWriteRejectedError('not-found', message ?? 'Graph event no longer exists');
+      if (write && res.status === 400) throw new ProviderWriteRejectedError('invalid-data', message ?? 'Graph rejected the event');
       throw new GraphHttpError(res.status, `Graph answered ${res.status} for ${method} ${url.pathname}`);
     }
   }
 
   /** Every item of a paged collection, following `@odata.nextLink`. */
-  async function* list(ctx: AdapterContext, path: string, query?: Record<string, string>): AsyncGenerator<unknown> {
+  async function* list(ctx: AdapterContext, path: string, query?: Record<string, string>, write = false): AsyncGenerator<unknown> {
     const seen = new Set<string>();
-    let page = await call(ctx, Page, path, query ? { query } : {});
+    let page = await call(ctx, Page, path, { ...(query && { query }), write });
     for (;;) {
       yield* page.value;
       const next = page['@odata.nextLink'];
       if (!next) return;
       if (seen.has(next)) throw new ProviderUnavailableError('Graph repeated a nextLink');
       seen.add(next);
-      page = await call(ctx, Page, next);
+      page = await call(ctx, Page, next, { write });
     }
   }
 
   return { call, list, accessToken };
+}
+
+/** Graph grants may include their resource prefix. Legacy connections are read-only. */
+export function microsoftCanWrite(ctx: AdapterContext): boolean {
+  return microsoftCredentials(ctx).scopes?.some((scope) => scope.replace(/^https:\/\/graph\.microsoft\.com\//, '').toLowerCase() === 'calendars.readwrite') ?? false;
 }

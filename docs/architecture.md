@@ -306,7 +306,7 @@ CalDAV requests use the guarded session transport. Google uses its fixed-host AP
 its per-account token bucket with sync. Google write access requires `calendar.events` plus an
 `owner` or `writer` calendar role. Granular consent may grant only `calendar.events.readonly`;
 those accounts keep syncing read-only. `Account.canWrite` reports the account scope, independently
-of calendar roles. `POST /accounts/{id}/allow-editing` returns 409 `needs-consent` with a Google
+of calendar roles. `POST /accounts/{id}/allow-editing` returns 409 `needs-consent` with a Google or Microsoft
 incremental-consent URL, or 204 when already granted. Successful consent wakes discovery to
 refresh calendar capabilities.
 
@@ -322,7 +322,26 @@ live invitation behavior remains unverified.
 A multi-call provider failure carries accepted changes in `ProviderPartialWriteError.partial`.
 The write service applies that result through the same third step before mapping the underlying
 cause to the device response. The follow-up sync repairs any upstream state not returned by the
-failed request. Microsoft writes extend the same contract separately.
+failed request.
+
+Microsoft write access requires `Calendars.ReadWrite` (with or without the Graph resource prefix)
+and the calendar's `canEdit` flag. New connections request that scope; read-only grants continue
+syncing and refresh using only their held scopes. The shared Allow editing operation starts dynamic
+consent for the same Microsoft identity, then wakes discovery. Graph creates use a UUIDv5 of the
+client UID as `transactionId`; Graph assigns `iCalUId`. The apply step normalizes and names the
+returned UID, permits an identity change only on create, and checks for an existing UID conflict.
+
+Graph writes run the master first, occurrence patches next and occurrence deletes last. Recorded
+`graph_occurrence` rows resolve recurrence IDs, with a bounded instances lookup for unknown ids.
+Removing an exception patches the master's values back at its original start. Returned groups and
+occurrence records use the same fetch and cancellation resolution as sync. Every PATCH and DELETE
+sends `If-Match: W/"<changeKey>"`. Graph's event documentation does not guarantee enforcement, so a
+GET also compares the stored changeKey immediately before mutation; a short race remains between
+that GET and the mutation. Live enforcement and Outlook client behavior still need verification.
+
+The pure Graph converter refuses unrepresentable recurrences before making a request, retains an
+unchanged HTML body, and retries a rejected timed IANA zone once using UTC instants. Graph sends
+attendee notifications itself and offers no suppression parameter.
 
 ### Providers
 

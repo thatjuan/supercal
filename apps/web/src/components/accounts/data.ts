@@ -98,7 +98,7 @@ export function useOAuth(onProblem: (error: unknown) => void) {
 }
 
 /** Providers whose account-level editing consent is implemented by the API. */
-export const EDITING_CONSENT_PROVIDERS: ReadonlySet<Account['provider']> = new Set(['google']);
+export const EDITING_CONSENT_PROVIDERS: ReadonlySet<Account['provider']> = new Set(['google', 'microsoft']);
 
 /** Start incremental consent, or refresh the account when consent was already granted. */
 export function useAllowEditing(onProblem: (error: unknown) => void) {

@@ -29,7 +29,7 @@ export type RawObject = {
 export type StoredObject = { id: ProviderObjectId; etag: string; payload: string | JsonValue; originalStart?: string };
 
 /** What the provider holds after a write, in the same shape a sync page has. */
-export type WriteResult = { upserts: RawObject[]; deletes: ProviderObjectId[] };
+export type WriteResult = { upserts: RawObject[]; deletes: ProviderObjectId[]; occurrences?: OccurrenceRecord[] };
 
 /**
  * A recurrence instance's id and original start, for providers whose cancellations name only the

@@ -164,7 +164,7 @@ describe('RemoveDialog', () => {
 
 describe('Allow editing', () => {
   const account: Account = { id: 'acc_google', provider: 'google', ownerUserId: 'user_1', displayName: 'Work', email: 'me@example.test', serverUrl: null, status: 'active', statusDetail: null, autoPublish: true, canWrite: false };
-  test.each([['google', false, true], ['google', true, false], ['microsoft', false, false], ['ics', false, false], ['caldav', true, false]] as const)('renders only for supported accounts lacking consent: %s, canWrite=%s', (provider, canWrite, shown) => {
+  test.each([['google', false, true], ['google', true, false], ['microsoft', false, true], ['ics', false, false], ['caldav', true, false]] as const)('renders only for supported accounts lacking consent: %s, canWrite=%s', (provider, canWrite, shown) => {
     withQueries(<AccountRow account={{ ...account, provider, canWrite }} calendars={[]} onReconnect={() => {}} />);
     expect(Boolean(screen.queryByRole('button', { name: 'Allow editing' }))).toBe(shown);
   });

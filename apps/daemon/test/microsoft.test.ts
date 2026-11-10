@@ -4,7 +4,7 @@
  * cancellations resolved through `graph_occurrence`, incomplete resources), the mailbox
  * subscription and the change and lifecycle webhooks.
  */
-import { calendarAccount, closeDb, connectDb, graphOccurrence, member, migrate, organization, pushLease, resource, sourceCalendar, syncTarget, user, type AccountId, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
+import { calendarAccount, davLogin, sourceObject, closeDb, connectDb, graphOccurrence, member, migrate, organization, pushLease, resource, sourceCalendar, syncTarget, user, type AccountId, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { createGuardedFetch, createMicrosoftAdapter } from '@supercal/providers';
@@ -13,6 +13,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
+import { createDav } from '../src/dav/index.ts';
+import { verifyGraphUidWithTsdav } from './dav/clients/microsoft_tsdav.ts';
 import { createApi } from '../src/api/index.ts';
 import type { ApiEnv, Principal } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
@@ -34,11 +36,12 @@ const injectPrincipal = createMiddleware<ApiEnv>(async (c, next) => {
 const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
 const idToken = `${b64({ alg: 'none' })}.${b64({ iss: 'https://login.microsoftonline.com/tid-1/v2.0', aud: 'client-id', tid: 'tid-1', oid: 'oid-1', preferred_username: 'ann@example.test' })}.sig`;
 
+let grantedScope = 'Calendars.Read';
 const graph = mockGraph();
-graph.calendars.push({ id: 'cal-a', name: 'Calendar', hexColor: '#336699' }, { id: 'cal-b', name: 'Team', color: 'lightTeal' });
+graph.calendars.push({ id: 'cal-a', name: 'Calendar', hexColor: '#336699', canEdit: true }, { id: 'cal-b', name: 'Team', color: 'lightTeal', canEdit: false });
 graph.state.token = (form) =>
   form.get('grant_type') === 'authorization_code'
-    ? Response.json({ access_token: 'access-1', expires_in: 3600, refresh_token: 'refresh-1', scope: 'openid email https://graph.microsoft.com/Calendars.Read https://graph.microsoft.com/User.Read', id_token: idToken })
+    ? Response.json({ access_token: 'access-1', expires_in: 3600, refresh_token: 'refresh-1', scope: `openid email https://graph.microsoft.com/${grantedScope} https://graph.microsoft.com/User.Read`, id_token: idToken })
     : Response.json({ access_token: 'access-2', expires_in: 3600, refresh_token: 'refresh-2' });
 
 const adapter = createMicrosoftAdapter({ ...graph.options, push: true });
@@ -107,6 +110,7 @@ describe.skipIf(!testDatabaseUrl)('Microsoft provider', () => {
     const now = new Date();
     await unsafeDb().insert(organization).values({ id: tenantId, name: 'T', slug: tenantId, createdAt: now });
     await unsafeDb().insert(user).values({ id: userId, name: 'Ann', email: 'ann@example.com', updatedAt: now });
+    await unsafeDb().insert(davLogin).values({ tenantId, userId, name: 'Microsoft device', username: 'microsoft-writer-abcdefgh', passwordHash: await Bun.password.hash('device-password', { algorithm: 'argon2id' }) });
     await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: tenantId, userId, role: 'member', createdAt: now });
   });
 
@@ -123,7 +127,7 @@ describe.skipIf(!testDatabaseUrl)('Microsoft provider', () => {
       client_id: 'client-id',
       redirect_uri: `${TEST_ORIGIN}/api/v1/oauth/microsoft/callback`,
       response_type: 'code',
-      scope: 'openid email offline_access https://graph.microsoft.com/Calendars.Read https://graph.microsoft.com/User.Read',
+      scope: 'openid email offline_access https://graph.microsoft.com/Calendars.ReadWrite https://graph.microsoft.com/User.Read',
       code_challenge_method: 'S256',
       prompt: 'select_account',
     });
@@ -280,4 +284,72 @@ describe.skipIf(!testDatabaseUrl)('Microsoft provider', () => {
     const [recreated] = await unsafeDb().select().from(pushLease);
     expect(recreated?.providerChannelId).not.toBe(subscription.id);
   });
+  test('device creates retain href across Graph UID assignment, occurrence edits/cancellations and series deletion', async () => {
+    const dav = createDav({ ...deps, bus: idleBus });
+    const authorization = `Basic ${btoa('microsoft-writer-abcdefgh:device-password')}`;
+    const request = (calendarId: string, method: string, name = '', body?: string, headers: Record<string, string> = {}) => dav.request(`/dav/microsoft-writer-abcdefgh/cal/${calendarId}/${name}`, { method, headers: { authorization, 'content-type': 'text/calendar', ...headers }, ...(body !== undefined && { body }) });
+    const ics = (uid: string, override = '', rule = 'FREQ=DAILY;COUNT=5') => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20261101T000000Z', 'DTSTART:20261109T090000Z', 'DURATION:PT1H', 'SUMMARY:Device series', `RRULE:${rule}`, 'END:VEVENT', override, 'END:VCALENDAR', ''].filter(Boolean).join('\r\n') + '\r\n';
+    const active = async () => expect((await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, account.id)))[0]?.status).toBe('active');
+    expect((await request(account.calendarA, 'PUT', 'device.ics', ics('client@test'))).status).toBe(403);
+    await active();
+    const allow = () => post(`/api/v1/accounts/${account.id}/allow-editing`, { returnTo: '/accounts' });
+    const callback = (url: URL) => app.request(`/api/v1/oauth/microsoft/callback?${new URLSearchParams({ code: 'code', state: url.searchParams.get('state') ?? '' })}`);
+    const consent = await allow();
+    expect(consent.status).toBe(409);
+    const url = new URL(((await consent.json()) as { authorizationUrl: string }).authorizationUrl);
+    expect(url.searchParams.get('scope')).toContain('Calendars.ReadWrite');
+    expect(url.searchParams.get('login_hint')).toBe('ann@example.test');
+    expect(new URL((await callback(url)).headers.get('location')!).searchParams.get('error')).toBe('consent_declined');
+    await active();
+    const tokenResponse = graph.state.token;
+    graph.state.token = (form) => form.get('grant_type') === 'authorization_code'
+      ? Response.json({ access_token: 'other', expires_in: 3600, refresh_token: 'other', scope: 'Calendars.ReadWrite', id_token: `${b64({ alg: 'none' })}.${b64({ iss: 'https://login.microsoftonline.com/tid-1/v2.0', aud: 'client-id', tid: 'tid-1', oid: 'another-account', preferred_username: 'other@example.test' })}.sig` })
+      : tokenResponse(form);
+    const wrongAccount = new URL(((await (await allow()).json()) as { authorizationUrl: string }).authorizationUrl);
+    expect(new URL((await callback(wrongAccount)).headers.get('location')!).searchParams.get('error')).toBe('account_mismatch');
+    graph.state.token = tokenResponse;
+    grantedScope = 'Calendars.ReadWrite';
+    const retry = new URL(((await (await allow()).json()) as { authorizationUrl: string }).authorizationUrl);
+    const discover = await targetOf('discover', account.id);
+    await unsafeDb().update(syncTarget).set({ nextRunAt: sql`now() + interval '1 day'` }).where(eq(syncTarget.id, discover));
+    expect(new URL((await callback(retry)).headers.get('location')!).searchParams.get('accountId')).toBe(account.id);
+    expect((await unsafeDb().select().from(syncTarget).where(eq(syncTarget.id, discover)))[0]!.nextRunAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(await runNow(discover)).toBeUndefined();
+    expect((await allow()).status).toBe(204);
+    expect((await request(account.calendarB, 'PUT', 'readonly.ics', ics('client@test'))).status).toBe(403);
+    await active();
+    const before = graph.requests.length;
+    const invalid = await request(account.calendarA, 'PUT', 'invalid.ics', ics('bad@test', '', 'FREQ=HOURLY'));
+    expect(invalid.status).toBe(403);
+    expect(await invalid.text()).toContain('valid-calendar-data');
+    expect(graph.requests).toHaveLength(before);
+    expect((await request(account.calendarA, 'PUT', 'device.ics', ics('client@test'), { 'If-None-Match': '*' })).status).toBe(201);
+    const first = await request(account.calendarA, 'GET', 'device.ics');
+    const text = await first.text();
+    const uid = /UID:([^\r\n]+)/.exec(text)?.[1];
+    expect(uid).toEndWith('@outlook.test');
+    if (!uid) throw new Error('missing Graph UID');
+    expect(uid).not.toBe('client@test');
+    expect(first.headers.get('etag')).toBeTruthy();
+    const [master] = await unsafeDb().select().from(sourceObject).where(and(eq(sourceObject.sourceCalendarId, account.calendarA), eq(sourceObject.groupUid, uid)));
+    graph.instances.set(master!.providerObjectId, [{ id: 'device-occurrence', originalStart: '2026-11-10T09:00:00Z' }]);
+    const override = (cancel = false) => ['BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20261101T000000Z', 'RECURRENCE-ID:20261110T090000Z', 'DTSTART:20261110T110000Z', 'DURATION:PT1H', 'SUMMARY:Changed occurrence', ...(cancel ? ['STATUS:CANCELLED'] : []), 'END:VEVENT'].join('\r\n');
+    expect((await request(account.calendarA, 'PUT', 'device.ics', ics(uid, override()), { 'If-Match': first.headers.get('etag')! })).status).toBe(204);
+    const edited = await request(account.calendarA, 'GET', 'device.ics');
+    expect(await edited.text()).toContain('SUMMARY:Changed occurrence');
+    expect((await unsafeDb().select().from(graphOccurrence).where(eq(graphOccurrence.sourceCalendarId, account.calendarA))).some((row) => row.occurrenceId === 'device-occurrence')).toBe(true);
+    expect((await request(account.calendarA, 'PUT', 'device.ics', ics(uid, override(true)), { 'If-Match': edited.headers.get('etag')! })).status).toBe(204);
+    const cancelled = await request(account.calendarA, 'GET', 'device.ics');
+    expect(await cancelled.text()).toContain('EXDATE:20261110T090000Z');
+    expect((await request(account.calendarA, 'DELETE', 'device.ics', undefined, { 'If-Match': cancelled.headers.get('etag')! })).status).toBe(204);
+    expect((await request(account.calendarA, 'GET', 'device.ics')).status).toBe(404);
+    graph.state.intercept = (r) => r.method === 'POST' && r.path.endsWith('/events') ? Response.json({ error: { code: 'ErrorAccessDenied' } }, { status: 403 }) : undefined;
+    expect((await request(account.calendarA, 'PUT', 'denied.ics', ics('denied@test'))).status).toBe(403);
+    await active();
+    graph.state.intercept = () => undefined;
+    const server = Bun.serve({ port: 0, fetch: (req) => dav.fetch(req) });
+    try { await verifyGraphUidWithTsdav(`http://localhost:${server.port}/`, account.calendarA); }
+    finally { server.stop(true); }
+  });
+
 });
