@@ -56,8 +56,15 @@ describe("expandOccurrences", () => {
     expect(starts(gap)).toEqual(["2026-03-07T07:30:00Z", "2026-03-08T07:30:00Z"]);
   });
 
+  // BC is on permanent UTC-7 from 2026-11 (tzdata 2026e). A runtime with older ICU data gives
+  // 18:05Z here; the image sets ICU_TIMEZONE_FILES_DIR to newer data (see Dockerfile).
+  test("America/Vancouver stays at UTC-7 after 2026-11-01", () => {
+    const r = resource("DTSTART;TZID=America/Vancouver:20261111T100500", "DTEND;TZID=America/Vancouver:20261111T103500");
+    expect(starts(r)).toEqual(["2026-11-11T17:05:00Z"]);
+  });
+
   const weekly = byUid("weekly-sync@example.com");
-  const nov = expandOccurrences(weekly, window("2026-11-01T00:00:00Z", "2026-12-01T00:00:00Z")).occurrences;
+  const nov =expandOccurrences(weekly, window("2026-11-01T00:00:00Z", "2026-12-01T00:00:00Z")).occurrences;
 
   test("an EXDATE removes its instance", () => {
     expect(nov.map((o) => o.recurrenceId)).toEqual(["2026-11-02T09:00:00", "2026-11-09T09:00:00", "2026-11-30T09:00:00"]);

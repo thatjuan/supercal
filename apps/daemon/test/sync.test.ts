@@ -3,7 +3,7 @@
  * transactions, replay after a failed page, the snapshot sweep, wake-ups during a run, lease
  * renewal and abort, account status, discovery, seq economy and re-normalisation.
  */
-import { summary } from '@supercal/core';
+import { normalizers, summary } from '@supercal/core';
 import {
   calendarAccount,
   closeDb,
@@ -461,7 +461,7 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
 
     expect(await syncOnce(id)).toBeUndefined();
     const [done] = await unsafeDb().select({ dirty: sourceObject.dirty, version: sourceObject.normalizerVersion }).from(sourceObject).where(eq(sourceObject.sourceCalendarId, calendarId));
-    expect(done).toEqual({ dirty: false, version: 1 });
+    expect(done).toMatchObject({ dirty: false, version: normalizers.ical?.version });
   });
 
   test.each([{ targets: 8, workers: 1 }, { targets: 16, workers: 2 }])(
