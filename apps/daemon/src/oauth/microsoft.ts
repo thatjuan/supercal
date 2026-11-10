@@ -16,7 +16,7 @@ import type { Principal } from '../auth/principal.ts';
 import { connectAccount, findOwnAccount, reconnectAccount } from '../sync/accounts.ts';
 import type { SyncDeps } from '../sync/index.ts';
 import { allowedReturnTo, beginFlow, CallbackFailure, errorCode, redirectWith, takeFlow, type OAuthClient, type OAuthDeps } from './common.ts';
-import { AuthorizationUrl, OAuthStart } from './google.ts';
+import { AuthorizationUrl, OAuthStart, type ConsentRequest } from './google.ts';
 
 export const MICROSOFT_AUTHORIZE_URL = `${MICROSOFT_AUTHORITY}/authorize`;
 const CALENDARS_READ = 'Calendars.Read';
@@ -41,8 +41,8 @@ function microsoftClient(oauth: OAuthDeps): OAuthClient {
   return oauth.microsoft;
 }
 
-/** The consent URL for the principal; `loginHint` preselects the account on reconnect. 400 when `returnTo` is not ours. */
-export async function startMicrosoftFlow(oauth: OAuthDeps, principal: Principal, returnTo: string, loginHint?: string | null): Promise<string> {
+/** The consent URL; loginHint preselects reconnects, and consent binds editing to the same account. Invalid returnTo is a 400. */
+export async function startMicrosoftFlow(oauth: OAuthDeps, principal: Principal, returnTo: string, loginHint?: string | null, consent?: ConsentRequest): Promise<string> {
   const client = microsoftClient(oauth);
   const target = allowedReturnTo(returnTo, oauth.returnOrigins);
   if (!target) throw new BadRequest([{ path: 'returnTo', message: `must be a path on ${oauth.returnOrigins.join(' or ')}` }]);
@@ -57,7 +57,7 @@ export async function startMicrosoftFlow(oauth: OAuthDeps, principal: Principal,
     scope: MICROSOFT_SCOPES.join(' '),
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    state: oauth.state.sign({ provider: 'microsoft', userId, tenantId, flowId, returnTo: target }),
+    state: oauth.state.sign({ provider: 'microsoft', userId, tenantId, flowId, returnTo: target, ...(consent && { consent }) }),
     ...(loginHint ? { login_hint: loginHint } : { prompt: 'select_account' }),
   }).toString();
   return url.href;
@@ -84,7 +84,7 @@ async function exchange(oauth: OAuthDeps, client: OAuthClient, code: string, ver
   });
   // Graph scopes come back with or without their resource prefix.
   const scopes = (token.scope?.split(' ') ?? []).map((s) => (s.startsWith(GRAPH_SCOPE_PREFIX) ? s.slice(GRAPH_SCOPE_PREFIX.length) : s));
-  if (!scopes.includes(CALENDARS_READ)) throw new CallbackFailure('missing_scopes');
+  if (!scopes.includes(CALENDARS_READ) && !scopes.includes('Calendars.ReadWrite')) throw new CallbackFailure('missing_scopes');
   if (!token.refresh_token) throw new CallbackFailure('no_refresh_token');
   const claims = IdClaims.safeParse(token.id_token ? idTokenClaims(token.id_token) : null);
   if (!claims.success) throw new CallbackFailure('invalid_id_token');
@@ -98,6 +98,7 @@ async function exchange(oauth: OAuthDeps, client: OAuthClient, code: string, ver
     accessToken: token.access_token,
     accessTokenExpiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(),
     refreshToken: token.refresh_token,
+    scopes,
   };
 }
 
@@ -116,6 +117,10 @@ export async function completeMicrosoftFlow(oauth: OAuthDeps, sync: SyncDeps, pr
     if (!query.code) throw new CallbackFailure('missing_code');
     const credentials = await exchange(oauth, microsoftClient(oauth), query.code, verifier);
     const existing = await findOwnAccount(principal, 'microsoft', credentials.subject);
+    if (state.consent) {
+      if (existing?.id !== state.consent.accountId) throw new CallbackFailure('account_mismatch');
+      if (!state.consent.scopes.every((scope) => credentials.scopes?.includes(scope.replace(GRAPH_SCOPE_PREFIX, '')))) throw new CallbackFailure('consent_declined');
+    }
     const account = existing
       ? await reconnectAccount(sync, principal, existing.id, credentials, { email: credentials.email })
       : (await connectAccount(sync, principal, { credentials, displayName: credentials.email, email: credentials.email, providerSubject: credentials.subject })).account;

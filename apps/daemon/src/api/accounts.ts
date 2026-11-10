@@ -260,8 +260,9 @@ export const accountRoutes = createApiApp()
   .openapi(allowEditing, async (c) => {
     const { principal, oauth, sync } = c.var;
     const account = await withTenant(principal.tenantId, (tx) => loadAccount(tx, principal, c.req.valid('param').id));
-    if (account.provider !== 'google') throw new Unprocessable(`${account.provider} accounts do not support editing consent`, 'unsupported-provider');
+    if (account.provider !== 'google' && account.provider !== 'microsoft') throw new Unprocessable(`${account.provider} accounts do not support editing consent`, 'unsupported-provider');
     if (await accountCanWrite(account, sync.secrets)) return c.body(null, 204);
+    if (account.provider === 'microsoft') throw new NeedsConsent(await startMicrosoftFlow(oauth, principal, c.req.valid('json').returnTo, account.email, { accountId: account.id, scopes: ['Calendars.ReadWrite'] }), 'Editing needs permission to change events in this Microsoft account');
     throw new NeedsConsent(await startGoogleFlow(oauth, principal, c.req.valid('json').returnTo, account.email, { accountId: account.id, scopes: [GOOGLE_EVENTS_WRITE_SCOPE] }), 'Editing needs permission to change events in this Google account');
   })
   .openapi(listAccounts, async (c) => {

@@ -75,6 +75,8 @@ export const GraphEvent = z.object({
   end: GraphTime,
   isAllDay: z.boolean().nullish(),
   isCancelled: z.boolean().nullish(),
+  isReminderOn: z.boolean().nullish(),
+  reminderMinutesBeforeStart: z.number().int().nullish(),
   originalStart: z.string().nullish(),
   originalStartTimeZone: z.string().nullish(),
   lastModifiedDateTime: z.string().nullish(),
@@ -212,6 +214,7 @@ function eventLines(uid: string, e: GraphEvent, series: Series, extra: string[])
   lines.push(dateLine("DTSTART", instantOf(e.start), own), dateLine("DTEND", instantOf(e.end), own));
   if (modified) lines.push(`LAST-MODIFIED:${utcStamp(modified)}`);
   if (e.isCancelled) lines.push("STATUS:CANCELLED");
+  if (!e.isCancelled && e.showAs === "tentative") lines.push("STATUS:TENTATIVE");
   if (e.showAs === "free") lines.push("TRANSP:TRANSPARENT");
   const klass = CLASS[e.sensitivity ?? ""];
   if (klass) lines.push(`CLASS:${klass}`);
@@ -236,6 +239,7 @@ function eventLines(uid: string, e: GraphEvent, series: Series, extra: string[])
   }
   const meeting = webUrl(e.onlineMeeting?.joinUrl);
   if (meeting) lines.push(`CONFERENCE;VALUE=URI;FEATURE=VIDEO:${meeting}`, `URL:${meeting}`);
+  if (e.isReminderOn && e.reminderMinutesBeforeStart != null) lines.push("BEGIN:VALARM", "ACTION:DISPLAY", `TRIGGER:-PT${e.reminderMinutesBeforeStart}M`, "END:VALARM");
   return lines;
 }
 

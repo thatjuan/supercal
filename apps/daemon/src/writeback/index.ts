@@ -1,6 +1,6 @@
 /** Synchronous provider writes: check in a short transaction, call upstream, then apply its result. */
 import { normalizers, validateObject } from '@supercal/core';
-import { calendarAccount, davObjectName, recordChanges, resource, sourceObject, syncTarget, withTenant, type SourceCalendarId } from '@supercal/db';
+import { calendarAccount, davObjectName, graphOccurrence, recordChanges, resource, sourceObject, syncTarget, withTenant, type SourceCalendarId } from '@supercal/db';
 import { AuthFailedError, ProviderConflictError, ProviderPartialWriteError, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError, type StoredObject, type WriteResult } from '@supercal/providers';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -59,7 +59,9 @@ async function check(deps: WriteDeps, principal: Principal, calendarId: SourceCa
     const existing: StoredObject[] = rows.map((row) => ({ id: row.providerObjectId, etag: row.etag ?? '',
       payload: adapter.format === 'ical' ? row.payload : z.json().parse(JSON.parse(row.payload)),
       ...(row.originalStart !== null && { originalStart: row.originalStart }) }));
-    return { calendar, account, adapter, writes: adapter.writes, uid, existing, created: !live };
+    const occurrences = await tx.select().from(graphOccurrence).where(eq(graphOccurrence.sourceCalendarId, calendarId));
+    const ref = { ...calendar, occurrences: async (masterId: string) => new Map(occurrences.filter((row) => row.masterId === masterId).map((row) => [row.occurrenceId, row.originalStart])) };
+    return { calendar: ref, account, adapter, writes: adapter.writes, uid, existing, created: !live };
   });
 }
 
@@ -94,12 +96,21 @@ async function providerWrite(deps: WriteDeps, checked: Checked, applyPartial: (r
 
 /** Persist only an accepted provider result, protecting it from a snapshot already in progress. */
 async function apply(deps: WriteDeps, principal: Principal, checked: Checked, input: Preconditions, result: WriteResult, deleting: boolean) {
-  const { calendar, adapter, uid, created } = checked;
+  const { calendar, adapter, created } = checked;
+  const groups = new Set(result.upserts.map((object) => object.groupUid));
+  if (groups.size > 1) throw new Error('Provider write returned several UID groups');
+  const uid = result.upserts[0]?.groupUid ?? checked.uid;
+  if (uid !== checked.uid && !created) throw new Error('Provider changed an existing UID');
   await withTenant(principal.tenantId, async (tx) => {
     await lockCalendarWrites(tx, calendar.id);
     const [target] = await tx.select().from(syncTarget)
       .where(and(eq(syncTarget.kind, 'events'), eq(syncTarget.targetId, calendar.id))).for('update');
     if (!target) throw new Error('Imported calendar has no events target');
+    if (created && uid !== checked.uid) {
+      const index = await pubIndex(tx, importedPublication(calendar, checked.account.email));
+      const conflict = index.byUid.get(uid);
+      if (conflict) throw new HostedWriteError('uid-conflict', 'Provider UID already exists in this calendar', decodeURIComponent(conflict.href));
+    }
     await applyRawObjects(tx, { tenantId: principal.tenantId, calendar, format: adapter.format, seenGeneration: target.leaseVersion }, result);
     const normalizer = normalizers[adapter.format];
     if (!normalizer) throw new Error(`No normalizer for ${adapter.format}`);

@@ -115,6 +115,22 @@ describe.skipIf(!testDatabaseUrl)('imported DAV write-through', () => {
     expect((await target()).wakeGeneration).toBeGreaterThan(0);
   });
 
+  test('a provider-assigned UID keeps the client href and still rejects UID conflicts', async () => {
+    const { fake, calendar, request } = await setup();
+    const writes = fake.adapter.writes!;
+    const put = writes.put;
+    writes.put = (ctx, ref, ics, existing) => put(ctx, ref, existing.length ? ics : ics.replace('UID:client-uid', 'UID:provider-uid'), existing);
+    expect((await request('PUT', 'chosen.ics', body('client-uid'))).status).toBe(201);
+    const get = await request('GET', 'chosen.ics');
+    expect(get.status).toBe(200);
+    expect(await get.text()).toContain('UID:provider-uid');
+    expect((await unsafeDb().select().from(davObjectName).where(eq(davObjectName.sourceCalendarId, calendar.id)))[0]?.uid).toBe('provider-uid');
+    expect((await request('PUT', 'other.ics', body('provider-uid'))).status).toBe(403);
+    expect((await request('PUT', 'chosen.ics', body('client-uid'))).status).toBe(403);
+    expect((await request('PUT', 'chosen.ics', body('provider-uid', 'Edited'), { 'If-Match': get.headers.get('etag')! })).status).toBe(204);
+    expect((await request('DELETE', 'chosen.ics')).status).toBe(204);
+  });
+
   test('a partial provider result is published before its cause returns to the device', async () => {
     const { fake, account, calendar, request } = await setup();
     const writes = fake.adapter.writes!;

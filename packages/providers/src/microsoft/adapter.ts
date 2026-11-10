@@ -21,10 +21,13 @@
  * PATCH. Calendars report `push: false`: no subscription is made per calendar, and freshness shows
  * whether the mailbox subscription covers them.
  */
-import { CANCELLED_ANNOTATION } from '@supercal/core';
+import { Temporal } from '@js-temporal/polyfill';
+import { graphWriteOps, graphUtcBody, type GraphBody, type GraphWriteOp } from './write.ts';
+import { ProviderConflictError, ProviderPartialWriteError, ProviderWriteRejectedError, type StoredObject, type WriteResult, type SourceCalendarRef } from '../adapter.ts';
+import { CANCELLED_ANNOTATION, validateObject } from '@supercal/core';
 import { z } from 'zod';
 import type { AdapterContext, OccurrenceRecord, ProviderAdapter, PushLeaseInfo, PushRequest, RawObject, SourceCalendarInfo, SyncEnd, SyncPage } from '../adapter.ts';
-import { createGraphApi, GraphHttpError, type MicrosoftClientOptions } from './api.ts';
+import { createGraphApi, GraphHttpError, microsoftCanWrite, type MicrosoftClientOptions } from './api.ts';
 
 /** Graph keeps a subscription on Outlook events for at most 10,080 minutes. */
 const SUBSCRIPTION_MINUTES = 10_000;
@@ -57,6 +60,8 @@ const EVENT_SELECT = [
   'attendees',
   'onlineMeeting',
   'recurrence',
+  'isReminderOn',
+  'reminderMinutesBeforeStart',
 ].join(',');
 /** Changes whenever the selected fields do, so stored changeKeys from another query are not trusted. */
 const FINGERPRINT = Bun.hash(`${LIST_SELECT}|${EVENT_SELECT}|cancelledOccurrences|exceptionOccurrences`).toString(36);
@@ -74,7 +79,7 @@ const PALETTE: Record<string, string> = {
   lightRed: '#e74c3c',
 };
 
-const Calendar = z.object({ id: z.string(), name: z.string().nullish(), hexColor: z.string().nullish(), color: z.string().nullish() });
+const Calendar = z.object({ canEdit: z.boolean().default(false), id: z.string(), name: z.string().nullish(), hexColor: z.string().nullish(), color: z.string().nullish() });
 const Head = z.object({ id: z.string(), changeKey: z.string(), type: z.string().nullish() });
 /** What routing needs from a fetched event; the payload keeps the whole JSON. */
 const Fetched = z.object({
@@ -102,6 +107,14 @@ export type MicrosoftAdapterOptions = MicrosoftClientOptions & {
 };
 
 const eventPath = (id: string) => `/me/events/${encodeURIComponent(id)}`;
+
+/** The shared sync/write raw representation, including exception recurrence identity. */
+function rawEvent(payload: z.infer<typeof EventJson>, groupUid: string): RawObject {
+  const head = Fetched.parse(payload);
+  const fields = { ...payload };
+  delete fields.exceptionOccurrences;
+  return { id: head.id, etag: head.changeKey, groupUid, payload: fields, ...(head.originalStart && { originalStart: head.originalStart }) };
+}
 
 /** One fetched item: its raw objects, recorded occurrences and cursor entry. */
 type Fetch = { objects: RawObject[]; occurrences: OccurrenceRecord[]; item: Item };
@@ -180,10 +193,114 @@ export function createMicrosoftAdapter(options: MicrosoftAdapterOptions): Provid
     }
 
     const objects: RawObject[] = [
-      { id, etag: event.changeKey, groupUid: uid, payload: master },
-      ...exceptions.map(({ head, payload }) => ({ id: head.id, etag: head.changeKey, groupUid: uid, payload, ...(head.originalStart && { originalStart: head.originalStart }) })),
+      rawEvent(master, uid),
+      ...exceptions.map(({ payload }) => rawEvent(payload, uid)),
     ];
     return { objects, occurrences, item: { changeKey: event.changeKey, uid, exceptions: Object.fromEntries(exceptions.map(({ head }) => [head.id, head.changeKey])) } };
+  }
+
+  /** Graph's event update/delete docs do not promise If-Match enforcement. Compare changeKey
+   * first as well as sending If-Match; the GET → mutation still has a short race window.
+   * https://learn.microsoft.com/en-us/graph/api/event-update?view=graph-rest-1.0
+   */
+  async function condition(ctx: AdapterContext, id: string, etag: string) {
+    const event = await api.call(ctx, Fetched, eventPath(id), { write: true });
+    if (event.changeKey !== etag) throw new ProviderConflictError('Graph event changed; refetch it');
+  }
+
+  /** Retry a zone rejection once: UTC instants for timed events, midnight dates for all-day. */
+  async function mutate(ctx: AdapterContext, path: string, method: 'POST' | 'PATCH', body: Partial<GraphBody> & { transactionId?: string }, etag?: string) {
+    const call = (fields: typeof body) => api.call(ctx, EventJson, path, { method, body: fields, write: true, ...(etag && { ifMatch: etag }) });
+    try { return await call(body); }
+    catch (error) {
+      if (!(error instanceof ProviderWriteRejectedError && error.reason === 'invalid-data' && /time.?zone/i.test(error.message)) || !body.start) throw error;
+      return call({ ...body, ...graphUtcBody(body) });
+    }
+  }
+
+  /** Execute masters, overrides, then cancellations, retaining responses after partial failure. */
+  async function execute(ctx: AdapterContext, calendar: SourceCalendarRef, operations: GraphWriteOp[], existing: StoredObject[]): Promise<WriteResult> {
+    if (!microsoftCanWrite(ctx) || !calendar.capabilities.write) throw new ProviderWriteRejectedError('read-only', 'Microsoft calendar is read-only');
+    const result: WriteResult = { upserts: [], deletes: [], occurrences: [] };
+    const storedMaster = existing.find((object) => !z.object({ seriesMasterId: z.string().nullish() }).parse(object.payload).seriesMasterId);
+    let masterId = storedMaster?.id ?? '';
+    const records = new Map(await calendar.occurrences?.(masterId) ?? []);
+    /** Retain a mutation response even if the following series fetch fails. */
+    const accepted = (json: z.infer<typeof EventJson>, uid: string) => {
+      const previous = result.upserts.find((object) => object.id === json.id) ?? existing.find((object) => object.id === json.id);
+      const fields = { ...(previous ? EventJson.parse(previous.payload) : {}), ...json };
+      if (json.id === masterId && Array.isArray(fields.cancelledOccurrences)) {
+        const old = z.array(z.object({ id: z.string(), originalStart: z.string().nullable() })).parse(fields[CANCELLED_ANNOTATION] ?? []);
+        fields[CANCELLED_ANNOTATION] = z.array(z.string()).parse(fields.cancelledOccurrences).map((id) => ({ id, originalStart: records.get(id) ?? old.find((item) => item.id === id)?.originalStart ?? null }));
+      }
+      const raw = rawEvent(fields, uid);
+      result.upserts = [...result.upserts.filter((object) => object.id !== raw.id), raw];
+      if (raw.originalStart) records.set(raw.id, raw.originalStart);
+      result.occurrences = [...records].map(([occurrenceId, originalStart]) => ({ masterId, occurrenceId, originalStart }));
+    };
+    const remember = async () => {
+      const fetched = await fetchItem(ctx, masterId, async () => records);
+      if (!fetched) return;
+      result.upserts = fetched.objects;
+      result.occurrences = [...records].map(([occurrenceId, originalStart]) => ({ masterId, occurrenceId, originalStart }));
+      for (const record of fetched.occurrences) if (!records.has(record.occurrenceId)) result.occurrences.push(record);
+      result.deletes = existing.filter((object) => !fetched.objects.some((next) => next.id === object.id)).map((object) => object.id);
+    };
+    try {
+      if (storedMaster && operations[0]?.op === 'instance') await condition(ctx, storedMaster.id, storedMaster.etag);
+      for (const operation of operations) {
+        if (operation.op === 'create') {
+          const json = await mutate(ctx, `/me/calendars/${encodeURIComponent(calendar.providerCalendarId)}/events`, 'POST', { ...operation.body, transactionId: operation.transactionId });
+          const event = Fetched.parse(json);
+          masterId = event.id;
+          accepted(json, event.iCalUId ?? `${event.id}@graph.microsoft.com`);
+        } else if (operation.op === 'patch') {
+          await condition(ctx, operation.id, operation.etag);
+          const json = await mutate(ctx, eventPath(operation.id), 'PATCH', operation.body, operation.etag);
+          const event = Fetched.parse(json);
+          accepted(json, event.iCalUId ?? `${event.id}@graph.microsoft.com`);
+        } else {
+          const original = Temporal.Instant.from(operation.originalStart);
+          const previous = existing.find((object) => object.originalStart && Temporal.Instant.from(object.originalStart).equals(original));
+          let id = previous?.id ?? [...records].find(([, start]) => Temporal.Instant.from(start).equals(original))?.[0];
+          if (!id) {
+            for await (const raw of api.list(ctx, `${eventPath(masterId)}/instances`, { startDateTime: original.subtract({ hours: 24 }).toString(), endDateTime: original.add({ hours: 24 }).toString() }, true)) {
+              const instance = Instance.parse(raw);
+              if (instance.originalStart) records.set(instance.id, instance.originalStart);
+              if (instance.originalStart && Temporal.Instant.from(instance.originalStart).equals(original)) id = instance.id;
+            }
+          }
+          if (!id) throw new ProviderWriteRejectedError('not-found', 'Graph occurrence no longer exists');
+          const current = await api.call(ctx, Fetched, eventPath(id), { write: true });
+          const etag = previous?.etag ?? current.changeKey;
+          if (current.changeKey !== etag) throw new ProviderConflictError('Graph occurrence changed; refetch it');
+          records.set(id, operation.originalStart);
+          if (operation.body) {
+            const json = await mutate(ctx, eventPath(id), 'PATCH', operation.body, etag);
+            const uid = result.upserts[0]?.groupUid ?? Fetched.parse(storedMaster?.payload).iCalUId ?? `${masterId}@graph.microsoft.com`;
+            accepted(json, uid);
+          } else {
+            await api.call(ctx, z.unknown(), eventPath(id), { method: 'DELETE', write: true, ifMatch: etag });
+            result.deletes.push(id);
+            result.upserts = result.upserts.filter((object) => object.id !== id);
+            const master = result.upserts.find((object) => object.id === masterId) ?? (storedMaster ? rawEvent(EventJson.parse(storedMaster.payload), Fetched.parse(storedMaster.payload).iCalUId ?? `${masterId}@graph.microsoft.com`) : undefined);
+            if (master) {
+              const json = EventJson.parse(master.payload);
+              const cancelled = z.array(z.object({ id: z.string(), originalStart: z.string().nullable() })).parse(json[CANCELLED_ANNOTATION] ?? []);
+              accepted({ ...json, cancelledOccurrences: [...new Set([...z.array(z.string()).parse(json.cancelledOccurrences ?? []), id])], [CANCELLED_ANNOTATION]: [...cancelled.filter((item) => item.id !== id), { id, originalStart: operation.originalStart }] }, master.groupUid);
+            }
+            result.occurrences = [...records].map(([occurrenceId, originalStart]) => ({ masterId, occurrenceId, originalStart }));
+          }
+        }
+        // The refreshed master includes Graph's cancellation ids and latest changeKey. Keeping
+        // each completed step makes a later exception failure publish exactly what succeeded.
+        await remember();
+      }
+      return result;
+    } catch (error) {
+      if (result.upserts.length || result.deletes.length) throw new ProviderPartialWriteError(result, error);
+      throw error;
+    }
   }
 
   return {
@@ -191,16 +308,38 @@ export function createMicrosoftAdapter(options: MicrosoftAdapterOptions): Provid
     format: 'graph',
     capabilities: { calendarDiscovery: 'poll', push: options.push ? 'account' : 'none' },
 
+    writes: {
+      async put(ctx, calendar, ics, existing) {
+        const parsed = validateObject(ics);
+        if (!parsed.ok) throw new ProviderWriteRejectedError('invalid-data', parsed.detail);
+        let operations;
+        try { operations = graphWriteOps(parsed.resource, existing, calendar.timezone ?? 'UTC'); }
+        catch (error) {
+          if (error instanceof ProviderWriteRejectedError) ctx.log.info('Graph write rejected before requests', { error: error.message });
+          throw error;
+        }
+        return execute(ctx, calendar, operations, existing);
+      },
+      async delete(ctx, calendar, existing) {
+        if (!microsoftCanWrite(ctx) || !calendar.capabilities.write) throw new ProviderWriteRejectedError('read-only', 'Microsoft calendar is read-only');
+        const master = existing.find((object) => !z.object({ seriesMasterId: z.string().nullish() }).parse(object.payload).seriesMasterId);
+        if (!master) throw new ProviderWriteRejectedError('not-found', 'Graph series no longer exists');
+        await condition(ctx, master.id, master.etag);
+        await api.call(ctx, z.unknown(), eventPath(master.id), { method: 'DELETE', write: true, ifMatch: master.etag });
+        return { upserts: [], deletes: existing.map((object) => object.id) };
+      },
+    },
+
     async listCalendars(ctx) {
       const calendars: SourceCalendarInfo[] = [];
-      for await (const raw of api.list(ctx, '/me/calendars', { $select: 'id,name,hexColor,color', $top: '100' })) {
+      for await (const raw of api.list(ctx, '/me/calendars', { $select: 'id,name,hexColor,color,canEdit', $top: '100' })) {
         const calendar = Calendar.parse(raw);
         calendars.push({
           providerCalendarId: calendar.id,
           name: calendar.name || calendar.id,
           color: calendar.hexColor || PALETTE[calendar.color ?? ''] || null,
           timezone: null,
-          capabilities: { incremental: 'reconcile', push: false, write: false },
+          capabilities: { incremental: 'reconcile', push: false, write: calendar.canEdit && microsoftCanWrite(ctx) },
         });
       }
       return calendars;
