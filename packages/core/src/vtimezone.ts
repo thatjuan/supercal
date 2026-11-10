@@ -96,12 +96,20 @@ export function vtimezoneFor(tzid: string, range: TimeWindow): JCalComponent {
   return ["vtimezone", props, observances];
 }
 
-/** The generation range policy: earliest DTSTART − 1 day to max(last end/UNTIL, now + 2 years). */
+/**
+ * Samples at most now − 20 years through now + 10 years, with at least a 2-year horizon.
+ * Clients trusting this VTIMEZONE use the first/last offset outside that window: an older
+ * instance or a daylight-saving date past the horizon can therefore be an hour off.
+ */
 export function timezoneRange(resource: EventResource, now: Temporal.Instant = Temporal.Now.instant()): TimeWindow {
   const span = spanOf(resource);
-  const twoYears = now.toZonedDateTimeISO("UTC").add({ years: 2 }).toInstant();
-  const end = span.end === "infinity" || Temporal.Instant.compare(span.end, twoYears) < 0 ? twoYears : span.end;
-  return { from: span.start.subtract({ hours: 24 }), to: end };
+  const utc = now.toZonedDateTimeISO("UTC");
+  const twoYears = utc.add({ years: 2 }).toInstant();
+  const floor = utc.subtract({ years: 20 }).toInstant();
+  const horizon = utc.add({ years: 10 }).toInstant();
+  const clamp = (i: Temporal.Instant) => (Temporal.Instant.compare(i, floor) < 0 ? floor : Temporal.Instant.compare(i, horizon) > 0 ? horizon : i);
+  const end = span.end === "infinity" || Temporal.Instant.compare(span.end, twoYears) < 0 ? twoYears : clamp(span.end);
+  return { from: clamp(span.start.subtract({ hours: 24 })), to: end };
 }
 
 /** A copy of `resource` with a generated VTIMEZONE for each referenced TZID it lacks. */

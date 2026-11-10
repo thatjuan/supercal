@@ -32,7 +32,14 @@ export type RawObject = {
 export type OccurrenceRecord = { masterId: ProviderObjectId; occurrenceId: string; originalStart: string };
 
 /** One page of a sync. `occurrences` are written with the page, so later runs can resolve cancellations through `SourceCalendarRef.occurrences`. */
-export type SyncPage = { kind: 'page'; upserts: RawObject[]; deletes: ProviderObjectId[]; occurrences?: OccurrenceRecord[] };
+export type SyncPage = {
+  kind: 'page';
+  upserts: RawObject[];
+  deletes: ProviderObjectId[];
+  /** Provider object IDs whose entire stored UID group was deleted. */
+  deleteGroupsOf?: ProviderObjectId[];
+  occurrences?: OccurrenceRecord[];
+};
 
 /**
  * The last item of a sync. `snapshot`: every existing object was yielded, so the runner deletes the

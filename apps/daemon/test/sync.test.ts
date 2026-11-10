@@ -30,14 +30,14 @@ import { unsafeDb } from '@supercal/db/unsafe-db';
 import { AuthFailedError, createGuardedFetch, ProviderThrottledError, ProviderUnavailableError, type ProviderAdapter } from '@supercal/providers';
 import { createFakeAdapter, fakeEvent, type FakeProvider } from '@supercal/providers/test/fake';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Principal } from '../src/auth/principal.ts';
 import { startBus, type BusEvents } from '../src/bus.ts';
 import { createLogger } from '../src/log.ts';
 import { connectAccount } from '../src/sync/accounts.ts';
 import { createSyncDeps, syncHandlers } from '../src/sync/index.ts';
 import { registerMaintenance } from '../src/sync/maintenance.ts';
-import { claim, complete, LeaseLostError, startScheduler, StopTargetError, wakeTargets, type Job } from '../src/sync/scheduler.ts';
+import { AccountBusyError, claim, complete, createSlots, defer, LeaseLostError, startScheduler, StopTargetError, wakeTargets, type Job, type JobHandler } from '../src/sync/scheduler.ts';
 import { testSecrets } from './auth-fixture.ts';
 
 const tenantId = `org_${crypto.randomUUID()}` as TenantId;
@@ -205,6 +205,26 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
     expect((await target(id)).cursor).not.toEqual(before.cursor);
   });
 
+  test('Google strings jsonb cannot store keep last good groups while an honest delta edit commits', async () => {
+    const fake = createFakeAdapter();
+    const work = fake.calendar('work');
+    const event = (id: string, title: string) => ({ groupUid: `${id}@test`, payload: JSON.stringify({ id, iCalUID: `${id}@test`, summary: title,
+      start: { dateTime: '2026-11-09T09:00:00Z' }, end: { dateTime: '2026-11-09T10:00:00Z' } }) });
+    for (const id of ['null', 'surrogate', 'honest']) work.put(id, event(id, 'old'));
+    const { calendars } = await connect(fake);
+    // The fake transports provider JSON; use the same normalizer as the real Google adapter.
+    adapters.ics = { ...fake.adapter, format: 'google' };
+    const calendarId = (calendars[0] as SourceCalendar).id;
+    const id = await targetOf('events', calendarId);
+    expect(await syncOnce(id)).toBeUndefined();
+    work.put('null', event('null', 'bad\0title')).put('surrogate', event('surrogate', 'bad\ud800title')).put('honest', event('honest', 'edited'));
+    expect(await syncOnce(id)).toBeUndefined();
+    expect(await summaries(calendarId)).toEqual({ 'null@test': 'old', 'surrogate@test': 'old', 'honest@test': 'edited' });
+    const rows = await unsafeDb().select().from(resource).where(eq(resource.sourceCalendarId, calendarId));
+    for (const uid of ['null@test', 'surrogate@test']) expect(rows.find((r) => r.uid === uid)).toMatchObject({ completeness: 'incomplete', completenessReason: 'Object contains a string PostgreSQL cannot store' });
+    expect(rows.find((r) => r.uid === 'honest@test')?.completeness).toBe('complete');
+  });
+
   test('a snapshot that no longer lists an object deletes it only at end', async () => {
     const fake = createFakeAdapter({ mode: 'snapshot' });
     fake.calendar('work').put('a', fakeEvent('a@test')).put('b', fakeEvent('b@test'));
@@ -329,7 +349,7 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
       fake.calendar('work').put('a', fakeEvent('a@test'));
       fake.calendar('home').put('h', fakeEvent('h@test'));
       const { account, calendars } = await connect(fake);
-      const [work] = calendars as [SourceCalendar];
+      const work = calendars.find((c) => c.providerCalendarId === 'work') as SourceCalendar;
       const id = await targetOf('events', work.id);
       expect(await syncOnce(id)).toBeUndefined();
 
@@ -340,7 +360,7 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
       const parked = await unsafeDb()
         .select({ due: sql<boolean>`${syncTarget.nextRunAt} = 'infinity'` })
         .from(syncTarget)
-        .where(sql`${syncTarget.targetId} in (${account.id}, ${work.id}, ${(calendars[1] as SourceCalendar).id})`);
+        .where(sql`${syncTarget.targetId} in (${account.id}, ${work.id}, ${(calendars.find((c) => c.providerCalendarId === 'home') as SourceCalendar).id})`);
       expect(parked).toEqual([{ due: true }, { due: true }, { due: true }]);
 
       const published = await unsafeDb()
@@ -443,4 +463,162 @@ describe.skipIf(!testDatabaseUrl)('sync engine', () => {
     const [done] = await unsafeDb().select({ dirty: sourceObject.dirty, version: sourceObject.normalizerVersion }).from(sourceObject).where(eq(sourceObject.sourceCalendarId, calendarId));
     expect(done).toMatchObject({ dirty: false, version: normalizers.ical?.version });
   });
+
+  test.each([{ targets: 8, workers: 1 }, { targets: 16, workers: 2 }])(
+    '$workers scheduler(s) keep a busy CalDAV account from starving another tenant with $targets targets',
+    async ({ targets, workers }) => {
+      const otherTenant = `org_${crypto.randomUUID()}` as TenantId;
+      await unsafeDb().insert(organization).values({ id: otherTenant, name: 'Other', slug: otherTenant, createdAt: new Date() });
+      await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: otherTenant, userId: alice.userId, role: 'member', createdAt: new Date() });
+      const fake = createFakeAdapter({ provider: 'caldav' });
+      for (let i = 0; i < targets; i++) fake.calendar(`busy-${i}`);
+      const localDeps = createSyncDeps({ secrets: testSecrets, fetch: deps.fetch, log, adapters: { caldav: fake.adapter } });
+      const { calendars } = await connectAccount(localDeps, { ...alice, tenantId: otherTenant }, {
+        credentials: { provider: 'caldav', serverUrl: 'https://dav.test', username: 'alice', password: 'test' }, displayName: 'Busy',
+      });
+      const ids = await Promise.all(calendars.map((c) => targetOf('events', c.id)));
+      const [other] = await unsafeDb().insert(syncTarget).values({ tenantId, kind: 'events', targetId: crypto.randomUUID() }).returning();
+      if (!other) throw new Error('target insert failed');
+      await only([...ids, other.id]);
+      let active = 0;
+      let maxActive = 0;
+      const unblock = gate();
+      fake.hooks.beforeItem = async () => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        try { await unblock.opened; } finally { active--; }
+      };
+      let otherRan = false;
+      const localHandlers = syncHandlers(localDeps);
+      const fairHandlers = { ...localHandlers, events: async (job: Job, signal: AbortSignal) => {
+        if (job.id === other.id) { otherRan = true; return { nextRunInMs: Infinity }; }
+        return localHandlers.events(job, signal);
+      } };
+      const stop = new AbortController();
+      const schedulers = Array.from({ length: workers }, () => startScheduler({ handlers: fairHandlers, log, signal: stop.signal, concurrency: 8, pollMs: 20 }));
+      try {
+        await eventually(() => otherRan && active === 2, 1_000);
+        await eventually(async () => (await unsafeDb().select().from(syncTarget)
+          .where(and(inArray(syncTarget.id, ids), sql`${syncTarget.leaseOwner} is not null`))).length === 2, 1_000);
+        expect(maxActive).toBe(2);
+        const deferred = await unsafeDb().select().from(syncTarget).where(and(inArray(syncTarget.id, ids), sql`${syncTarget.leaseVersion} > 0`, sql`${syncTarget.leaseOwner} is null`));
+        expect(deferred.length).toBeGreaterThan(0);
+        for (const row of deferred) expect(row).toMatchObject({ attempts: 0, lastSuccessAt: null, lastError: null });
+      } finally {
+        stop.abort();
+        unblock.open();
+        await Promise.all(schedulers);
+      }
+    },
+  );
+
+  test('one tenant stays within its cap and every due target eventually finishes', async () => {
+    const rows = await unsafeDb().insert(syncTarget).values(Array.from({ length: 12 }, () => ({ tenantId, kind: 'events' as const, targetId: crypto.randomUUID() }))).returning();
+    await only(rows.map((r) => r.id));
+    let active = 0;
+    let maxActive = 0;
+    const handler: JobHandler = async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await Bun.sleep(80);
+      active--;
+      return { nextRunInMs: Infinity };
+    };
+    const stop = new AbortController();
+    const scheduler = startScheduler({ handlers: { ...handlers, events: handler }, log, signal: stop.signal, concurrency: 8, pollMs: 10 });
+    try {
+      await eventually(async () => (await unsafeDb().select().from(syncTarget)
+        .where(and(inArray(syncTarget.id, rows.map((r) => r.id)), sql`${syncTarget.lastSuccessAt} is not null`))).length === rows.length);
+      expect(maxActive).toBe(4);
+    } finally { stop.abort(); await scheduler; }
+  });
+
+  test('the job deadline records its reason, backs off and frees the slot', async () => {
+    const rows = await unsafeDb().insert(syncTarget).values([0, 1].map(() => ({ tenantId, kind: 'events' as const, targetId: crypto.randomUUID() }))).returning();
+    const [blocked, following] = rows;
+    if (!blocked || !following) throw new Error('target insert failed');
+    await only(rows.map((r) => r.id));
+    // Make the blocked job unambiguously first in the due order.
+    await unsafeDb().update(syncTarget).set({ nextRunAt: sql`clock_timestamp() - interval '1 hour'` }).where(eq(syncTarget.id, blocked.id));
+    let followingRan = false;
+    const handler: JobHandler = async (job, signal) => {
+      if (job.id === following.id) { followingRan = true; return { nextRunInMs: Infinity }; }
+      await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('request aborted')), { once: true }));
+      return { nextRunInMs: Infinity };
+    };
+    const stop = new AbortController();
+    const scheduler = startScheduler({ handlers: { ...handlers, events: handler }, log, signal: stop.signal, concurrency: 1, pollMs: 10, jobDeadlineMs: 100 });
+    try {
+      await eventually(() => followingRan, 1_000);
+      const row = await target(blocked.id);
+      expect(row.lastError).toBe('the job ran past its deadline');
+      expect(row.dueIn).toBeGreaterThan(0);
+      expect(row.attempts).toBe(1);
+      const [stored] = await unsafeDb().select().from(syncTarget).where(eq(syncTarget.id, blocked.id));
+      expect(stored?.leaseOwner).toBeNull();
+    } finally { stop.abort(); await scheduler; }
+  });
+
+  test('a busy account refuses immediately; deferring preserves attempts, success and error history', async () => {
+    const slots = createSlots(1);
+    const held = gate();
+    const running = slots('account', () => held.opened);
+    try { await expect(slots('account', async () => {})).rejects.toBeInstanceOf(AccountBusyError); }
+    finally { held.open(); await running; }
+    await slots('account', async () => {});
+    const [row] = await unsafeDb().insert(syncTarget).values({ tenantId, kind: 'events', targetId: crypto.randomUUID(), attempts: 3, lastError: 'previous failure', lastSuccessAt: new Date('2026-01-01') }).returning();
+    if (!row) throw new Error('target insert failed');
+    const job = await claimNow(row.id, 'deferred');
+    await defer(job, 5_000);
+    const [stored] = await unsafeDb().select().from(syncTarget).where(eq(syncTarget.id, row.id));
+    expect(stored).toMatchObject({ attempts: 3, lastSuccessAt: row.lastSuccessAt, lastError: 'previous failure', leaseOwner: null, leaseUntil: null });
+    expect((await target(row.id)).dueIn).toBeGreaterThan(4);
+  });
+
+  test('maintenance is exempt when a tenant has filled its share', async () => {
+    const rows = await unsafeDb().insert(syncTarget).values(Array.from({ length: 6 }, () => ({ tenantId, kind: 'events' as const, targetId: crypto.randomUUID() }))).returning();
+    const [maintenance] = await unsafeDb().insert(syncTarget).values({ kind: 'maintenance', targetId: crypto.randomUUID() }).returning();
+    if (!maintenance) throw new Error('target insert failed');
+    await only([...rows.map((r) => r.id), maintenance.id]);
+    const jobs = await claim('cap', { leaseMs: 30_000, limit: 8, tenantCap: 4, ids: rows.map((r) => r.id) });
+    expect(jobs).toHaveLength(4);
+    const next = await claim('cap', { leaseMs: 30_000, limit: 8, tenantCap: 4 });
+    expect(next.map((j) => j.id)).toEqual([maintenance.id]);
+    await Promise.all([...jobs, ...next].map((j) => complete(j, { ok: true, nextRunInMs: Infinity })));
+  });
+
+  test('discovery selects a stable first 100 calendars and clears the quota detail when it fits', async () => {
+    const fake = createFakeAdapter();
+    for (let i = 119; i >= 0; i--) fake.calendar(`c${String(i).padStart(3, '0')}`);
+    const { account, calendars } = await connect(fake);
+    expect(calendars).toHaveLength(100);
+    expect(calendars.map((c) => c.providerCalendarId)).toEqual(Array.from({ length: 100 }, (_, i) => `c${String(i).padStart(3, '0')}`));
+    expect(account.statusDetail).toBe('Syncing the first 100 of 120 calendars');
+    const discover = await targetOf('discover', account.id);
+    expect(await syncOnce(discover)).toBeUndefined();
+    expect(await unsafeDb().select().from(sourceCalendar).where(eq(sourceCalendar.accountId, account.id))).toHaveLength(100);
+    for (let i = 90; i < 120; i++) fake.calendars.delete(`c${String(i).padStart(3, '0')}`);
+    expect(await syncOnce(discover)).toBeUndefined();
+    const [updated] = await unsafeDb().select().from(calendarAccount).where(eq(calendarAccount.id, account.id));
+    expect(updated?.statusDetail).toBeNull();
+    expect(await unsafeDb().select().from(sourceCalendar).where(and(eq(sourceCalendar.accountId, account.id), eq(sourceCalendar.state, 'active')))).toHaveLength(90);
+  });
+
+  test('passing 50,000 raw objects parks the calendar and preserves its published data', async () => {
+    const fake = createFakeAdapter();
+    const work = fake.calendar('work').put('published', fakeEvent('published@test'));
+    const { calendars } = await connect(fake);
+    const calendar = calendars[0];
+    if (!calendar) throw new Error('no calendar');
+    const id = await targetOf('events', calendar.id);
+    expect(await syncOnce(id)).toBeUndefined();
+    // Seed the boundary directly; the run only has to write the object that crosses it.
+    await unsafeDb().execute(sql`insert into source_object (tenant_id, source_calendar_id, provider_object_id, format, payload, etag, group_uid, seen_generation, dirty)
+      select ${tenantId}, ${calendar.id}, 'seed-' || n, 'ical', '', '', 'seed-' || n, 0, false from generate_series(1, 49999) n`);
+    work.put('extra', fakeEvent('extra@test'));
+    expect(await syncOnce(id)).toBeInstanceOf(StopTargetError);
+    expect(await target(id)).toMatchObject({ lastError: 'This calendar has more than 50,000 events', dueIn: Infinity });
+    expect(await summaries(calendar.id)).toEqual({ 'published@test': 'published@test' });
+  });
+
 });

@@ -28,6 +28,16 @@ afterAll(async () => {
 });
 
 describe('dashboard serving', () => {
+  test('dashboard, API and reference responses forbid framing and isolate openers', async () => {
+    for (const path of ['/invite/abc', '/api/v1/openapi.json', '/api/docs', '/api/auth/reference']) {
+      const res = await app.request(path);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+      expect(res.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
+      expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    }
+  });
+
   test('hashed assets are cached for a year', async () => {
     const res = await app.request('/assets/index-abc123.js');
     expect(res.status).toBe(200);

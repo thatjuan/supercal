@@ -43,6 +43,13 @@ describe.skipIf(!testDatabaseUrl)('tenant isolation', () => {
     await closeDb();
   });
 
+  test('the shared pool bounds idle transactions without limiting active statements', async () => {
+    const [idle] = await unsafeDb().execute<{ idle_in_transaction_session_timeout: string }>(sql`show idle_in_transaction_session_timeout`);
+    const [statement] = await unsafeDb().execute<{ statement_timeout: string }>(sql`show statement_timeout`);
+    expect(idle?.idle_in_transaction_session_timeout).toBe('1min');
+    expect(statement?.statement_timeout).toBe('0');
+  });
+
   test('a query without WHERE sees only the current tenant, as supercal_app', async () => {
     const seen = await withTenant(tenantA, async (tx) => {
       const [role] = await tx.execute<{ current_user: string }>(sql`select current_user`);
@@ -85,6 +92,22 @@ describe.skipIf(!testDatabaseUrl)('tenant isolation', () => {
     expect(await sqlState(withControl((tx) => tx.select().from(resource)))).toBe('42501');
     expect(await sqlState(withControl((tx) => tx.select().from(calendarAccount)))).toBe('42501');
     expect(await sqlState(withControl((tx) => tx.select({ provider: calendarAccount.provider }).from(calendarAccount)))).toBe('42501');
+  });
+
+  test('supercal_control reads live resource metadata but cannot read event columns or delete live rows', async () => {
+    const calendarId = newId('cal');
+    const { maxSeq } = await withTenant(tenantA, async (tx) => {
+      await tx.insert(sourceCalendar).values({ id: calendarId, tenantId: tenantA, accountId: accountA, providerCalendarId: 'control-metadata', name: 'C' });
+      return recordChanges(tx, [{ op: 'upsert', sourceCalendarId: calendarId, uid: 'control-live', resource: { uid: 'control-live', master: null, overrides: [], timezones: {} }, revision: 'secret', sequence: null, lastModified: null, organizer: null, span: { start: new Date('2026-11-09T09:00:00Z'), end: new Date('2026-11-09T10:00:00Z') }, completeness: 'complete' }]);
+    });
+    const rows = await withControl((tx) => tx.select({ calendarId: resource.sourceCalendarId, seq: resource.seq, changedAt: resource.changedAt, deleted: resource.deleted }).from(resource).where(eq(resource.sourceCalendarId, calendarId)));
+    expect(rows).toEqual([{ calendarId, seq: maxSeq!, changedAt: expect.any(Date), deleted: false }]);
+    for (const column of [resource.data, resource.uid, resource.revision, resource.tenantId])
+      expect(await sqlState(withControl((tx) => tx.select({ denied: column }).from(resource)))).toBe('42501');
+    // Attempt a live-row deletion without the purge's own deleted predicate, exercising RLS itself.
+    const deleted = await withControl((tx) => tx.execute(sql`delete from ${resource} where ${resource.sourceCalendarId} = ${calendarId} returning ${resource.seq}`));
+    expect(deleted).toHaveLength(0);
+    expect(await withTenant(tenantA, (tx) => resourcesIn(tx, [calendarId]))).toHaveLength(1);
   });
 
   test('supercal_control can delete a tenant, cascading through its RLS tables', async () => {

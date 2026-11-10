@@ -1,6 +1,6 @@
 /**
  * Sign-up on a production-shaped install: `invite` mode with mail on, against a daemon of its own
- * (`serve-verified.ts`). The first user becomes the operator through the confirmation link, and an
+ * (`serve-verified.ts`). The first user becomes the operator after confirming and signing in, and an
  * invitee confirms and then accepts. The links come from the mail the daemon really produced.
  */
 import { expect, test, type Page } from '@playwright/test';
@@ -38,7 +38,7 @@ async function fillSignUp(page: Page, name: string, email: string) {
 
 const notice = (page: Page, email: string) => page.getByRole('status').filter({ hasText: email });
 
-test('the first user confirms by email and lands on their tenant as operator', async ({ page }) => {
+test('the first user confirms by email, then signs in to their tenant as operator', async ({ page }) => {
   await page.goto('/sign-up');
   await expect(page.getByRole('heading', { name: 'Set up Supercal' })).toBeVisible();
   await fillSignUp(page, 'Olga Owner', OWNER);
@@ -49,6 +49,12 @@ test('the first user confirms by email and lands on their tenant as operator', a
   await expect(page).toHaveURL(/\/sign-up$/);
 
   await page.goto(await mailedLink(OWNER, 'Confirm your email'));
+  await expect(page).toHaveURL(/\/sign-in\?verified=1$/);
+  await expect(page.getByRole('status')).toHaveText('Your email is confirmed. Sign in, or reset your password if you opened the link on another device.');
+  expect((await page.request.get('/api/v1/me')).status()).toBe(401);
+  await page.getByLabel('Email').fill(OWNER);
+  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page).toHaveURL(/\/welcome$/);
   await expect(page.getByRole('heading', { name: 'No tenant yet' })).toHaveCount(0);
   const nav = page.getByRole('navigation', { name: 'Main' });
@@ -81,8 +87,36 @@ test('an invitee confirms by email and accepts the invitation', async ({ page, b
 
   await invitee.goto(await mailedLink(INVITEE, 'Confirm your email'));
   await expect(invitee).toHaveURL(invitation);
+  await invitee.getByRole('link', { name: 'Sign in to accept' }).click();
+  await expect(invitee.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await invitee.getByLabel('Email').fill(INVITEE);
+  await invitee.getByLabel('Password').fill(PASSWORD);
+  await invitee.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(invitee).toHaveURL(invitation);
   await invitee.getByRole('button', { name: 'Accept invitation' }).click();
   await expect(invitee).toHaveURL(/\/welcome$/);
   await expect(invitee.getByRole('button', { name: /Olga Owner.*Switch tenant/ })).toBeVisible();
   await context.close();
+});
+
+test('an operator explicitly confirms assigning an unverified owner', async ({ page }) => {
+  await page.goto('/sign-in');
+  await page.getByLabel('Email').fill(OWNER);
+  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/welcome$/);
+  const ownerEmail = 'unverified-owner@example.invalid';
+  const seed = await page.request.post('/api/v1/tenants', {
+    headers: { origin: new URL(page.url()).origin },
+    data: { name: 'First unverified tenant', ownerEmail },
+  });
+  expect(seed.status()).toBe(201);
+  await page.goto('/operator');
+  await page.getByLabel('Name', { exact: true }).fill('Confirmed assignment');
+  await page.getByLabel('Owner email').fill(ownerEmail);
+  await page.getByRole('button', { name: 'Create tenant', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('An unverified account holds that email');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Assign anyway' }).click();
+  await expect(page.getByRole('region', { name: 'New tenant' }).getByRole('status')).toContainText(`Created Confirmed assignment, owned by ${ownerEmail}`);
 });

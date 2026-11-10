@@ -13,7 +13,13 @@ import { closeDb, connectDb, unsafeDb } from './unsafe-db.ts';
 test('nothing outside changes.ts writes resource', async () => {
   const root = join(import.meta.dir, '../../..');
   const writes = [/\.(insert|update|delete)\(\s*resource\s*\)/, /\b(insert\s+into|update|delete\s+from)\s+"?resource\b/i];
-  const allowed = new Set(['packages/db/src/changes.ts']);
+  const allowed = new Set([
+    'packages/db/src/changes.ts',
+    // Legacy poison-object fixtures deliberately bypass the ingestion gate to test read isolation.
+    'apps/daemon/test/dav/dav.test.ts',
+    'apps/daemon/test/events.test.ts',
+    'apps/daemon/test/feeds.test.ts',
+  ]);
   const offenders: string[] = [];
   for (const dir of ['apps', 'packages'])
     for await (const file of new Bun.Glob(`${dir}/**/*.{ts,tsx}`).scan({ cwd: root })) {
@@ -204,6 +210,22 @@ describe.skipIf(!testDatabaseUrl)('change log', () => {
     expect(setting?.value).toBe(Number(floor));
     const left = await inSecond((tx) => changesSince(tx, [cal], start, 10));
     expect(left.rows.map((row) => row.uid).sort()).toEqual(['live', 'recent']);
+  });
+
+  test('purging keeps the newest tombstone until a newer calendar row arrives', async () => {
+    const cal = calendars[2] as SourceCalendarId, inThird = inTenant(tenants[2] as TenantId);
+    await inThird((tx) => recordChanges(tx, [upsert(cal, 'purge-anchor')]));
+    const { maxSeq: deleted } = await inThird((tx) => recordChanges(tx, [remove(cal, 'purge-anchor')]));
+    const cutoff = new Date(Date.now() + 60_000);
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const retained = await inThird((tx) => changesSince(tx, [cal], 0n, 1000));
+    expect(retained.rows.find((row) => row.uid === 'purge-anchor')).toMatchObject({ deleted: true, seq: deleted });
+    expect((await inThird((tx) => publicationState(tx, [cal]))).maxSeq).toBe(deleted!);
+    const { maxSeq: newer } = await inThird((tx) => recordChanges(tx, [upsert(cal, 'newer-than-anchor')]));
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const removed = await inThird((tx) => changesSince(tx, [cal], 0n, 1000));
+    expect(removed.rows.some((row) => row.uid === 'purge-anchor')).toBe(false);
+    expect((await inThird((tx) => publicationState(tx, [cal]))).maxSeq).toBe(newer!);
   });
 
   test('NOTIFY reaches another connection only after commit, and never on rollback', async () => {

@@ -15,6 +15,8 @@ export const NS = {
 
 export type XmlEl = { ns: string; name: string; attrs: Record<string, string>; children: XmlEl[]; text: string };
 
+type Scope = Record<string, string>;
+
 type RawNode = Record<string, RawNode[] | string | Record<string, string>>;
 
 const parser = new XMLParser({
@@ -29,23 +31,21 @@ const parser = new XMLParser({
 /** The root element of `src` with namespaces resolved, or undefined when it has none or is not XML. */
 export function parseXml(src: string): XmlEl | undefined {
   try {
-    return convert(parser.parse(src) as RawNode[], {}).find((e) => e.name);
+    return convert(parser.parse(src) as RawNode[], Object.create(null) as Scope).find((e) => e.name);
   } catch {
     return undefined;
   }
 }
 
-function convert(nodes: RawNode[], scope: Record<string, string>): XmlEl[] {
+function convert(nodes: RawNode[], scope: Scope): XmlEl[] {
   const out: XmlEl[] = [];
   for (const node of nodes) {
     const attrs = (node[':@'] ?? {}) as Record<string, string>;
     for (const [tag, value] of Object.entries(node)) {
       if (tag === ':@' || tag === '#text' || tag.startsWith('?')) continue;
-      const local = { ...scope };
-      for (const [k, v] of Object.entries(attrs)) {
-        if (k === 'xmlns') local[''] = v;
-        else if (k.startsWith('xmlns:')) local[k.slice(6)] = v;
-      }
+      const declarations = Object.entries(attrs).filter(([k]) => k === 'xmlns' || k.startsWith('xmlns:'));
+      const local: Scope = declarations.length ? (Object.create(scope) as Scope) : scope;
+      for (const [k, v] of declarations) local[k === 'xmlns' ? '' : k.slice(6)] = v;
       const [prefix, name] = tag.includes(':') ? (tag.split(':', 2) as [string, string]) : ['', tag];
       const kids = Array.isArray(value) ? value : [];
       const text = kids.map((k) => (typeof k['#text'] === 'string' ? k['#text'] : '')).join('');

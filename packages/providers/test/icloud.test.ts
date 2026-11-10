@@ -1,11 +1,11 @@
 /**
  * The iCloud preset over the real guarded transport and a local server answering for several
- * hosts: Basic credentials follow a redirect into a partition host (`p42-caldav.icloud.com`) and
- * are stripped on a redirect anywhere else.
+ * hosts: Basic credentials are stripped on HTTP redirects, including partition hosts.
+ * HTTPS partition permissions are covered in caldav.test.ts.
  */
 import { afterAll, expect, test } from 'bun:test';
 import { AuthFailedError, createCaldavAdapter, createGuardedFetch, icloudLogin, type ProviderCredentials } from '../src/index.ts';
-import { collect, davContext, DavFixture, event } from './dav-fixture.ts';
+import { davContext, DavFixture, event } from './dav-fixture.ts';
 
 const credentials: ProviderCredentials = { provider: 'icloud', appleId: 'me@icloud.com', appSpecificPassword: 'abcd-efgh-ijkl-mnop' };
 const expected = `Basic ${btoa('me@icloud.com:abcd-efgh-ijkl-mnop')}`;
@@ -34,15 +34,14 @@ const origins = ['caldav.icloud.com', 'p42-caldav.icloud.com', 'evil.example'].m
 const guarded = createGuardedFetch({ allow: origins }, { resolve: async () => [{ address: '127.0.0.1', family: 4 }] });
 const icloud = createCaldavAdapter('icloud', (c) => icloudLogin(c, `http://caldav.icloud.com:${port}/`));
 
-test('credentials survive a redirect into an iCloud partition host, and sync runs there', async () => {
+test('HTTP partition redirects lose credentials even when the starting test origin is trusted', async () => {
   seen.length = 0;
-  const ctx = davContext(guarded, credentials);
-  const [calendar] = await icloud.listCalendars(ctx);
-  expect(calendar?.providerCalendarId).toBe(`http://p42-caldav.icloud.com:${port}/u/cals/home/`);
-  expect(seen.filter((s) => s.host === 'p42-caldav.icloud.com').every((s) => s.authorization === expected)).toBe(true);
-  if (!calendar) throw new Error('no calendar');
-  const items = await collect(icloud.sync(ctx, { id: 'cal_1', providerCalendarId: calendar.providerCalendarId, capabilities: calendar.capabilities }, null));
-  expect(items.flatMap((i) => (i.kind === 'page' ? i.upserts.map((o) => o.groupUid) : []))).toEqual(['a']);
+  redirectTo = 'p42-caldav.icloud.com';
+  await expect(icloud.listCalendars(davContext(guarded, credentials))).rejects.toBeInstanceOf(AuthFailedError);
+  expect(seen[0]).toEqual({ host: 'caldav.icloud.com', authorization: expected });
+  const partition = seen.filter((s) => s.host === 'p42-caldav.icloud.com');
+  expect(partition.length).toBeGreaterThan(0);
+  expect(partition.every((s) => s.authorization === null)).toBe(true);
 });
 
 test('credentials are stripped on a redirect to another host', async () => {

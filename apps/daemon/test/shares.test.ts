@@ -129,6 +129,20 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
       expect({ tenant, level, statuses }).toEqual({ tenant, level, statuses: [busyStatus, readStatus, writeStatus, metadataStatus, shareStatus, deleteStatus] });
       if (tenant) await withTenant(owner.tenantId, (tx) => tx.delete(calendarShare).where(eq(calendarShare.calendarId, cal.id)));
     }
+  }, 20_000);
+
+  test('deleted calendars hide every event read from grantees while owners and tenant admins can read', async () => {
+    const cal = await calendar(); await share(cal, 'read');
+    expect((await call(owner, `/calendars/${cal.id}`, 'DELETE')).status).toBe(204);
+    const admin: Principal = { ...colleague, role: 'admin' };
+    for (const suffix of ['/events', '/events/private', '/occurrences?from=2026-11-09T00:00:00Z&to=2026-11-10T00:00:00Z', '/changes', '/export.ics']) {
+      expect((await call(colleague, `/calendars/${cal.id}${suffix}`)).status).toBe(404);
+      for (const who of [owner, admin]) {
+        const response = await call(who, `/calendars/${cal.id}${suffix}`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain('Secret');
+      }
+    }
   });
 
   test('highest grant wins; free-busy listing omits metadata and owner publication ids', async () => {
@@ -277,19 +291,21 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
     const input = { from: '2026-11-09T00:00:00Z', to: '2026-11-10T00:00:00Z', calendarIds: [cal.id, privateCal.id, gone.id, missing] };
     const response = await call(colleague, '/free-busy', 'POST', input); expect(response.status).toBe(200);
     expect(await json(response)).toEqual({ calendars: { [cal.id]: { busy: [{ start: '2026-11-09T09:00:00Z', end: '2026-11-09T10:00:00Z', status: 'busy' }], truncated: false }, [privateCal.id]: { error: 'not-accessible' }, [gone.id]: { error: 'not-accessible' }, [missing]: { error: 'not-accessible' } } });
-    for (const patch of [{ to: input.from }, { to: '2027-01-11T00:00:00Z' }, { calendarIds: Array.from({ length: 51 }, () => cal.id) }]) expect((await call(colleague, '/free-busy', 'POST', { ...input, ...patch })).status).toBe(400);
+    for (const patch of [{ to: input.from }, { to: '2027-01-11T00:00:00Z' }, { from: '2526-11-09T00:00:00Z', to: '2526-11-10T00:00:00Z' }, { calendarIds: Array.from({ length: 51 }, () => cal.id) }]) expect((await call(colleague, '/free-busy', 'POST', { ...input, ...patch })).status).toBe(400);
     expect((await davCall(home, 'PROPFIND', undefined, { Depth: '1' })).text).not.toContain(cal.id);
     const read = await calendar(); await share(read, 'read');
     expect((await davCall(`${home}${read.id}/`)).text).toContain('free-busy-query');
     const report = await davCall(`${home}${read.id}/`, 'REPORT', xml('c:free-busy-query', '<c:time-range start="20261109T000000Z" end="20261110T000000Z"/>'));
     expect(report.status).toBe(200); expect(report.text).toContain('FREEBUSY;FBTYPE=BUSY:20261109T090000Z/20261109T100000Z');
-    for (const range of ['', '<c:time-range start="nonsense"/>', '<c:time-range start="20261110T000000Z" end="20261109T000000Z"/>']) expect((await davCall(`${home}${read.id}/`, 'REPORT', xml('c:free-busy-query', range))).status).toBe(400);
+    for (const range of ['', '<c:time-range start="nonsense"/>', '<c:time-range start="20261110T000000Z" end="20261109T000000Z"/>', '<c:time-range start="20261109T000000Z" end="20270111T000000Z"/>', '<c:time-range start="25261109T000000Z" end="25261110T000000Z"/>']) expect((await davCall(`${home}${read.id}/`, 'REPORT', xml('c:free-busy-query', range))).status).toBe(400);
   });
 
   test('member removal hook deletes personal grants before re-invitation', async () => {
     const cal = await calendar(); await share(cal, 'read');
+    expect((await authCall('/organization/leave', colleagueCookie, { organizationId: owner.tenantId })).status).toBe(404);
     expect((await authCall('/organization/remove-member', ownerCookie, { memberIdOrEmail: 'colleague@sharing.test', organizationId: owner.tenantId })).status).toBe(200);
     const remaining = await unsafeDb().select().from(calendarShare).where(eq(calendarShare.granteeUserId, colleague.userId)); expect(remaining).toEqual([]);
+    expect(await unsafeDb().select().from(davLogin).where(eq(davLogin.userId, colleague.userId))).toEqual([]);
     const invite = await authCall('/organization/invite-member', ownerCookie, { email: 'colleague@sharing.test', role: 'member', organizationId: owner.tenantId }); expect(invite.status).toBe(200);
     const invitation = z.object({ id: z.string() }).parse(await json(invite));
     expect((await authCall('/organization/accept-invitation', colleagueCookie, { invitationId: invitation.id })).status).toBe(200);

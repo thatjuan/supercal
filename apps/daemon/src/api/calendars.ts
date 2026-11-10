@@ -45,8 +45,8 @@ const CalendarList = z.object({ items: z.array(Calendar) }).openapi('CalendarLis
 /** Calendar metadata, with private publication membership visible only to owners and admins. */
 export async function toCalendars(tx: TenantTx, calendars: SourceCalendar[], grants?: { calendar: SourceCalendar; access: Access }[]): Promise<z.infer<typeof Calendar>[]> {
   if (!calendars.length) return [];
-  const accounts = await tx.select({ id: calendarAccount.id, provider: calendarAccount.provider, ownerId: user.id, ownerName: user.name })
-    .from(calendarAccount).innerJoin(user, eq(user.id, calendarAccount.ownerUserId))
+  const accounts = await tx.select({ id: calendarAccount.id, provider: calendarAccount.provider, ownerId: calendarAccount.ownerUserId, ownerName: user.name })
+    .from(calendarAccount).leftJoin(user, eq(user.id, calendarAccount.ownerUserId))
     .where(inArray(calendarAccount.id, calendars.map((c) => c.accountId)));
   const byAccount = new Map(accounts.map((account) => [account.id, account]));
   const byId = new Map(grants?.map((grant) => [grant.calendar.id, grant.access]));
@@ -59,7 +59,7 @@ export async function toCalendars(tx: TenantTx, calendars: SourceCalendar[], gra
     const hosted = account.provider === 'hosted';
     return {
       id: calendar.id, name: calendar.name, color: calendar.color, timezone: calendar.timezone, state: calendar.state, access,
-      owner: { id: account.ownerId, name: account.ownerName },
+      owner: { id: account.ownerId, name: account.ownerName ?? 'Former member' },
       ...(hosted ? { kind: 'hosted' as const, ...(access !== 'free-busy' && { accountId: null }) } : { kind: 'connected' as const, ...(access !== 'free-busy' && { accountId: calendar.accountId }) }),
       ...(access === 'free-busy' ? {} : {
         description: calendar.description, sortOrder: calendar.sortOrder,

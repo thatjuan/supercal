@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Temporal } from "@js-temporal/polyfill";
-import { type EventResource, UnknownTimeZoneError, expandOccurrences, parseCalendar, spanOf } from "../src/index.ts";
+import { type EventResource, UnknownTimeZoneError, expandOccurrences, parseCalendar, serializeCalendar, spanOf, validateObject, MAX_ITERATIONS } from "../src/index.ts";
 
 const tricky = parseCalendar(readFileSync(new URL("./fixtures/tricky.ics", import.meta.url), "utf8")).resources;
 const byUid = (uid: string): EventResource => {
@@ -20,6 +20,26 @@ function resource(...vevent: string[]): EventResource {
 }
 
 const starts = (r: EventResource, w = ALL, zone?: string) => expandOccurrences(r, w, zone).occurrences.map((o) => o.start.toString());
+
+describe('spanOf recurrence validation', () => {
+  test('unbounded rules reject unreadable EXDATEs', () => {
+    const data = resource('DTSTART:20261109T090000Z', 'RRULE:FREQ=DAILY', 'EXDATE;TZID=Unknown/Zone:20261110T090000');
+    expect(() => spanOf(data)).toThrow(UnknownTimeZoneError);
+    expect(validateObject(serializeCalendar({ props: [], resources: [data] }))).toMatchObject({ ok: false, code: 'invalid-calendar-data' });
+  });
+
+  test('unbounded rules reject malformed RDATEs', () => {
+    const data = resource('DTSTART:20261109T090000Z', 'RRULE:FREQ=DAILY', 'RDATE:20261110T090000Z');
+    const rdate = data.master?.[1].find((p) => p[0] === 'rdate');
+    if (!rdate) throw new Error('no RDATE');
+    rdate[3] = 'invalid';
+    expect(() => spanOf(data)).toThrow(RangeError);
+  });
+
+  test('unbounded rules with readable recurrence values remain infinite', () => {
+    expect(spanOf(resource('DTSTART:20261109T090000Z', 'RRULE:FREQ=DAILY', 'EXDATE;TZID=Europe/Paris:20261110T090000', 'RDATE:20261111T090000Z')).end).toBe('infinity');
+  });
+});
 
 describe("expandOccurrences", () => {
   test("a weekly New York series crosses both 2026 DST transitions at the right UTC instants", () => {
@@ -106,5 +126,77 @@ describe("spanOf", () => {
     const flight = spanOf(byUid("flight@example.com"));
     expect([flight.start.toString(), flight.end.toString()]).toEqual(["2026-11-20T23:00:00Z", "2026-11-21T07:00:00Z"]);
     expect(spanOf(resource("DTSTART:20260101T090000Z", "RRULE:FREQ=DAILY")).end).toBe("infinity");
+  });
+});
+
+
+describe("object work budgets", () => {
+  for (const suffix of [";COUNT=2", ""])
+    test(`an impossible daily rule returns with truncation (${suffix || "unbounded"})`, () => {
+      const started = performance.now();
+      const r = resource("DTSTART:20260101T090000Z", `RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30${suffix}`);
+      expect(expandOccurrences(r, ALL).truncated).toBe(true);
+      expect(spanOf(r).end).toBe("infinity");
+      expect(validateObject(serializeCalendar({ props: [], resources: [r] })).ok).toBe(true);
+      expect(performance.now() - started).toBeLessThan(2000);
+    }, 2000);
+
+  test("a rarely matching secondly rule exhausts its steps across yielded values", () => {
+    const started = performance.now();
+    const r = resource("DTSTART:20260101T000000Z", "RRULE:FREQ=SECONDLY;BYHOUR=0;BYMINUTE=0;BYSECOND=0;COUNT=200000");
+    expect(expandOccurrences(r, ALL).truncated).toBe(true);
+    expect(performance.now() - started).toBeLessThan(2000);
+  }, 2000);
+
+  for (const frequency of ["HOURLY", "DAILY"])
+    test(`a huge ${frequency} interval is refused before stepping`, () => {
+      const started = performance.now();
+      const r = resource("DTSTART:20260101T090000Z", `RRULE:FREQ=${frequency};INTERVAL=1000000000000;COUNT=2`);
+      expect(expandOccurrences(r, ALL)).toEqual({ occurrences: [], truncated: true });
+      expect(spanOf(r).end).toBe("infinity");
+      expect(performance.now() - started).toBeLessThan(2000);
+    }, 2000);
+
+  test("ordinary intervals still yield every value", () => {
+    const r = resource("DTSTART:20260101T090000Z", "RRULE:FREQ=DAILY;INTERVAL=7;COUNT=10");
+    const result = expandOccurrences(r, ALL);
+    expect(result.truncated).toBe(false);
+    expect(result.occurrences).toHaveLength(10);
+    expect(result.occurrences.at(-1)?.start.toString()).toBe("2026-03-05T09:00:00Z");
+  });
+
+  test("the occurrence cap makes a bounded series span infinite", () => {
+    const started = performance.now();
+    const r = resource("DTSTART:20260101T090000Z", `RRULE:FREQ=DAILY;COUNT=${MAX_ITERATIONS + 1}`);
+    expect(spanOf(r).end).toBe("infinity");
+    expect(performance.now() - started).toBeLessThan(2000);
+  }, 2000);
+
+  test("RDATE lookup for 8,000 dates is comparable to EXDATE lookup", () => {
+    const dates = Array.from({ length: 8000 }, (_, n) => new Date(Date.UTC(2026, 0, n + 2, 9)).toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z').join(',');
+    const rdates = resource("DTSTART:20260101T090000Z", `RDATE:${dates}`);
+    const exdates = resource("DTSTART:20260101T090000Z", `EXDATE:${dates}`);
+    const started = performance.now();
+    spanOf(exdates);
+    const exdateMs = performance.now() - started;
+    const rdateStarted = performance.now();
+    expect(spanOf(rdates).end.toString()).toBe("2047-11-27T09:00:00Z");
+    const rdateMs = performance.now() - rdateStarted;
+    expect(rdateMs).toBeLessThan(exdateMs * 4 + 100);
+    expect(performance.now() - started).toBeLessThan(2000);
+  }, 2000);
+
+  test("a repeated RDATE period updates the original base's length", () => {
+    const r = resource("DTSTART:20260101T090000Z", "RDATE:20260102T090000Z", "RDATE;VALUE=PERIOD:20260102T090000Z/PT3H");
+    const result = expandOccurrences(r, ALL);
+    expect(result.occurrences).toHaveLength(2);
+    expect(result.occurrences[1]?.end.toString()).toBe("2026-01-02T12:00:00Z");
+  });
+
+  test("10,001 RDATE values or overrides exceed the object cap", () => {
+    const r = resource("DTSTART:20260101T090000Z", `RDATE:${Array.from({ length: 10001 }, () => '20260102T090000Z').join(',')}`);
+    expect(() => spanOf(r)).toThrow(RangeError);
+    const single = resource("DTSTART:20260101T090000Z");
+    expect(() => spanOf({ ...single, overrides: Array.from({ length: 10001 }, () => single.master!) })).toThrow(RangeError);
   });
 });

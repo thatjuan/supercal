@@ -224,6 +224,27 @@ describe.skipIf(!testDatabaseUrl)('Microsoft provider', () => {
     }
   });
 
+  test('both hook routes reject oversized bodies with Content-Length and chunked transfer', async () => {
+    for (const path of ['/hooks/microsoft', '/hooks/microsoft/lifecycle']) {
+      for (const chunked of [false, true]) {
+        const body = new TextEncoder().encode(JSON.stringify({ value: [], padding: 'x'.repeat(256 * 1024) }));
+        const res = await microsoftHooks.request(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(chunked ? { 'transfer-encoding': 'chunked' } : { 'content-length': String(body.byteLength) }) },
+          body: chunked ? new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(body.subarray(0, 128 * 1024)); controller.enqueue(body.subarray(128 * 1024)); controller.close(); } }) : body,
+        });
+        expect(res.status).toBe(413);
+      }
+    }
+  });
+
+  test('both hook routes reject more than 1,000 notifications', async () => {
+    for (const path of ['/hooks/microsoft', '/hooks/microsoft/lifecycle']) {
+      const res = await microsoftHooks.request(path, { method: 'POST', body: JSON.stringify({ value: Array.from({ length: 1001 }, () => ({ subscriptionId: 'unknown', clientState: 'wrong' })) }) });
+      expect(res.status).toBe(400);
+    }
+  });
+
   test('a notification wakes every calendar of the account; a wrong clientState is ignored', async () => {
     const subscription = theSubscription();
     const ids = [await targetOf('events', account.calendarA), await targetOf('events', account.calendarB)];

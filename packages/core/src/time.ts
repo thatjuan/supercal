@@ -6,7 +6,7 @@
  */
 import { Temporal } from "@js-temporal/polyfill";
 import { getProp, getProps, propParam, propParams, propType, propValues, recurrenceId, rrule } from "./accessors.ts";
-import { rruleWallTimes, vtimezoneUtcOffset } from "./ical.ts";
+import { RecurBudgetError, rruleWallTimes, vtimezoneUtcOffset } from "./ical.ts";
 import type { EventResource, JCalComponent, JCalProperty, JCalValue, Occurrence } from "./model.ts";
 
 /** Thrown when a TZID is neither an IANA zone nor defined by a VTIMEZONE we hold. Never UTC. */
@@ -26,7 +26,9 @@ const ALL_TIME: TimeWindow = {
   to: Temporal.Instant.from("9999-12-31T00:00:00Z"),
 };
 // Guards RRULE iteration (e.g. FREQ=MINUTELY over decades); hitting it reports `truncated`.
-const MAX_ITERATIONS = 200_000;
+export const MAX_ITERATIONS = 20_000;
+const MAX_RDATES = 10_000;
+const MAX_OVERRIDES = 10_000;
 
 type Wall = Temporal.PlainDateTime | Temporal.PlainDate;
 /** A DATE or DATE-TIME value: wall time plus the zone it is read in (`utc` marks a `Z` value). */
@@ -138,9 +140,10 @@ function resolveOverride(c: JCalComponent, cv: Converter, masterLength: Length |
  * Occurrences of the resource that overlap `window`, sorted by start: the master's RRULE and
  * RDATEs minus EXDATEs, with overrides replacing their instance and RANGE=THISANDFUTURE overrides
  * shifting every later instance by the same offset and length. At most `limit` are returned;
- * `truncated` says more existed (or iteration hit its safety bound).
+ * `truncated` says more existed (or iteration hit its safety bound). An optional shared
+ * budget limits RRULE values across multiple resource expansions.
  */
-export function expandOccurrences(resource: EventResource, window: TimeWindow, calendarZone = "UTC", limit = 5000): Expansion {
+export function expandOccurrences(resource: EventResource, window: TimeWindow, calendarZone = "UTC", limit = 5000, budget?: { remaining: number }): Expansion {
   const cv = converter(resource, calendarZone);
   const master = resource.master;
   const masterStart = master && cv.startOf(master);
@@ -169,17 +172,24 @@ export function expandOccurrences(resource: EventResource, window: TimeWindow, c
     const rule = rrule(master);
     if (rule) {
       let n = 0;
-      for (const wall of rruleWallTimes(rule.prop, masterStart.wall)) {
-        if (++n > MAX_ITERATIONS) {
-          truncated = true;
-          break;
+      try {
+        for (const wall of rruleWallTimes(rule.prop, masterStart.wall)) {
+          if (++n > MAX_ITERATIONS || (budget && budget.remaining <= 0)) {
+            truncated = true;
+            break;
+          }
+          if (budget) budget.remaining--;
+          const point = { ...masterStart, wall };
+          const instant = cv.instantOf(point);
+          if (until(instant) || instant.epochMilliseconds > horizon) break;
+          bases.push({ point, instant });
         }
-        const point = { ...masterStart, wall };
-        const instant = cv.instantOf(point);
-        if (until(instant) || instant.epochMilliseconds > horizon) break;
-        bases.push({ point, instant });
+      } catch (error) {
+        if (!(error instanceof RecurBudgetError)) throw error;
+        truncated = true;
       }
     } else bases.push({ point: masterStart, instant: cv.instantOf(masterStart) });
+    const byInstant = new Map(bases.map((base) => [base.instant.epochMilliseconds, base]));
     for (const p of getProps(master, "rdate"))
       for (const v of propValues(p)) {
         const point = cv.pointOf(p, v, propParam(p, "tzid") ?? masterStart.zone);
@@ -191,9 +201,13 @@ export function expandOccurrences(resource: EventResource, window: TimeWindow, c
             : undefined;
           const length = periodProperty ? cv.lengthOf(['vevent', [periodProperty], []], point) : null;
           const instant = cv.instantOf(point);
-          const prior = bases.find((base) => base.instant.equals(instant));
+          const prior = byInstant.get(instant.epochMilliseconds);
           if (prior && length) prior.length = length;
-          else if (!prior) bases.push({ point, instant, ...(length && { length }) });
+          else if (!prior) {
+            const base = { point, instant, ...(length && { length }) };
+            bases.push(base);
+            byInstant.set(instant.epochMilliseconds, base);
+          }
         }
       }
 
@@ -203,7 +217,14 @@ export function expandOccurrences(resource: EventResource, window: TimeWindow, c
       if (seen.has(key) || excluded.has(key) || exact.has(key)) continue;
       seen.add(key);
       const recurrenceId = formatWall(point.wall) + (point.utc ? "Z" : "");
-      const range = ranges.findLast((o) => Temporal.Instant.compare(o.ridInstant, instant) <= 0);
+      // Upper bound: the last THISANDFUTURE override at or before this instant.
+      let lo = 0, hi = ranges.length;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (Temporal.Instant.compare(ranges[mid]!.ridInstant, instant) <= 0) lo = mid + 1;
+        else hi = mid;
+      }
+      const range = ranges[lo - 1];
       if (range) {
         const start = instant.add({ milliseconds: range.occurrence.start.epochMilliseconds - range.ridInstant.epochMilliseconds });
         const ms = range.occurrence.end.epochMilliseconds - range.occurrence.start.epochMilliseconds;
@@ -238,13 +259,28 @@ function untilCheck(master: JCalComponent, start: Point, cv: Converter): (i: Tem
 
 /**
  * First start to last end over master and overrides. An RRULE without COUNT or UNTIL gives
- * `'infinity'`; a bounded one ends at its last occurrence's end, found by expansion.
+ * `'infinity'`; a bounded one ends at its last occurrence's end, found by expansion,
+ * or at infinity when expansion exhausts its work budget.
  */
 export function spanOf(resource: EventResource, calendarZone = "UTC"): Span {
+  if (resource.overrides.length > MAX_OVERRIDES) throw new RangeError('Object exceeds 10,000 overrides');
+  let rdates = 0;
+  for (const component of [resource.master, ...resource.overrides]) {
+    if (!component) continue;
+    for (const prop of getProps(component, 'rdate')) {
+      rdates += propValues(prop).length;
+      if (rdates > MAX_RDATES) throw new RangeError('Object exceeds 10,000 RDATE values');
+    }
+  }
   const cv = converter(resource, calendarZone);
   const rule = resource.master && rrule(resource.master);
   const own = ownTimings(resource, cv);
-  if (rule && !rule.until && rule.count === null) return { start: earliest(own), end: "infinity" };
+  if (rule && !rule.until && rule.count === null) {
+    const start = earliest(own);
+    // Parse recurrence values here so unreadable objects fail at ingestion, before later reads.
+    expandOccurrences(resource, { from: start, to: start }, calendarZone, 1);
+    return { start, end: "infinity" };
+  }
   const { occurrences, truncated } = expandOccurrences(resource, ALL_TIME, calendarZone, MAX_ITERATIONS);
   // Every instance excluded: fall back to the components' own timing.
   const pool = occurrences.length ? occurrences : own;

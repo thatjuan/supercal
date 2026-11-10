@@ -57,7 +57,12 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   events do not count; private events do. Readable device CalDAV collections also support
   free-busy REPORT. Free-busy-only grants use REST and receive no event-change stream.
 - Revoke a grant for the recipient's next request. Removing a tenant member deletes personal
-  grants, so re-inviting them does not restore access. Tenant-wide grants apply to current members.
+  grants, device logins and API keys, clears feed credentials, and disables connected accounts while
+  erasing their provider credentials. Their targets stop syncing; already synced events stay published
+  until an admin deletes the account. Re-inviting requires new credentials and personal grants;
+  tenant-wide grants apply to current members. A ban pauses authenticated access, feed subscriptions and syncing until it is lifted.
+- A published link created by a grantee ends when they lose manage access or leave the tenant.
+  Calendar owners' own links keep working without an account. The Links tab shows each creator.
 - Sharing stays within one tenant; people outside it use published links. Invitation emails,
   CalDAV sharing extensions and per-user names, colours and alerts are not included. Event
   alarms are shared by everyone who can edit the event. A shared calendar cannot be republished
@@ -94,10 +99,10 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 
 - REST under `/api/v1`, OpenAPI 3.1 spec at `/api/v1/openapi.json`, interactive docs at `/api/docs`.
 - Authentication: session cookie (dashboard) or API key (automation). API keys are bound to one tenant and carry a role.
-- Roles per tenant: `owner`, `admin`, `member`. Members manage their own accounts and feeds; admins manage everyone's in the tenant; owners also manage tenant settings and membership. A platform `operator` role manages tenants across the install.
+- Roles per tenant: `owner`, `admin`, `member`. Members manage their own accounts and feeds; admins manage everyone's in the tenant and invite or remove members; owners also manage tenant settings and roles through REST. A tenant must retain an owner. A platform `operator` role manages tenants across the install; operators cannot impersonate users or replace their passwords.
 - Errors as RFC 9457 problem details; cursor pagination; `ETag`/`If-Match` on mutable resources to prevent lost updates.
 - Server-sent events stream for live changes, scoped to what the caller may see.
-- Every mutation is written to a tenant audit log.
+- Every mutation is written to a tenant audit log, including invitations, joins, removals and role changes, with the acting user's identity. Self-service tenant deletion is disabled so its audit history remains available.
 
 ### Operations
 
@@ -111,7 +116,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 
 Screens, in the order a new user meets them:
 
-1. Sign up / sign in (email + password; magic link when an email provider is configured).
+1. Sign up / sign in (email + password). With email configured, confirm your address, then sign in. If the link opens on another device, reset the password to finish setting up access. Password reset signs out existing sessions and revokes API keys and device logins; automation and calendar apps need new credentials. Read-only feed credentials stay valid so subscribers keep working.
 2. Onboarding: connect the first account, watch calendars appear, get the subscribe step.
 3. Accounts: list with health badges, add, reconnect, remove.
 4. Calendars: every source calendar grouped by account, with hosted calendars in their own group; publish toggle, rename, colour, privacy.

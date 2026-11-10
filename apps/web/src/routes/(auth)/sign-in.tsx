@@ -9,10 +9,13 @@ import { Field } from '../../components/ui/field.tsx';
 import { ProblemAlert, toProblem } from '../../components/ui/problem-alert.tsx';
 import { redirectSearch } from '../../lib/redirect.ts';
 
-export const Route = createFileRoute('/(auth)/sign-in')({ validateSearch: redirectSearch, component: SignIn });
+export const Route = createFileRoute('/(auth)/sign-in')({
+  validateSearch: (search) => ({ ...redirectSearch(search), ...((search.verified === '1' || search.verified === 1) && { verified: 1 }) }),
+  component: SignIn,
+});
 
 function SignIn() {
-  const { redirect } = Route.useSearch();
+  const { redirect, verified } = Route.useSearch();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -43,6 +46,7 @@ function SignIn() {
       }
     >
       <form onSubmit={submit} className="grid gap-3">
+        {verified && <p role="status">Your email is confirmed. Sign in, or reset your password if you opened the link on another device.</p>}
         {problem && <ProblemAlert problem={problem} />}
         <Field label="Email" name="email" type="email" autoComplete="email" required autoFocus />
         <Field label="Password" name="password" type="password" autoComplete="current-password" required />

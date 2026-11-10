@@ -42,6 +42,7 @@ export const configSchema = z
     SUPERCAL_PUBLIC_URL: url
       .optional()
       .describe('Public https base URL, used in feed links, OAuth redirect URIs and push webhooks. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
+    SUPERCAL_CLIENT_IP_HEADER: optional.describe('Header holding the client address, set by a reverse proxy you run. When unset, the socket peer is used.'),
     SUPERCAL_KEYS: optional.describe('Master keys for secrets at rest, `v2:<base64 32 bytes>,v1:…`; the first one encrypts. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
     BETTER_AUTH_SECRET: optional.describe('Secret that signs sessions and OAuth state; at least 32 random characters. Required unless `SUPERCAL_INSECURE_DEV=1`.'),
     SUPERCAL_ROLES: rolesSchema.prefault('api,dav,worker').describe('Comma list of roles this process runs: `api` (API and dashboard), `dav` (CalDAV and ICS feeds), `worker` (sync).'),
@@ -64,9 +65,9 @@ export const configSchema = z
       .min(1)
       .max(256)
       .default(8)
-      .describe('Sync jobs a worker process runs at once (at most 2 per account).'),
-    SUPERCAL_METRICS_TOKEN: optional.describe('When set, `/metrics` requires `Authorization: Bearer <token>`.'),
-    RESEND_API_KEY: optional.describe('Resend API key. With `MAIL_FROM`, enables verification, password-reset, magic-link and invitation email.'),
+      .describe('Sync jobs a worker process runs at once (at most 2 per account; one tenant uses at most half, rounded up).'),
+    SUPERCAL_METRICS_TOKEN: optional.describe('Required to enable `/metrics` unless `SUPERCAL_INSECURE_DEV=1`; when set, requires `Authorization: Bearer <token>`.'),
+    RESEND_API_KEY: optional.describe('Resend API key. With `MAIL_FROM`, enables verification, password-reset and invitation email.'),
     MAIL_FROM: optional.describe('Sender of that email, such as `Supercal <cal@example.com>`, on a domain verified in Resend.'),
     WEB_ORIGIN: url.optional().describe('Extra trusted origin for the Vite dev server, such as `http://localhost:5173`. Development only.'),
     SUPERCAL_WEB_DIR: optional.describe('Directory of the built dashboard. Defaults to `web/` next to the binary; the image sets `/app/web`.'),

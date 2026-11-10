@@ -1,4 +1,4 @@
-/** The audit log: every mutation calls `audit` inside the transaction that made the change. */
+/** The audit log: REST mutations audit in their transaction; Better Auth hooks audit after commit. */
 import { z } from '@hono/zod-openapi';
 import { auditLog, type TenantTx } from '@supercal/db';
 import type { Principal } from '../../auth/principal.ts';
@@ -12,6 +12,12 @@ export type AuditAction =
   | 'event.delete'
   | 'tenant.create'
   | 'tenant.update'
+  | 'member.invite'
+  | 'member.invite_cancel'
+  | 'member.invite_reject'
+  | 'member.join'
+  | 'member.remove'
+  | 'member.role_update'
   | 'api_key.create'
   | 'api_key.delete'
   | 'calendar.create'
@@ -67,7 +73,7 @@ export function redactSecrets(value: unknown): unknown {
 /** Records `action` on `target` by `principal`; `data` is stored after `redactSecrets`. */
 export async function audit(
   tx: TenantTx,
-  principal: Principal,
+  principal: Pick<Principal, 'kind' | 'userId' | 'via' | 'tenantId'>,
   action: AuditAction,
   target: AuditTarget,
   data?: Record<string, unknown>,

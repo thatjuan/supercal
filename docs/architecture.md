@@ -93,16 +93,16 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
 - **VTIMEZONE.** Pass the source's through. When the source only names an IANA zone (Google, Graph), generate VTIMEZONE from `Intl` over the data's span (earliest DTSTART to max(UNTIL, now+2y)). No static VTIMEZONE packages: they are wrong for many zones *(feed)*.
 - **Span.** `span` = first start to last end (infinity for unbounded RRULE), computed with Temporal. Used for coarse time-range queries.
 - **Projection** (per publication, at render time):
-  1. *Merge* (virtual publications): dedupe by UID; choose a winner **per component** (master and each RECURRENCE-ID): organizer's own copy → higher SEQUENCE → later LAST-MODIFIED → lower `priority`. Overrides are unioned *(feed)*. The combined `all.ics` does not merge: it dedupes by source UID, first publication by `sort_order` wins, and that publication's projection applies *(feed review)*.
+  1. *Merge* (virtual publications): dedupe by UID; choose a winner **per component** (master and each RECURRENCE-ID): organizer's own copy → higher SEQUENCE → later LAST-MODIFIED → lower `priority`. Overrides are unioned, and any restricted copy restricts that component in the merged output without changing the winner *(feed)*. The combined `all.ics` does not merge: it dedupes by source UID, first publication by `sort_order` wins, and that publication's projection applies *(feed review)*.
   2. *Filters*: hide declined (the account owner's PARTSTAT=DECLINED), hide cancelled, hide all-day. A hidden master drops the resource. A hidden override becomes an EXDATE on the master, never a silent drop, because dropping the override would bring the master's occurrence back *(both reviews)*.
   3. *Privacy*, by allowlist, never blocklist *(feed)*:
      - `busy-only`: keep only timing, recurrence, STATUS and TRANSP; set SUMMARY "Busy"; drop TRANSP:TRANSPARENT masters, and turn transparent overrides into EXDATE; drop CREATED/LAST-MODIFIED/SEQUENCE/CLASS (they leak edit history and flags). DTSTAMP is required by RFC 5545, so it stays but is set to a constant (`19700101T000000Z`).
-     - `title-only`: busy-only plus SUMMARY and COLOR; source CLASS PRIVATE/CONFIDENTIAL falls back to busy for that event.
+     - `title-only`: busy-only plus SUMMARY and COLOR; any effective CLASS other than PUBLIC falls back to busy for that event. An absent CLASS inherits the master's class on an override and defaults to PUBLIC on a master; an explicit PUBLIC override stays public.
      - Every spec names an audience: `owner` (feeds and sinks), `member` (another person in the tenant), or `public` (anyone holding a URL).
-     - `full`: owners retain everything; members retain everything for public events. PRIVATE/CONFIDENTIAL events become busy-only for members and the public, including the transparent-event rule above. Owners retain full private events; title-only always reduces private events to busy-only.
+     - `full`: owners retain everything; members retain everything for public events. Events with an effective CLASS other than PUBLIC become busy-only for members and the public, including the transparent-event rule above. Owners retain full private events; title-only always reduces private events to busy-only.
      - Public `full` uses `TITLE_PROPS` plus DESCRIPTION, LOCATION, URL, CATEGORIES, GEO, CONFERENCE, CREATED, LAST-MODIFIED, SEQUENCE and DTSTAMP. Only TZID and RANGE parameters survive. ATTENDEE, ORGANIZER, COMMENT, CONTACT, ATTACH, all X- properties and all subcomponents (including VALARM) are absent. DTSTAMP is preserved in this mode.
      - Owner/member full strips VALARM unless `keep_alarms`; title-only and busy-only always strip it.
-  4. *UID*: passthrough + full keeps the source UID. Virtual + full → `b64url(sha256(pubId‖uid))[:26]@supercal`. Title-only/busy-only → `b64url(hmac(feed.uid_secret, pubId‖uid))[:26]@supercal`. A feed never repeats a UID across its collections, because iCloud rejects that and KOrganizer collapses it *(feed)*. Published links use their own id and `calendar_link.uid_secret`, so two title-only or busy-only links on the same calendar produce unlinkable UIDs.
+  4. *UID*: passthrough + full keeps the source UID. Virtual + full → `b64url(sha256(pubId‖uid))[:26]@supercal`. Title-only/busy-only → `b64url(hmac(feed.uid_secret, pubId‖uid))[:26]@supercal`. A feed never repeats a UID across its collections, because iCloud rejects that and KOrganizer collapses it *(feed)*. Published links use their own id and `calendar_link.uid_secret`, so two title-only or busy-only links on the same calendar produce unlinkable UIDs. Public links also use keyed UIDs for full objects when any component copy is restricted; member read grants retain source UIDs for REST paths and tombstones.
   5. *Href*: `<b64url(sha256(outputUid))[:22]>.ics`.
 
 ## 6. Change log, sync tokens, caching
@@ -119,9 +119,9 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
 - **Cosmetic changes** (name, colour, sort order) bump `config_version` only, so clients do not do a full resync.
 - **Object ETag**: `hash(pubId, epoch, uid, max(seq of copies), RENDER_VERSION)`, derived without rendering, because etag-listing clients PROPFIND the whole collection every poll *(feed)*. `RENDER_VERSION` is a code constant bumped whenever projection or serialisation output changes. `config_version` is deliberately excluded, so a rename does not make clients re-download every object *(feed review)*.
 - **Publication hrefs are computed, not stored.** `href = b64url(sha256(outputUid))[:22]`, and `outputUid` derives from the source UID alone (§5). GET and multiget resolve an href by hashing the publication's UIDs (no rendering; ~ms for 5k) *(feed review: the lookup table is unnecessary)*.
-- **ICS ETag**: `pubId.epoch.seq.config_version.RENDER_VERSION` per publication (one segment per publication for the combined feed). 304s cost one aggregate query. Rendered bodies are cached compressed (br, gzip) in a size-bounded in-process LRU keyed by ETag. A changed ETag is a cache miss, so no invalidation is needed. Measured: 5,000 events render in ~200 ms; cached responses take ~9 ms *(feed)*.
-- **Published-link ICS ETag**: `"lnk.<id>.<sync_epoch>.<maxSeq>.<calendar.updated_at ms>.<RENDER_VERSION>"`. One aggregate query reads the active calendar and its newest resource sequence (including tombstones). Last-Modified is the later of the calendar update time and newest resource change. Links share the feed handler's conditional responses, compression and byte-bounded cache. Owner output is unchanged, so `RENDER_VERSION` remains 1.
-- **Tombstones** are purged by a periodic job. In one transaction it raises `tombstone_floor`, then deletes tombstones below it. It allocates no sequence numbers, so it needs no tenant lock.
+- **ICS ETag**: `pubId.epoch.seq.config_version.RENDER_VERSION` per publication. Combined feeds prefix the joined publication segments with `all.<feedId>.<feed.updated_at ms>.`; empty combined feeds use `empty.<RENDER_VERSION>` after that prefix. Feed names are therefore isolated in the body cache, and renames change the ETag. 304s cost one aggregate query. Rendered bodies are cached compressed (br, gzip) in a size-bounded in-process LRU keyed by ETag. A changed ETag is a cache miss, so no invalidation is needed. Measured: 5,000 events render in ~200 ms; cached responses take ~9 ms *(feed)*.
+- **Published-link ICS ETag**: `"lnk.<id>.<sync_epoch>.<maxSeq>.<calendar.updated_at ms>.<RENDER_VERSION>"`. One aggregate query reads the active calendar and its newest resource sequence (including tombstones). Last-Modified is the later of the calendar update time and newest resource change. Links share the feed handler's conditional responses, compression and byte-bounded cache. `RENDER_VERSION` is 2 for the corrected classification and public-link UID rules.
+- **Tombstones** are purged by a periodic job. In one transaction it raises `tombstone_floor`, then deletes tombstones at or below it except each calendar's newest row. Keeping that row makes `max(seq)` monotonic, so a purge cannot revive a cached pre-deletion body; a later row allows the next purge to remove the retained tombstone. It allocates no sequence numbers, so it needs no tenant lock.
 
 ## 7. Security
 
@@ -141,8 +141,8 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
   `accessibleCalendars` share that calculation; the listing uses one query. Grants require
   current tenant membership and never cross tenants. Owners and tenant admins have `owner`
   access; only they can grant, downgrade or revoke `manage`. Better Auth's existing
-  `afterRemoveMember` organization hook deletes the departing user's personal grants through
-  `withTenant`, then publishes auth revocation. Re-invitation does not restore old grants.
+  `afterRemoveMember` organization hook calls `endMembership` after the member row is gone;
+  see §17 for departure cleanup. Re-invitation does not restore personal grants or credentials.
 
   | Capability | free-busy | read | write | manage | owner/admin |
   | --- | --- | --- | --- | --- | --- |
@@ -168,11 +168,12 @@ Supercal tables. Every tenant table carries `tenant_id text not null references 
     - `feed`: lookup by `caldav_username` / `ics_token_hash`
     - `calendar_link`: lookup by `token_hash`, with SELECT limited to `id`, `tenant_id`, `token_hash` and `expires_at`
     - `dav_login`: only `id`, `tenant_id`, `user_id`, `username`, `password_hash` for device authentication
+    - `resource`: SELECT limited to `deleted`, `seq`, `changed_at` and `source_calendar_id` on live rows and tombstones for monotonic purge checks; DELETE only on tombstones
     - `api_key_tenant`: key → tenant resolution
     - `drizzle.__drizzle_migrations`: the migrations check in `/readyz`
     - Better Auth tables
 
-    It never reads `resource`, `source_object` or provider credentials. Once the tenant is resolved, the request continues in `withTenant`.
+    It never reads event data, `source_object` or provider credentials. Once the tenant is resolved, the request continues in `withTenant`.
   - **Recommended production setup**: `DATABASE_URL` is a login that is a member of both roles and owns nothing; `DATABASE_MIGRATION_URL` is the schema owner. **Single-URL mode** (one owner login for both) is supported for small self-hosts and documented as weaker: `SET LOCAL ROLE` still enforces RLS, but a code path that escapes the wrapper keeps owner/DDL rights *(platform review)*.
 - **Secrets at rest.** Envelope AES-256-GCM via WebCrypto. A per-value data key is wrapped by a versioned master key from `SUPERCAL_KEYS=v2:…,v1:…`. The authenticated context binds tenant, record and field. Old-key records are lazily re-encrypted with compare-and-swap *(platform)*.
 - **Feed credentials.**
@@ -309,16 +310,17 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 
 ## 12. Management API
 
-- Base `/api/v1`, OpenAPI 3.1 at `/api/v1/openapi.json`, Scalar at `/api/docs`. Better Auth's endpoints (sign-up/in, sessions, organizations, members, invitations) stay under `/api/auth` with their own spec at `/api/auth/open-api/generate-schema`, linked from our docs *(platform: merging the two specs is not worth it)*.
+- Base `/api/v1`, OpenAPI 3.1 at `/api/v1/openapi.json`, Scalar at `/api/docs`. Better Auth's endpoints (sign-up/in, sessions, organization creation and reads, invitations and member removal) stay under `/api/auth` with their own spec at `/api/auth/open-api/generate-schema`, linked from our docs *(platform: merging the two specs is not worth it)*. Tenant settings, roles and API-key mutations use REST; the corresponding plugin mutation routes are disabled, along with self-service tenant deletion, leave, operator impersonation and operator password replacement.
 - **Conventions**:
   - Errors are RFC 9457 `application/problem+json`, declared on every operation through shared response components.
   - Pagination is cursor-based (opaque, versioned, `(created_at, id)` keyset; limit ≤ 100).
   - Mutable resources return `ETag` and `PATCH` honours `If-Match`, returning 412 on conflict.
   - Timestamps are RFC 3339 UTC; IDs are TypeIDs.
-  - Every mutation writes the audit log.
+  - Every REST mutation writes the audit log in its transaction. One Better Auth after hook audits successful organization creation, invitations, joins and member removal using the acting session and the returned tenant and target. Better Auth commits first, so audit failures are logged without failing its response; removal also runs the membership cleanup hook.
 - **Resources**:
   - `GET /me`.
   - `GET|POST /tenants` (operator), `GET|PATCH /tenant` (current).
+  - `PATCH /members/{id}` (owner): Better Auth member id and a strict `role` body. Locks tenant members, preserves the last owner, commits the role and audit entry together, prunes orphan links on demotion to member, then revokes live streams for revalidation.
   - `GET|POST /dav-logins`, `DELETE /dav-logins/{id}` (per-device CalDAV credentials, password returned once).
   - `GET|POST /api-keys`, `DELETE /api-keys/{id}`.
   - `GET|POST /accounts`, `GET|PATCH|DELETE /accounts/{id}`, `POST /accounts/{id}/sync`. POST covers caldav, icloud and ics: credentials are verified and calendars discovered before 201.
@@ -360,7 +362,7 @@ Re-normalisation after a normaliser upgrade marks the affected `source_object` r
 | `SUPERCAL_EGRESS_ALLOW` | no | Operator LAN allowlist: `origin=cidr,…`. |
 | `SUPERCAL_ICS_CACHE_MB` | no | Bound on the in-process cache of rendered ICS bodies (default 64). |
 | `SUPERCAL_SYNC_CONCURRENCY` | no | Sync jobs at once per worker process (default 8; at most 2 per account). |
-| `RESEND_API_KEY`, `MAIL_FROM` | no | Enables magic links, invites, verification mail. |
+| `RESEND_API_KEY`, `MAIL_FROM` | no | Enables password-reset, invitation and verification mail. |
 | `WEB_ORIGIN` | dev | Extra trusted origin for the Vite dev server. |
 
 Google OAuth apps left in **Testing** publishing status issue refresh tokens that expire after 7 days. The self-hosting guide must walk operators through publishing the app (and through the personal-use / <100-user verification exceptions), and the dashboard shows `reauth_required` clearly when this happens *(ingest)*.
@@ -609,6 +611,20 @@ and duplicate grants return 409 with the existing `id`. PATCH honors `If-Match`.
 Grant changes audit `share.create`, `share.update` and `share.delete` and apply on the next
 request. Managers cannot change or remove an existing `manage` grant, including their own.
 
+`endMembership` deletes personal grants, device logins and API key bindings, clears both feed
+credential hashes, disables non-hosted accounts and erases their credentials in one tenant transaction.
+It parks account targets, deletes push leases and marks calendars stale; synced data remains published
+until an admin deletes the account. Afterwards it deletes the unbound key secrets and publishes auth
+revocation. `/organization/leave` is disabled because Better Auth skips the removal hook there.
+Bans are reversible and skip cleanup: ICS, feed CalDAV and provider jobs recheck membership before
+opening a tenant transaction, as sessions, API keys and device logins already do. There is no backfill.
+
+`pruneOrphanLinks` uses one SQL DELETE after grant removal, downgrade or member departure.
+Calendar owners retain their own bearer links; other creators need current membership and admin,
+personal manage or tenant-wide manage access. Link metadata includes `createdBy`, shown in the
+Links tab. Departed owners appear as “Former member”; admins can still list their calendars and feeds.
+API keys can only be issued from signed-in sessions; bearer keys cannot mint successors.
+
 Calendar list and get include effective `access` and `owner: { id, name }`. Free-busy grants
 receive only id, name, colour, kind, time zone, state, access and owner, with empty
 `publicationIds` and neutral freshness. Other metadata is absent. Publication ids are empty
@@ -616,9 +632,12 @@ for all sharees; owners and tenant admins see them. The dashboard still groups b
 accounts, so shared calendars add no screen.
 
 REST event reads use one shared projection before JSCalendar conversion, occurrence expansion
-or iCalendar export. Exactly `read` uses `audience: 'member'`: private and confidential events
-become Busy under the existing projection rules. Editors see stored details. Read ETags remain
-stored revisions for conditional reads, and changes tombstones retain source UIDs. With `since`,
+or iCalendar export. Exactly `read` uses `audience: 'member'`: restricted events become Busy
+under the projection rules. Editors see stored details. Read-grant ETags append `.redacted` to
+the stored revision; other reads and writes use the unsuffixed revision. GET sends
+`Cache-Control: no-store` on both 200 and 304 responses, and changes tombstones retain source UIDs.
+Soft-deleted calendars return 404 for event reads by grantees; owners and tenant admins can
+still read retained events while they can restore the calendar. With `since`,
 a live event now hidden by the member projection is also returned as a UID-only tombstone,
 so the client discards its cached details; initial reads omit hidden events. Full
 passthrough specs need no UID secret; other privacy modes reject a null key. SSE rechecks

@@ -26,6 +26,8 @@ import { withAccount, type SyncDeps, type TenantJob } from './context.ts';
 import { fenced } from './runner.ts';
 import { DISCOVER_EVERY_MS, StopTargetError, wakeTargets, type JobResult } from './scheduler.ts';
 
+export const MAX_CALENDARS_PER_ACCOUNT = 100;
+
 /** Creates (or makes due now) the `kind` target of `targetId`; returns its id. */
 export async function ensureTarget(tx: TenantTx, account: Pick<CalendarAccount, 'tenantId'>, kind: 'discover' | 'events' | 'push_renew', targetId: string): Promise<SyncTargetId> {
   const [row] = await tx
@@ -55,7 +57,13 @@ export async function applyListing(
         .where(and(eq(sink.provider, account.provider), eq(sink.providerSubject, account.providerSubject)))
     : [];
   const written = new Set(sinks.map((s) => s.providerCalendarId));
-  const listed = infos.filter((info) => !written.has(info.providerCalendarId));
+  // Choose the same calendars regardless of the provider's listing order.
+  const available = infos.filter((info) => !written.has(info.providerCalendarId))
+    .sort((a, b) => a.providerCalendarId < b.providerCalendarId ? -1 : a.providerCalendarId > b.providerCalendarId ? 1 : 0);
+  const listed = available.slice(0, MAX_CALENDARS_PER_ACCOUNT);
+  await tx.update(calendarAccount).set({
+    statusDetail: available.length > MAX_CALENDARS_PER_ACCOUNT ? `Syncing the first 100 of ${available.length} calendars` : null,
+  }).where(eq(calendarAccount.id, account.id));
   const before = new Map((await tx.select().from(sourceCalendar).where(eq(sourceCalendar.accountId, account.id))).map((c) => [c.providerCalendarId, c]));
 
   const active: SourceCalendar[] = [];

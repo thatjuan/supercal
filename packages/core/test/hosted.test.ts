@@ -26,6 +26,17 @@ describe('hosted object validation', () => {
     for (const payload of [calendar(`METHOD:REQUEST\r\n${event()}`), calendar(''), calendar(`${event()}\r\n${event().replace('UID:u1', 'UID:u2')}`)])
       expect(validateObject(payload)).toMatchObject({ ok: false, code: 'invalid-object' });
   });
+  test('rejects overrides carrying their own expensive RRULE without expanding each', () => {
+    const overrides = Array.from({ length: 8 }, (_, n) => event(`RECURRENCE-ID:202611${10 + n}T090000Z\r\nDTSTART:202611${10 + n}T100000Z\r\nRRULE:FREQ=DAILY;COUNT=20000`)).join('\r\n');
+    const started = performance.now();
+    expect(validateObject(calendar(`${event()}\r\n${overrides}`))).toMatchObject({ ok: false, detail: 'An override cannot carry RRULE' });
+    expect(performance.now() - started).toBeLessThan(2000);
+  }, 2000);
+  test('accepts a recurring master with ordinary overrides', () => {
+    const master = event('DTSTART:20261110T090000Z\r\nRRULE:FREQ=DAILY;COUNT=10');
+    const override = event('RECURRENCE-ID:20261111T090000Z\r\nDTSTART:20261111T100000Z');
+    expect(validateObject(calendar(`${master}\r\n${override}`)).ok).toBe(true);
+  });
   test('too-large counts UTF-8 bytes', () => {
     expect(validateObject('é'.repeat(MAX_OBJECT_BYTES / 2 + 1))).toMatchObject({ ok: false, code: 'too-large' });
   });

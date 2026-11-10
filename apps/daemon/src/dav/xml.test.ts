@@ -32,3 +32,28 @@ test('unknown output namespaces get a generated prefix declared on the root', ()
     `<?xml version="1.0" encoding="utf-8"?>\n<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:ical="http://apple.com/ns/ical/" xmlns:x0="urn:x"><d:href/><x0:thing/></d:multistatus>`,
   );
 });
+
+test('8,000 namespace declarations and elements parse in under one second', () => {
+  const declarations = Array.from({ length: 8000 }, (_, i) => `xmlns:n${i}="urn:${i}"`).join(' ');
+  const elements = Array.from({ length: 8000 }, (_, i) => `<n${i}:item/>`).join('');
+  const xml = `<root ${declarations}>${elements}</root>`;
+  const started = performance.now();
+  const root = parseXml(xml);
+  const elapsed = performance.now() - started;
+  expect(root?.children).toHaveLength(8000);
+  expect(root?.children.at(-1)?.ns).toBe('urn:7999');
+  expect(elapsed).toBeLessThan(1000);
+});
+
+test('namespace scopes inherit, shadow and stay local to each element', () => {
+  const root = parseXml(`<root xmlns="urn:default" xmlns:p="urn:parent">
+    <p:child><p:item/></p:child>
+    <p:child xmlns:p="urn:child"><p:item/><item xmlns="urn:local"/></p:child>
+    <p:sibling/><constructor:item/><__proto__:item/>
+    <constructor:item xmlns:constructor="urn:constructor"/>
+  </root>`);
+  expect(root?.ns).toBe('urn:default');
+  expect(root?.children.map((el) => el.ns)).toEqual(['urn:parent', 'urn:child', 'urn:parent', '', '', 'urn:constructor']);
+  expect(root?.children[0]?.children[0]?.ns).toBe('urn:parent');
+  expect(root?.children[1]?.children.map((el) => el.ns)).toEqual(['urn:child', 'urn:local']);
+});

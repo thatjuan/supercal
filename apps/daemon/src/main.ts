@@ -79,6 +79,8 @@ const webDir = config.SUPERCAL_WEB_DIR ?? defaultWebDir();
 let schedulerTickedAt: number | null = null;
 const server = Bun.serve({
   port: config.PORT,
+  maxRequestBodySize: 9 * 1024 * 1024,
+  idleTimeout: 10,
   fetch: createApp(roles, {
     auth,
     secrets,
@@ -88,10 +90,11 @@ const server = Bun.serve({
     oauth: { webOrigin: config.WEB_ORIGIN, stateSecret: config.BETTER_AUTH_SECRET ?? crypto.randomUUID(), google, microsoft },
     stream: { signal: stopAbort.signal },
     publicUrl: config.SUPERCAL_PUBLIC_URL,
+    clientIpHeader: config.SUPERCAL_CLIENT_IP_HEADER,
     icsCacheBytes: config.SUPERCAL_ICS_CACHE_MB * 1024 * 1024,
     signup: config.SUPERCAL_SIGNUP,
     webDir,
-    ops: { metricsToken: config.SUPERCAL_METRICS_TOKEN, ...(roles.has('worker') && { schedulerTickedAt: () => schedulerTickedAt }) },
+    ops: { metricsToken: config.SUPERCAL_METRICS_TOKEN, insecureDev: config.SUPERCAL_INSECURE_DEV, ...(roles.has('worker') && { schedulerTickedAt: () => schedulerTickedAt }) },
   }).fetch,
 });
 log.info('listening', { port: server.port, roles: [...roles], webDir });

@@ -13,6 +13,7 @@ import { calendarLink, feed, publicationState, resource, sourceCalendar, withCon
 import { and, eq, max } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { brotliCompressSync, constants } from 'node:zlib';
+import { membership } from '../auth/principal.ts';
 import { icsTokenHash } from '../feeds/credentials.ts';
 import { createLogger, redact } from '../log.ts';
 import { metrics } from '../ops/metrics.ts';
@@ -126,9 +127,9 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
     const combined = slug === COMBINED;
 
     const [owner] = await withControl((tx) =>
-      tx.select({ id: feed.id, tenantId: feed.tenantId }).from(feed).where(eq(feed.icsTokenHash, icsTokenHash(c.req.param('token')))),
+      tx.select({ id: feed.id, tenantId: feed.tenantId, ownerUserId: feed.ownerUserId }).from(feed).where(eq(feed.icsTokenHash, icsTokenHash(c.req.param('token')))),
     );
-    if (!owner) return c.body(null, 404);
+    if (!owner || !await membership(owner.ownerUserId, owner.tenantId)) return c.body(null, 404);
 
     return withTenant(owner.tenantId, async (tx) => {
       const [target] = await tx.select().from(feed).where(eq(feed.id, owner.id));
@@ -139,7 +140,8 @@ export function createIcs({ secrets, cacheBytes, render = renderIcs }: IcsDeps) 
 
       const states = await Promise.all(publications.map((p) => publicationState(tx, p.sources.map((s) => s.sourceCalendarId))));
       const segments = publications.map((p, i) => [p.id, p.epoch, states[i]?.maxSeq ?? 0n, p.configVersion, RENDER_VERSION].join('.'));
-      const etag = `"${segments.join('~') || `empty.${RENDER_VERSION}`}"`;
+      const scope = combined ? `all.${target.id}.${target.updatedAt.getTime()}.` : '';
+      const etag = `"${scope}${segments.join('~') || `empty.${RENDER_VERSION}`}"`;
       // Edits to names and order change no `changed_at`, so the rows' own update times count too.
       const times = [...states.map((s) => s.lastChangedAt), ...publications.map((p) => p.updatedAt), ...(combined ? [target.updatedAt] : [])];
       const lastModified = times.reduce<Date | null>((latest, t) => (t && (!latest || t > latest) ? t : latest), null);

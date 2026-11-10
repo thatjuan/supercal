@@ -12,10 +12,13 @@ import {
   member,
   migrate,
   organization,
+  purgeTombstones,
+  changesSince,
   recordChanges,
   sourceCalendar,
   user,
   withTenant,
+  withControl,
   type FeedId,
   type ResourceChange,
   type SourceCalendar,
@@ -25,10 +28,13 @@ import {
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { createDav } from '../src/dav/index.ts';
+import { departureActors, FeedCredentials, basicCredentials } from './departure-fixture.ts';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import ICAL from 'ical.js';
 import { createApi } from '../src/api/index.ts';
+import { CreatedCalendarLink } from '../src/api/links.ts';
 import type { subscribeLinks } from '../src/api/subscribe.ts';
 import type { ApiEnv, Principal } from '../src/auth/principal.ts';
 import { idleBus } from '../src/bus.ts';
@@ -214,6 +220,76 @@ describe.skipIf(!testDatabaseUrl)('ICS feeds', () => {
     expect(single).toContain('COLOR:#336699\r\n');
   });
 
+  test('empty combined feeds in different tenants cache their own names and rename changes the ETag', async () => {
+    const otherTenant = `org_${crypto.randomUUID()}` as TenantId;
+    const now = new Date();
+    await unsafeDb().insert(organization).values({ id: otherTenant, name: 'Other', slug: otherTenant, createdAt: now });
+    await unsafeDb().insert(member).values({ id: crypto.randomUUID(), organizationId: otherTenant, userId, role: 'member', createdAt: now });
+    const first = await withTenant(tenantId, (tx) => feeds.createFeed(tx, principal, 'First empty feed'));
+    const second = await withTenant(otherTenant, (tx) => feeds.createFeed(tx, { ...principal, tenantId: otherTenant }, 'Second empty feed'));
+    const nameOf = (body: string) => new ICAL.Component(ICAL.parse(body)).getFirstPropertyValue('x-wr-calname');
+    const firstResponse = await get(`/${first.secrets.ics.token}/all.ics`);
+    const secondResponse = await get(`/${second.secrets.ics.token}/all.ics`);
+    expect(firstResponse.status).toBe(200); expect(secondResponse.status).toBe(200);
+    expect(nameOf(await firstResponse.text())).toBe('First empty feed');
+    expect(nameOf(await secondResponse.text())).toBe('Second empty feed');
+    expect(secondResponse.headers.get('etag')).not.toBe(firstResponse.headers.get('etag'));
+    await withTenant(tenantId, (tx) => feeds.updateFeed(tx, principal, first.feed.id, { name: 'Renamed empty feed' }));
+    const renamed = await get(`/${first.secrets.ics.token}/all.ics`, { headers: { 'If-None-Match': firstResponse.headers.get('etag')! } });
+    expect(renamed.status).toBe(200);
+    expect(renamed.headers.get('etag')).not.toBe(firstResponse.headers.get('etag'));
+    expect(nameOf(await renamed.text())).toBe('Renamed empty feed');
+  });
+
+  test('tombstone purge never resurrects cached events in feeds or public links', async () => {
+    const cal = calendar('big');
+    const created = await withTenant(tenantId, async (tx) => {
+      const created = await feeds.createFeed(tx, principal, 'Purge regression');
+      await feeds.createPublication(tx, principal, created.feed.id, { kind: 'passthrough', sourceCalendarId: cal.id, name: 'Purge' });
+      await recordChanges(tx, [event(cal.id, 'deleted@example.com', 'Deleted event'), event(cal.id, 'survivor@example.com', 'Survivor')]);
+      return created;
+    });
+    const published = await api.request(`/api/v1/calendars/${cal.id}/links`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ privacy: 'full' }) });
+    expect(published.status).toBe(201);
+    const link = CreatedCalendarLink.parse(await published.json());
+    const paths = [`/${created.secrets.ics.token}/purge.ics`, `/${created.secrets.ics.token}/all.ics`, `/l/${link.token}.ics`];
+    const before = new Map<string, string>();
+    for (const path of paths) {
+      const response = await get(path); expect(response.status).toBe(200);
+      before.set(path, response.headers.get('etag')!);
+      expect(uidsOf(await response.text())).toContain('deleted@example.com');
+    }
+    const { maxSeq: deleted } = await withTenant(tenantId, (tx) => recordChanges(tx, [{ op: 'delete', sourceCalendarId: cal.id, uid: 'deleted@example.com' }]));
+    const afterDelete = new Map<string, string>();
+    for (const path of paths) {
+      const response = await get(path);
+      afterDelete.set(path, response.headers.get('etag')!);
+      expect(response.headers.get('etag')).not.toBe(before.get(path)!);
+      expect(uidsOf(await response.text())).not.toContain('deleted@example.com');
+    }
+    // Advance the purge cutoff beyond the deletions without writing resource outside changes.ts.
+    const cutoff = new Date(Date.now() + 60_000);
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const retained = await withTenant(tenantId, (tx) => changesSince(tx, [cal.id], 0n, 100));
+    expect(retained.rows.find((row) => row.uid === 'deleted@example.com')).toMatchObject({ deleted: true, seq: deleted });
+    for (const path of paths) {
+      const response = await get(path);
+      expect(response.headers.get('etag')).toBe(afterDelete.get(path)!);
+      expect(response.headers.get('etag')).not.toBe(before.get(path)!);
+      expect(uidsOf(await response.text())).not.toContain('deleted@example.com');
+    }
+    await withTenant(tenantId, (tx) => recordChanges(tx, [event(cal.id, 'newer@example.com', 'Newer')]));
+    await withControl((tx) => purgeTombstones(tx, cutoff));
+    const purged = await withTenant(tenantId, (tx) => changesSince(tx, [cal.id], 0n, 100));
+    expect(purged.rows.some((row) => row.uid === 'deleted@example.com')).toBe(false);
+    for (const path of paths) {
+      const response = await get(path);
+      expect(response.headers.get('etag')).not.toBe(before.get(path)!);
+      expect(response.headers.get('etag')).not.toBe(afterDelete.get(path)!);
+      expect(uidsOf(await response.text()).sort()).toEqual(['newer@example.com', 'survivor@example.com']);
+    }
+  });
+
   test('an unknown token or slug is a 404 with an empty body', async () => {
     for (const path of [`/not-a-token/all.ics`, `/${token}/nope.ics`, `/${token}/alice-work`, `/${token}`]) {
       const res = await get(path);
@@ -282,4 +358,28 @@ describe.skipIf(!testDatabaseUrl)('ICS feeds', () => {
     expect(cold.ms).toBeLessThan(400);
     expect(cached.ms).toBeLessThan(20);
   }, 120_000);
+  test('ban blocks cached feed ICS and CalDAV access, unban restores it, and removal ends it', async () => {
+    const actors = await departureActors(fixture!.auth);
+    const response = await actors.apiCall('/feeds', 'POST', { name: 'Banned feed' });
+    expect(response.status).toBe(201);
+    const saved = FeedCredentials.parse(await response.json());
+    const dav = createDav({ secrets: testSecrets, bus: idleBus });
+    const ics = createIcs({ secrets: testSecrets, cacheBytes: 1024 });
+    const read = () => ics.request(`/${saved.credentials.ics.token}/all.ics`);
+    const readDav = () => dav.request(`/dav/${saved.credentials.caldav.username}/cal/`, {
+      method: 'PROPFIND', headers: { Authorization: basicCredentials(saved.credentials.caldav) },
+    });
+    expect((await read()).status).toBe(200);
+    expect((await readDav()).status).toBe(207);
+    await actors.ban(true);
+    expect((await read()).status).toBe(404);
+    expect((await readDav()).status).toBe(401);
+    await actors.ban(false);
+    expect((await read()).status).toBe(200);
+    expect((await readDav()).status).toBe(207);
+    await actors.remove();
+    expect((await read()).status).toBe(404);
+    expect((await readDav()).status).toBe(401);
+  });
+
 });

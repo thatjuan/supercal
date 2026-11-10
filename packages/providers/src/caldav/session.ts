@@ -2,15 +2,15 @@
  * One account's WebDAV conversation. tsdav builds the XML and parses the multistatus; its injected
  * `fetch` is a shim over the guarded transport, so every request is SSRF-checked, bounded and
  * IP-pinned. tsdav types its results loosely, so each one is validated here with Zod before the
- * adapter sees it. Credentials go only to the account's own hosts.
+ * adapter sees it. Credentials go only to the account's configured origins or trusted HTTPS hosts.
  *
- *   const dav = createDavSession(ctx, { username, password, hosts: ['caldav.icloud.com', '*.icloud.com'] });
+ *   const dav = createDavSession(ctx, { username, password, origins: ['https://caldav.icloud.com'], hosts: ['*.icloud.com'] });
  *   const { entries, url } = await dav.propfind(home, ['d:displayname'], '1');
  */
 import { davRequest, propfind, syncCollection, type DAVResponse } from 'tsdav';
 import { z } from 'zod';
 import { AuthFailedError, ProviderThrottledError, ProviderUnavailableError, type AdapterContext } from '../adapter.ts';
-import { EgressBlockedError, hostMatches, type GuardedResponse } from '../transport/index.ts';
+import { credentialTarget, EgressBlockedError, type GuardedResponse } from '../transport/index.ts';
 
 /** The server only offers an auth scheme we do not support (v1 is Basic only). */
 export class UnsupportedAuthError extends AuthFailedError {}
@@ -29,6 +29,8 @@ export class DavStatusError extends Error {
 /** One `<response>` of a multistatus, with an absolute href. */
 export type DavEntry = { href: string; status: number; props: Record<string, unknown> };
 export type DavResult = { url: string; entries: DavEntry[]; syncToken: string | null };
+
+const MAX_XML_NAMESPACES = 64;
 
 const NS = {
   'xmlns:d': 'DAV:',
@@ -65,13 +67,14 @@ function statusError(response: GuardedResponse): Error {
   return new ProviderUnavailableError(`the CalDAV server answered HTTP ${status}`);
 }
 
-export function createDavSession(ctx: AdapterContext, { username, password, hosts }: { username: string; password: string; hosts: string[] }) {
+export function createDavSession(ctx: AdapterContext, { username, password, hosts, origins }: { username: string; password: string; hosts: string[]; origins: string[] }) {
   const guarded = ctx.fetch;
 
   /** Runs one tsdav call over the guarded transport and validates its result. `handled` statuses throw `DavStatusError` instead of an adapter error. */
   async function exchange(url: string, send: (shim: typeof globalThis.fetch) => Promise<DAVResponse[]>, handled: number[] = []): Promise<DavResult> {
-    const host = new URL(url).hostname;
-    if (!hostMatches(host, hosts)) throw new ProviderUnavailableError(`the server referred to ${host}, which is not one of this account's hosts`);
+    const target = new URL(url);
+    const host = target.host;
+    if (!credentialTarget(target, origins, hosts)) throw new ProviderUnavailableError(`the server referred to ${target.host}, which is not one of this account's hosts`);
     let last: GuardedResponse | undefined;
     const shim = Object.assign(
       async (input: string | URL | Request, init?: RequestInit) => {
@@ -84,11 +87,14 @@ export function createDavSession(ctx: AdapterContext, { username, password, host
           ...(typeof init?.body === 'string' && { body: init.body }),
           credentials: { kind: 'basic', username, password },
           credentialHosts: hosts,
+          credentialOrigins: origins,
           signal: ctx.signal,
         }).catch((error: unknown) => {
           if (error instanceof EgressBlockedError || ctx.signal.aborted) throw error;
           throw new ProviderUnavailableError(`could not reach ${host}`, { cause: error });
         });
+        const declarations = new TextDecoder().decode(response.body).match(/\sxmlns(?::[^\s=]+)?\s*=/g)?.length ?? 0;
+        if (declarations > MAX_XML_NAMESPACES) throw new ProviderUnavailableError('the CalDAV server sent an unreasonable XML reply');
         last = response;
         const result = new Response([204, 205, 304].includes(response.status) ? null : new Uint8Array(response.body), { status: response.status, headers: response.headers });
         Object.defineProperty(result, 'url', { value: response.finalUrl });
@@ -109,12 +115,16 @@ export function createDavSession(ctx: AdapterContext, { username, password, host
     if (!parsed.success) throw new ProviderUnavailableError('the CalDAV server sent an unreadable multistatus');
     const entries: DavEntry[] = [];
     let syncToken: string | null = null;
+    let validatedRaw: unknown;
     for (const entry of parsed.data) {
       // Unparsed text (malformed XML, or not XML at all) is never read as "no objects".
       if (entry.parseError !== undefined || typeof entry.raw === 'string') throw new ProviderUnavailableError('the CalDAV server sent malformed XML');
-      const root = Multistatus.safeParse(entry.raw);
-      if (!root.success) throw new ProviderUnavailableError('the CalDAV server sent no multistatus');
-      syncToken = root.data.multistatus.syncToken ?? syncToken;
+      if (entry.raw !== validatedRaw) {
+        const root = Multistatus.safeParse(entry.raw);
+        if (!root.success) throw new ProviderUnavailableError('the CalDAV server sent no multistatus');
+        syncToken = root.data.multistatus.syncToken ?? syncToken;
+        validatedRaw = entry.raw;
+      }
       // tsdav represents an empty multistatus as one entry without an href.
       if (entry.href === undefined) continue;
       entries.push({ href: new URL(entry.href, http.finalUrl).href, status: entry.status, props: entry.props ?? {} });
@@ -123,6 +133,7 @@ export function createDavSession(ctx: AdapterContext, { username, password, host
   }
 
   return {
+    log: ctx.log,
     /** PROPFIND for `props` (prefixed names such as `d:displayname`, `c:calendar-home-set`). */
     propfind: (url: string, props: string[], depth: '0' | '1', handled?: number[]) =>
       exchange(url, (shim) => propfind({ url, props: Object.fromEntries(props.map((p) => [p, {}])), depth, fetch: shim }), handled),

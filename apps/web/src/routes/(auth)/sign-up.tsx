@@ -58,7 +58,7 @@ function SignUp() {
       footer={footer}
     >
       <SignUpForm
-        callbackURL={redirect ?? '/'}
+        {...(redirect ? { callbackURL: redirect } : {})}
         onConfirmationSent={setConfirming}
         onSignedUp={async () => {
           queryClient.clear();
