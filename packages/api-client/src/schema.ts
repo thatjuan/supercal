@@ -365,10 +365,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["listEvents"];
         put?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         post: operations["createEvent"];
         delete?: never;
         options?: never;
@@ -383,16 +383,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["getEvent"];
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         put: operations["putEvent"];
         post?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         delete: operations["deleteEvent"];
         options?: never;
         head?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         patch: operations["patchEvent"];
         trace?: never;
     };
@@ -405,7 +405,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         post: operations["splitEvent"];
         delete?: never;
         options?: never;
@@ -420,7 +420,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["calendarOccurrences"];
         put?: never;
         post?: never;
@@ -437,7 +437,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a hosted calendar. */
+        /** @description Uses JSCalendar 2.0 per draft-ietf-calext-jscalendarbis-22. Reads include imported calendars; writes require a writable calendar. Atomic series splits and bulk imports require a hosted calendar. */
         get: operations["calendarChanges"];
         put?: never;
         post?: never;
@@ -960,6 +960,8 @@ export interface components {
                 push: boolean;
                 write: boolean;
             };
+            /** @description Calendar supports event writes through its provider */
+            writable: boolean;
             /** @enum {string} */
             access: "free-busy" | "read" | "write" | "manage" | "owner";
             owner: {
@@ -1007,6 +1009,8 @@ export interface components {
                 push: boolean;
                 write: boolean;
             };
+            /** @description Calendar supports event writes through its provider */
+            writable: boolean;
             /** @enum {string} */
             access: "free-busy" | "read" | "write" | "manage" | "owner";
             owner: {
@@ -4571,6 +4575,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     getEvent: {
@@ -4587,7 +4609,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Event; ETag is shared with writable CalDAV */
+            /** @description Event; ETag is the stored resource revision */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4804,6 +4826,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     deleteEvent: {
@@ -4902,6 +4942,24 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5013,6 +5071,24 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Bad gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

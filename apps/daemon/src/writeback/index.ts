@@ -1,6 +1,6 @@
 /** Synchronous provider writes: check in a short transaction, call upstream, then apply its result. */
 import { normalizers, validateObject } from '@supercal/core';
-import { calendarAccount, davObjectName, recordChanges, sourceObject, syncTarget, withTenant, type SourceCalendarId } from '@supercal/db';
+import { calendarAccount, davObjectName, recordChanges, resource, sourceObject, syncTarget, withTenant, type SourceCalendarId } from '@supercal/db';
 import { AuthFailedError, ProviderConflictError, ProviderPartialWriteError, ProviderThrottledError, ProviderUnavailableError, ProviderWriteRejectedError, type StoredObject, type WriteResult } from '@supercal/providers';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -16,10 +16,10 @@ import { applyRawObjects } from '../sync/objects.ts';
 /** Provider-independent dependencies; writes deliberately do not acquire an account sync slot. */
 export type WriteDeps = Pick<SyncDeps, 'adapters' | 'secrets' | 'fetch' | 'log'>;
 
-/** Conditional device request fields shared by PUT and DELETE. */
-type Preconditions = { objectName: string; ifMatch?: string; ifNoneMatch?: '*' };
+/** Conditional writes use device ETags by default, or REST resource revisions when supplied. */
+type Preconditions = { objectName: string; ifMatch?: string; ifNoneMatch?: '*'; resourceIfMatch?: string };
 
-/** Resolve client names and check the device ETag before making any provider request. */
+/** Resolve client names and check the device ETag or REST revision before making any provider request. */
 async function check(deps: WriteDeps, principal: Principal, calendarId: SourceCalendarId, input: Preconditions, bodyUid?: string) {
   return withTenant(principal.tenantId, async (tx) => {
     const { calendar } = await requireAccess(tx, principal, calendarId, 'write').catch((error: unknown) => {
@@ -48,6 +48,10 @@ async function check(deps: WriteDeps, principal: Principal, calendarId: SourceCa
     if ((input.ifNoneMatch && live) || (input.ifMatch !== undefined && (!live || input.ifMatch !== live.etag)))
       throw new HostedWriteError('precondition-failed', 'Object ETag does not match');
     if (bodyUid === undefined && !live) throw new HostedWriteError('not-found', 'No such object');
+    if (input.resourceIfMatch !== undefined) {
+      const [current] = await tx.select({ revision: resource.revision }).from(resource).where(and(eq(resource.sourceCalendarId, calendarId), eq(resource.uid, uid), eq(resource.deleted, false)));
+      if (!current || input.resourceIfMatch !== `"${current.revision}"`) throw new HostedWriteError('precondition-failed', 'Event revision does not match');
+    }
     const rows = await tx.select().from(sourceObject).where(and(eq(sourceObject.sourceCalendarId, calendarId), eq(sourceObject.groupUid, uid)));
     // A dirty group contains a provider version the client has not seen in resource yet. Using its
     // newer upstream ETag with the old DAV ETag would silently overwrite that unseen provider edit.
@@ -114,7 +118,7 @@ async function apply(deps: WriteDeps, principal: Principal, checked: Checked, in
 
 /** Write exactly one UID group upstream; callers must refetch its provider-normalized representation. */
 export async function putImported(deps: WriteDeps, principal: Principal, calendarId: SourceCalendarId,
-  input: { objectName: string; ics: string; ifMatch?: string; ifNoneMatch?: '*' }): Promise<{ created: boolean }> {
+  input: { objectName: string; ics: string; ifMatch?: string; ifNoneMatch?: '*'; resourceIfMatch?: string }): Promise<{ created: boolean }> {
   const validated = validateObject(input.ics);
   if (!validated.ok) throw new HostedWriteError(validated.code, validated.detail);
   const checked = await check(deps, principal, calendarId, input, validated.resource.uid);
@@ -125,7 +129,7 @@ export async function putImported(deps: WriteDeps, principal: Principal, calenda
 
 /** Delete the entire upstream UID group, then publish its deletion locally. */
 export async function deleteImported(deps: WriteDeps, principal: Principal, calendarId: SourceCalendarId,
-  input: { objectName: string; ifMatch?: string }): Promise<void> {
+  input: { objectName: string; ifMatch?: string; resourceIfMatch?: string }): Promise<void> {
   const checked = await check(deps, principal, calendarId, input);
   const result = await providerWrite(deps, checked, (partial) => apply(deps, principal, checked, input, partial, false), (ctx) => checked.writes.delete(ctx, checked.calendar, checked.existing));
   await apply(deps, principal, checked, input, result, true);

@@ -32,7 +32,11 @@ async function calendarsWithAccess(tx: TenantTx, principal: Principal, id?: Sour
       array_position(${ordered}, ${direct.access}::text),
       array_position(${ordered}, ${tenant.access}::text))]
     end`;
-  const access = sql<Access | null>`case when ${owned} or ${hasRole(principal, 'admin')} then 'owner' else ${grant} end`;
+  // Capability loss suspends editing without discarding the grant that a reconnect can restore.
+  const effectiveGrant = sql<Access | null>`case when ${calendarAccount.provider} <> 'hosted'
+    and coalesce((${sourceCalendar.capabilities}->>'write')::boolean, false) = false
+    and ${grant} in ('write', 'manage') then 'read' else ${grant} end`;
+  const access = sql<Access | null>`case when ${owned} or ${hasRole(principal, 'admin')} then 'owner' else ${effectiveGrant} end`;
   return tx.select({ calendar: sourceCalendar, access, owned, grant }).from(sourceCalendar)
     .innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId))
     .leftJoin(member, and(eq(member.organizationId, sourceCalendar.tenantId), eq(member.userId, principal.userId)))
@@ -42,7 +46,7 @@ async function calendarsWithAccess(tx: TenantTx, principal: Principal, id?: Sour
     .orderBy(asc(sourceCalendar.accountId), asc(sourceCalendar.name), asc(sourceCalendar.id));
 }
 
-/** Highest of ownership, tenant administration, personal and tenant grants; null when none applies. */
+/** Highest usable access; imported editing grants become read access while provider writability is lost. */
 export async function effectiveAccess(tx: TenantTx, principal: Principal, calendarId: SourceCalendarId): Promise<Access | null> {
   return (await calendarsWithAccess(tx, principal, calendarId))[0]?.access ?? null;
 }

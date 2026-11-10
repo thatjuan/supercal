@@ -22,7 +22,7 @@ import { Field } from '../ui/field.tsx';
 import { Panel } from '../ui/panel.tsx';
 import { fieldErrors, ProblemAlert, toProblem } from '../ui/problem-alert.tsx';
 import { QrButton } from '../ui/qr-code.tsx';
-import type { CalendarTabProps, HostedCalendar } from './data.ts';
+import type { CalendarTabProps, Calendar } from './data.ts';
 
 type CalendarLink = components['schemas']['CalendarLink'];
 type CreatedLink = components['schemas']['CreatedCalendarLink'];
@@ -172,7 +172,7 @@ function LinkRow({ link, creator, calendarId, onChanged }: { link: CalendarLink;
   );
 }
 
-type CreateLinkDialogProps = { calendar: HostedCalendar; onClose: () => void; onCreated: (link: CreatedLink) => void };
+type CreateLinkDialogProps = { calendar: Calendar; onClose: () => void; onCreated: (link: CreatedLink) => void };
 
 /** Privacy starts unset, so nobody publishes full details by accident. Mounted only while open, so it starts empty each time. */
 function CreateLinkDialog({ calendar, onClose, onCreated }: CreateLinkDialogProps) {

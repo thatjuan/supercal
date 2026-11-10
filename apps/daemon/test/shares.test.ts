@@ -154,7 +154,7 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
     const owned = z.object({ publicationIds: z.array(z.string()) }).parse(await json(await call(owner, `/calendars/${cal.id}`))); expect(owned.publicationIds.length).toBeGreaterThan(0);
     const fb = await calendar(); await share(fb, 'free-busy');
     const data = await json(await call(colleague, `/calendars/${fb.id}`));
-    expect(data).toEqual({ id: fb.id, name: 'Personal', color: null, kind: 'hosted', timezone: 'UTC', state: 'active', access: 'free-busy', owner: { id: owner.userId, name: 'Owner' }, publicationIds: [], freshness: { lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false } });
+    expect(data).toEqual({ id: fb.id, name: 'Personal', color: null, kind: 'hosted', writable: true, timezone: 'UTC', state: 'active', access: 'free-busy', owner: { id: owner.userId, name: 'Owner' }, publicationIds: [], freshness: { lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false } });
     await withTenant(owner.tenantId, (tx) => tx.delete(calendarShare).where(eq(calendarShare.calendarId, cal.id)));
   });
 
@@ -265,8 +265,31 @@ describe.skipIf(!testDatabaseUrl)('calendar sharing and free-busy', () => {
     expect((await davCall(`${home}${cal.id}/`, 'REPORT', xml('c:calendar-query'))).status).toBe(207);
     for (const access of ['write', 'manage']) {
       const response = await call(owner, `/calendars/${cal.id}/shares/${grant.id}`, 'PATCH', { access });
-      expect(response.status).toBe(422); expect(await json(response)).toMatchObject({ type: 'https://supercal.dev/problems/calendar-not-hosted' });
+      expect(response.status).toBe(422); expect(await json(response)).toMatchObject({ type: `https://supercal.dev/problems/${access === 'write' ? 'calendar-read-only' : 'calendar-not-hosted'}` });
     }
+  });
+
+  test('writable connected calendars allow write grants, retain them while read-only, and never allow manage', async () => {
+    const [account] = await unsafeDb().insert(calendarAccount).values({ tenantId: owner.tenantId, ownerUserId: owner.userId, provider: 'google', displayName: 'Writable' }).returning();
+    const capabilities = { incremental: 'delta', push: false, write: true };
+    const [cal] = await unsafeDb().insert(sourceCalendar).values({ tenantId: owner.tenantId, accountId: account!.id, providerCalendarId: 'writable', name: 'Writable', capabilities }).returning();
+    if (!cal) throw new Error('No calendar');
+    await withTenant(owner.tenantId, (tx) => recordChanges(tx, [upsertOf(cal, 'private', parseCalendar(payload()).resources[0]!, 'complete')]));
+    const grant = await share(cal, 'write');
+    expect(await withTenant(owner.tenantId, (tx) => effectiveAccess(tx, colleague, cal.id))).toBe('write');
+    const path = `/calendars/${cal.id}`;
+    expect(await json(await call(colleague, `${path}/events/private`))).toMatchObject({ title: 'Secret' });
+    expect((await call(owner, `${path}/shares/${grant.id}`, 'PATCH', { access: 'manage' })).status).toBe(422);
+    await unsafeDb().update(sourceCalendar).set({ capabilities: { ...capabilities, write: false } }).where(eq(sourceCalendar.id, cal.id));
+    expect(await withTenant(owner.tenantId, (tx) => effectiveAccess(tx, colleague, cal.id))).toBe('read');
+    expect((await call(owner, `${path}/shares`, 'POST', { grantee: { type: 'tenant' }, access: 'write' })).status).toBe(422);
+    expect(await json(await call(colleague, `${path}/events/private`))).toMatchObject({ title: 'Busy' });
+    expect((await call(colleague, `${path}/events`, 'POST', jsEvent)).status).toBe(403);
+    const [stored] = await unsafeDb().select().from(calendarShare).where(eq(calendarShare.calendarId, cal.id));
+    expect(stored?.access).toBe('write');
+    await unsafeDb().update(sourceCalendar).set({ capabilities }).where(eq(sourceCalendar.id, cal.id));
+    expect(await withTenant(owner.tenantId, (tx) => effectiveAccess(tx, colleague, cal.id))).toBe('write');
+    expect(await json(await call(colleague, `${path}/events/private`))).toMatchObject({ title: 'Secret' });
   });
 
   test('revocation affects the next REST and DAV request; read to write invalidates sync token', async () => {

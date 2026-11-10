@@ -1,4 +1,4 @@
-/** Loading and writing one hosted event. Each write sends the `If-Match` of the version it started from, so a stale one fails with 412 instead of overwriting. */
+/** Loading and writing one hosted or connected event. Each write sends the `If-Match` of the version it started from, so a stale one fails with 412 instead of overwriting. */
 import type { components, operations } from '@supercal/api-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { client, keyPath } from '../../../api.ts';

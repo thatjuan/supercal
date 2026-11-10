@@ -10,7 +10,7 @@ import { Icon } from '../ui/icon.tsx';
 import { ProblemAlert, toProblem } from '../ui/problem-alert.tsx';
 import { Switch } from '../ui/switch.tsx';
 import type { AccountGroup, CalendarRow, Feed } from './data.ts';
-import { useRefreshFeeds } from './data.ts';
+import { readOnlyReason, useRefreshFeeds } from './data.ts';
 import { freshnessText } from './freshness.ts';
 import { PrivacyBadge } from './privacy.tsx';
 import { FALLBACK_COLOR } from './settings-fields.tsx';
@@ -73,6 +73,7 @@ function CalendarRowItem({ row, onOpen, onPublish }: { row: CalendarRow; onOpen:
   const { calendar, passthrough, virtuals } = row;
   const on = passthrough?.enabled ?? false;
   const renamed = passthrough && passthrough.name !== calendar.name ? passthrough.name : null;
+  const readOnly = readOnlyReason(row);
   const gone = calendar.state === 'gone';
   return (
     <li
@@ -81,10 +82,18 @@ function CalendarRowItem({ row, onOpen, onPublish }: { row: CalendarRow; onOpen:
       className={cx('grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 border-t border-line py-2 pr-2 pl-9 first:border-t-0 sm:grid-cols-[1fr_auto_6.5rem_9.5rem]', passthrough && 'cursor-pointer hover:bg-surface-2/60')}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-        <ColorChip color={passthrough?.color ?? calendar.color ?? FALLBACK_COLOR} />
-        <button type="button" disabled={!passthrough} className="truncate text-left text-[15px] disabled:cursor-default" aria-label={`${calendar.name} settings`}>
-          {calendar.name}
-        </button>
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <ColorChip color={passthrough?.color ?? calendar.color ?? FALLBACK_COLOR} />
+          <button type="button" disabled={!passthrough} className="truncate text-left text-[15px] disabled:cursor-default" aria-label={`${calendar.name} settings`}>
+            {calendar.name}
+          </button>
+          {readOnly && (
+            <span role="img" aria-label={readOnly} title={readOnly}>
+              <Icon name="lock" className="size-4 text-ink-3" />
+            </span>
+          )}
+        </span>
+        {calendar.access !== 'free-busy' && <a href={`/hosted/${encodeURIComponent(calendar.id)}`} onClick={(event) => event.stopPropagation()} className="text-sm text-accent underline focus-visible:outline active:opacity-70">Events</a>}
         {renamed && <span className="truncate text-sm text-ink-3">as “{renamed}”</span>}
         {gone && <span className="text-sm text-warning">removed at provider</span>}
         {virtuals.map((v) => (

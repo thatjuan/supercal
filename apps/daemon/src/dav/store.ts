@@ -317,7 +317,7 @@ export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string
     const pub = importedPublication(calendar, account.email, access === 'read' ? 'member' : 'owner');
     pub.name = name;
     if (account.provider === 'hosted') delete pub.importedCalendarId;
-    const writable = own && account.provider !== 'hosted' && account.provider !== 'ics' && calendar.capabilities.write === true
+    const writable = atLeast(access, 'write') && account.provider !== 'hosted' && calendar.capabilities.write === true
       && adapters[account.provider]?.writes !== undefined && account.status !== 'reauth_required' && account.status !== 'disabled';
     return { ...publicationCollection(pub, host), kind: account.provider === 'hosted' ? 'hosted' : 'imported', segment: calendar.id, privileges: writable ? 'write' : 'read', calendar, shared: !own };
   });

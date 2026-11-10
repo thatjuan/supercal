@@ -1,5 +1,5 @@
 /** Calendars (product screen 4): every source calendar with its publish switch, settings drawer, virtual calendars and order. */
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { CalendarList } from '../../../components/calendars/calendar-list.tsx';
 import { feedSearch, useFeedCalendars, useFeeds } from '../../../components/calendars/data.ts';
@@ -38,6 +38,10 @@ function Calendars() {
           </div>
         </div>
       )}
+      {data.shared.length > 0 && <section className="mbs-6 grid gap-2" aria-label="Shared with you">
+        <h2 className="text-lg font-semibold">Shared with you</h2>
+        {data.shared.map((calendar) => <Link key={calendar.id} to="/hosted/$calendarId" params={{ calendarId: calendar.id }} className="text-accent underline focus-visible:outline active:opacity-70">{calendar.name} ({calendar.owner.name})</Link>)}
+      </section>}
       {editing && <PublicationDrawer key={editing.id} publicationId={editing.id} fallbackColor={editing.fallbackColor} onClose={() => setEditing(null)} />}
     </>
   );
