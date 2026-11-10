@@ -12,7 +12,7 @@
 import { normalizers, SOURCE_FORMATS } from '@supercal/core';
 import { calendarAccount, sourceCalendar, newId, organization, purgeTombstones, sourceObject, syncTarget, withControl, withTenant, type SourceCalendarId, type SyncTargetId, type TenantId } from '@supercal/db';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
-import { rebuildHostedCalendar, lockHostedCalendar } from '../hosted/objects.ts';
+import { rebuildHostedCalendar, lockCalendarWrites } from '../hosted/objects.ts';
 import type { Logger } from '../log.ts';
 import { StopTargetError, wakeTargets, type Job, type JobResult } from './scheduler.ts';
 
@@ -91,7 +91,7 @@ export async function runMaintenance(job: Job, log: Logger): Promise<JobResult> 
     for (const { id } of tenants) await withTenant(id as TenantId, async (tx) => {
       const expired = await tx.select({ id: sourceCalendar.id }).from(sourceCalendar).innerJoin(calendarAccount, eq(calendarAccount.id, sourceCalendar.accountId)).where(and(eq(calendarAccount.provider, 'hosted'), lt(sourceCalendar.goneAt, sql`now() - interval '30 days'`)));
       for (const calendar of expired) {
-        await lockHostedCalendar(tx, calendar.id);
+        await lockCalendarWrites(tx, calendar.id);
         await tx.delete(sourceCalendar).where(and(eq(sourceCalendar.id, calendar.id), lt(sourceCalendar.goneAt, sql`now() - interval '30 days'`)));
       }
     });

@@ -5,13 +5,14 @@
  * and the whole path: `POST /api/v1/accounts` → sync engine → the user's CalDAV feed.
  *
  * Seeds a recurring event with an override and an all-day event in a fresh collection, then checks
- * an incremental change (modify + delete), the forced etag mode, and deletes the collection.
+ * incremental changes, device writes with chosen hrefs and conflicts, and forced etag mode, then
+ * deletes the collection.
  */
 import { componentsOf, summary } from '@supercal/core';
 import { closeDb, connectDb, member, migrate, organization, resource, sourceCalendar, syncTarget, user, withControl, type SourceCalendarId, type TenantId } from '@supercal/db';
 import { scratchDatabase, testDatabaseUrl } from '@supercal/db/test-db';
 import { unsafeDb } from '@supercal/db/unsafe-db';
-import { createGuardedFetch } from '@supercal/providers';
+import { createGuardedFetch, registry } from '@supercal/providers';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
@@ -115,7 +116,7 @@ describe.skipIf(!radicale || !testDatabaseUrl)('Radicale end to end', () => {
     if (!calendar) throw new Error(`calendar not listed: ${JSON.stringify(created.body.calendars)}`);
     expect(calendar.color?.toUpperCase()).toBe('#48AAFF');
     const [stored] = await unsafeDb().select().from(sourceCalendar).where(eq(sourceCalendar.id, calendar.id));
-    expect(stored?.capabilities).toEqual({ incremental: 'sync-collection', push: false });
+    expect(stored?.capabilities).toEqual({ incremental: 'sync-collection', push: false, write: true });
 
     const log = createLogger({}, () => {});
     scheduler = startScheduler({ handlers: syncHandlers(createSyncDeps({ secrets: testSecrets, fetch: egress, log })), log, signal: stop.signal, pollMs: 200, leaseMs: 30_000 });
@@ -132,13 +133,66 @@ describe.skipIf(!radicale || !testDatabaseUrl)('Radicale end to end', () => {
     // The events are in the user's CalDAV feed.
     const [feedRow] = (await call('/api/v1/feeds')).body.items as { id: string }[];
     const credentials = (await call(`/api/v1/feeds/${feedRow?.id}/credentials/caldav/rotate`, 'POST')).body as { username: string; password: string };
-    const dav = createDav({ secrets: testSecrets, bus: idleBus });
+    const dav = createDav({ secrets: testSecrets, bus: idleBus, adapters: registry, fetch: egress });
     const feedAuth = `Basic ${btoa(`${credentials.username}:${credentials.password}`)}`;
     const home = await dav.request(`/dav/${credentials.username}/cal/`, { method: 'PROPFIND', headers: { authorization: feedAuth, depth: '1' } });
     const collections = [...(await home.text()).matchAll(/<d:href>([^<]+)<\/d:href>/g)].map((m) => m[1] ?? '').filter((h) => h !== `/dav/${credentials.username}/cal/`);
     const report = '<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"/></c:filter></c:calendar-query>';
     const feedText = (await Promise.all(collections.map(async (href) => (await dav.request(href, { method: 'REPORT', headers: { authorization: feedAuth, depth: '1' }, body: report })).text()))).join('');
     for (const text of ['SUMMARY:Standup', 'SUMMARY:Moved standup', 'SUMMARY:Day off']) expect(feedText).toContain(text);
+
+    // A device login writes through to Radicale and retains its own chosen object name.
+    const publications = (await call(`/api/v1/feeds/${feedRow?.id}/publications`)).body.items as { id: string; sourceCalendarId?: string }[];
+    const publication = publications.find((p) => p.sourceCalendarId === calendar.id);
+    if (!publication) throw new Error('No passthrough publication');
+    expect((await call(`/api/v1/publications/${publication.id}`, 'PATCH', { enabled: true })).status).toBe(200);
+    const device = (await call('/api/v1/dav-logins', 'POST', { name: 'Radicale device' })).body as { username: string; password: string };
+    const deviceAuth = `Basic ${btoa(`${device.username}:${device.password}`)}`;
+    const deviceCollection = `/dav/${device.username}/cal/${calendar.id}/`;
+    const deviceObject = `${deviceCollection}client-chosen.ics`;
+    const deviceRequest = (method: string, body?: string, etag?: string) => dav.request(deviceObject, {
+      method, headers: { authorization: deviceAuth, 'content-type': 'text/calendar', ...(etag && { 'if-match': etag }) }, ...(body && { body }),
+    });
+    const writeBody = DAY.replaceAll('e2e-day', 'e2e-write').replace('SUMMARY:Day off', 'SUMMARY:Device created');
+    const put = await deviceRequest('PUT', writeBody);
+    expect(put.status).toBe(201);
+    expect(put.headers.has('etag')).toBe(false);
+    const read = await deviceRequest('GET');
+    expect(read.status).toBe(200);
+    expect(await read.text()).toContain('SUMMARY:Device created');
+    const upstreamListing = await fetch(new URL(collection, serverUrl), { method: 'PROPFIND', headers: {
+      authorization: `Basic ${btoa(`${login?.username}:${login?.password}`)}`, depth: '1', 'content-type': 'application/xml',
+    }, body: '<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>' });
+    expect(upstreamListing.status).toBe(207);
+    const upstreamHrefs = [...(await upstreamListing.text()).matchAll(/<(?:[\w-]+:)?href>([^<]+\.ics)<\//g)].map((m) => m[1]!);
+    const upstreamObjects = await Promise.all(upstreamHrefs.map(async (href) => {
+      const response = await fetch(new URL(href, serverUrl), { headers: { authorization: `Basic ${btoa(`${login?.username}:${login?.password}`)}` } });
+      return { href, text: await response.text() };
+    }));
+    const upstreamWrite = upstreamObjects.find((object) => object.text.includes('UID:e2e-write'));
+    if (!upstreamWrite) throw new Error('Device create did not reach Radicale');
+    const listed = await dav.request(deviceCollection, { method: 'REPORT', headers: { authorization: deviceAuth }, body: report.replace('<c:calendar-data/>', '<d:getetag/><c:calendar-data/>') });
+    const entry = (await listed.text()).split('<d:response>').find((r) => r.startsWith(`<d:href>${deviceObject}</d:href>`));
+    const listedEtag = /<d:getetag>([^<]+)/.exec(entry ?? '')?.[1]?.replaceAll('&quot;', '"');
+    expect(listedEtag).toBe(read.headers.get('etag')!);
+    const update = await deviceRequest('PUT', writeBody.replace('Device created', 'Device updated'), listedEtag);
+    expect(update.status).toBe(204);
+    expect(update.headers.has('etag')).toBe(false);
+    expect((await deviceRequest('PUT', writeBody, listedEtag)).status).toBe(412);
+    const afterUpdate = await deviceRequest('GET');
+    const currentEtag = afterUpdate.headers.get('etag')!;
+    expect(await afterUpdate.text()).toContain('SUMMARY:Device updated');
+    const upstreamUpdated = await fetch(new URL(upstreamWrite.href, serverUrl), { headers: { authorization: `Basic ${btoa(`${login?.username}:${login?.password}`)}` } });
+    expect(await upstreamUpdated.text()).toContain('SUMMARY:Device updated');
+    expect(await radicaleRequest(upstreamWrite.href, 'PUT', writeBody.replace('Device created', 'Upstream changed'))).toBe(204);
+    expect((await deviceRequest('PUT', writeBody, currentEtag)).status).toBe(412);
+    // Refresh the provider's changed ETag before the final conditional delete.
+    await wake();
+    await eventually(() => resources(calendar.id), (r) => r['e2e-write']?.[0] === 'Upstream changed');
+    const beforeDelete = await deviceRequest('GET');
+    expect((await deviceRequest('DELETE', undefined, beforeDelete.headers.get('etag')!)).status).toBe(204);
+    expect((await deviceRequest('GET')).status).toBe(404);
+    expect(await radicaleRequest(upstreamWrite.href, 'GET')).toBe(404);
 
     // Incremental: modify the series, delete the all-day event.
     await radicaleRequest(`${collection}series.ics`, 'PUT', SERIES.replace('SUMMARY:Standup', 'SUMMARY:Changed standup'));
@@ -150,7 +204,7 @@ describe.skipIf(!radicale || !testDatabaseUrl)('Radicale end to end', () => {
     expect(second?.token).not.toBe(first?.token);
 
     // Forced etag mode: the calendar is downgraded and its cursor dropped.
-    await unsafeDb().update(sourceCalendar).set({ capabilities: { incremental: 'etag', push: false } }).where(eq(sourceCalendar.id, calendar.id));
+    await unsafeDb().update(sourceCalendar).set({ capabilities: { incremental: 'etag', push: false, write: true } }).where(eq(sourceCalendar.id, calendar.id));
     await unsafeDb().update(syncTarget).set({ cursor: null }).where(eq(syncTarget.id, target.id));
     await wake();
     await eventually(cursor, (c) => c?.mode === 'etag');

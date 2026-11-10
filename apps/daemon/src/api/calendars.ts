@@ -9,7 +9,7 @@ import { asc, eq, inArray } from 'drizzle-orm';
 import { accessibleCalendars, ACCESS_LEVELS, requireAccess, type Access } from '../hosted/access.ts';
 import type { Principal } from '../auth/principal.ts';
 import { createCalendar, deleteCalendar, restoreCalendar } from '../hosted/calendars.ts';
-import { lockHostedCalendar } from '../hosted/objects.ts';
+import { lockCalendarWrites } from '../hosted/objects.ts';
 import { audit, createApiApp, etagOf, ifMatchHeaders, requireIfMatch, NotFound, ProblemError, problemResponses, typeId } from './kit/index.ts';
 
 const CalendarFields = z
@@ -23,7 +23,7 @@ const CalendarFields = z
     color: z.string().nullable(),
     timezone: z.string().nullable().openapi({ description: 'IANA zone, when the provider names one' }),
     state: z.enum(calendarState.enumValues).openapi({ description: '`gone`: removed by the provider or soft-deleted by the hosted calendar owner' }),
-    capabilities: z.object({ incremental: z.string(), push: z.boolean() }).optional(),
+    capabilities: z.object({ incremental: z.string(), push: z.boolean(), write: z.boolean() }).optional(),
     access: z.enum([...ACCESS_LEVELS, 'owner']),
     owner: z.object({ id: z.string(), name: z.string() }),
     freshness: z
@@ -63,7 +63,7 @@ export async function toCalendars(tx: TenantTx, calendars: SourceCalendar[], gra
       ...(hosted ? { kind: 'hosted' as const, ...(access !== 'free-busy' && { accountId: null }) } : { kind: 'connected' as const, ...(access !== 'free-busy' && { accountId: calendar.accountId }) }),
       ...(access === 'free-busy' ? {} : {
         description: calendar.description, sortOrder: calendar.sortOrder,
-        updatedAt: calendar.updatedAt.toISOString(), goneAt: calendar.goneAt?.toISOString() ?? null, capabilities: calendar.capabilities,
+        updatedAt: calendar.updatedAt.toISOString(), goneAt: calendar.goneAt?.toISOString() ?? null, capabilities: { ...calendar.capabilities, write: calendar.capabilities.write === true },
       }),
       freshness: hosted || access === 'free-busy' ? { lastSuccessAt: null, pushActive: false, expectedLatency: 0, stale: false } : {
         lastSuccessAt: calendar.freshness.lastSuccessAt, pushActive: calendar.freshness.pushActive,
@@ -150,7 +150,7 @@ const recoverCalendar = createRoute({
 
 /** Authorizes calendar management and serializes metadata changes with event writes. */
 async function managedHosted(tx: TenantTx, principal: Principal, id: SourceCalendar['id'], min: 'manage' | 'owner' = 'owner') {
-  await lockHostedCalendar(tx, id);
+  await lockCalendarWrites(tx, id);
   const { calendar } = await requireAccess(tx, principal, id, min);
   const [account] = await tx.select({ provider: calendarAccount.provider }).from(calendarAccount).where(eq(calendarAccount.id, calendar.accountId));
   if (account?.provider !== 'hosted') throw new ProblemError(409, 'Calendar is not hosted', undefined, 'calendar-not-hosted');

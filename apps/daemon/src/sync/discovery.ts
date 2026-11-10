@@ -68,7 +68,8 @@ export async function applyListing(
 
   const active: SourceCalendar[] = [];
   const woken: SyncTargetId[] = [];
-  for (const { providerCalendarId, name, color, timezone, capabilities } of listed) {
+  for (const { providerCalendarId, name, color, timezone, capabilities: discovered } of listed) {
+    const capabilities = { ...discovered, write: discovered.write === true };
     const [row] = await tx
       .insert(sourceCalendar)
       .values({ tenantId: account.tenantId, accountId: account.id, providerCalendarId, name, color, timezone, capabilities })

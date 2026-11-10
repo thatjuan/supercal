@@ -89,7 +89,7 @@ export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdap
             name: item.summaryOverride ?? item.summary ?? item.id,
             color: item.backgroundColor ?? null,
             timezone: item.timeZone ?? null,
-            capabilities: { incremental: 'delta', push: options.push },
+            capabilities: { incremental: 'delta', push: options.push, write: false },
           });
         }
         pageToken = page.nextPageToken;

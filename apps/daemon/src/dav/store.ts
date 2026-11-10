@@ -1,12 +1,13 @@
 /**
  * CalDAV collection implementations: hosted payloads and metadata, and enabled feed projection
  * specs with the per-publication object index (href → UID, ETag) built without rendering, and
- * rendered objects. Everything except `loginByUsername` takes the request's `TenantTx`.
+ * rendered objects. Reads use the request's `TenantTx`; provider writes defer until it commits.
  */
 import { addMissingTimezones, hrefFor, objectEtag, project, serializeCalendar, type ProjectedObject, type PublicationSpec, type SourceResource } from '@supercal/core';
 import {
   calendarAccount,
   davLogin,
+  davObjectName,
   changesSince,
   resourcesIn,
   tombstoneFloor,
@@ -31,6 +32,7 @@ import {
   type SourceCalendarId,
   type TenantTx,
 } from '@supercal/db';
+import type { AdapterRegistry } from '@supercal/providers';
 import { and, asc, eq, inArray, max, sql } from 'drizzle-orm';
 import { openUidSecret } from '../feeds/credentials.ts';
 import { deviceHomeCalendars, atLeast } from '../hosted/access.ts';
@@ -56,7 +58,7 @@ export async function loginByUsername(username: string): Promise<DavLogin | null
 type Source = { id: SourceCalendarId; priority: number; ownerAddresses: string[] };
 
 /** An enabled publication with what projecting it needs. */
-export type Pub = Pick<Publication, 'name' | 'color' | 'sortOrder' | 'slug' | 'epoch'> & { id: string; spec: PublicationSpec; sources: Source[]; sourceIds: SourceCalendarId[] };
+export type Pub = Pick<Publication, 'name' | 'color' | 'sortOrder' | 'slug' | 'epoch'> & { id: string; importedCalendarId?: SourceCalendarId; spec: PublicationSpec; sources: Source[]; sourceIds: SourceCalendarId[] };
 
 export type FeedAccount = { feed: Feed; ownerEmail: string | null; publications: Pub[] };
 
@@ -101,6 +103,13 @@ export async function loadAccount(tx: TenantTx, secrets: SecretBox, feedId: Feed
 export type IndexEntry = { uid: string; href: string; seq: bigint; etag: string };
 export type PubIndex = { byHref: Map<string, IndexEntry>; byUid: Map<string, IndexEntry>; maxSeq: bigint };
 
+/** Load imported client names once for an index or change page; feed hrefs never use them. */
+async function importedNames(tx: TenantTx, pub: Pub): Promise<Map<string, string>> {
+  const rows = pub.importedCalendarId ? await tx.select({ uid: davObjectName.uid, objectName: davObjectName.objectName })
+    .from(davObjectName).where(eq(davObjectName.sourceCalendarId, pub.importedCalendarId)) : [];
+  return new Map(rows.map((row) => [row.uid, row.objectName]));
+}
+
 const INDEX_CACHE_SIZE = 256;
 const indexCache = new Map<string, PubIndex>();
 
@@ -108,12 +117,12 @@ const indexCache = new Map<string, PubIndex>();
  * Every live UID of `pub` with its href and ETag, computed from `uid, max(seq)` without loading
  * or rendering a resource. `max(seq)` counts tombstoned copies too, so deleting one copy in a
  * virtual publication changes the merged object's ETag. Cached per `(pubId, epoch, maxSeq)` in a
- * small LRU: any change to the publication's sources moves `maxSeq` and misses the cache.
+ * small LRU (also keyed by audience): any change to the publication's sources moves `maxSeq` and misses the cache.
  */
 export async function pubIndex(tx: TenantTx, pub: Pub): Promise<PubIndex> {
   if (pub.sourceIds.length === 0) return { byHref: new Map(), byUid: new Map(), maxSeq: 0n };
   const { maxSeq } = await publicationState(tx, pub.sourceIds);
-  const cacheKey = `${pub.id}/${pub.epoch}/${maxSeq}`;
+  const cacheKey = `${pub.id}/${pub.spec.audience}/${pub.epoch}/${maxSeq}`;
   const cached = indexCache.get(cacheKey);
   if (cached) {
     indexCache.delete(cacheKey);
@@ -127,10 +136,11 @@ export async function pubIndex(tx: TenantTx, pub: Pub): Promise<PubIndex> {
     .groupBy(resource.uid)
     .orderBy(resource.uid)
     .having(sql`bool_or(not ${resource.deleted})`);
+  const names = await importedNames(tx, pub);
   const entries = await Promise.all(
-    rows.map(async ({ uid, seq }): Promise<IndexEntry> => ({ uid, seq, href: await hrefFor(pub.spec, uid), etag: await objectEtag(pub.spec, pub.epoch, uid, seq) })),
+    rows.map(async ({ uid, seq }): Promise<IndexEntry> => ({ uid, seq, href: names.has(uid) ? encodeURIComponent(names.get(uid)!) : await hrefFor(pub.spec, uid), etag: await objectEtag(pub.spec, pub.epoch, uid, seq) })),
   );
-  const index = { byHref: new Map(entries.map((e) => [e.href, e])), byUid: new Map(entries.map((e) => [e.uid, e])), maxSeq };
+  const index = { byHref: new Map(entries.map((e) => [decodeURIComponent(e.href), e])), byUid: new Map(entries.map((e) => [e.uid, e])), maxSeq };
   indexCache.set(cacheKey, index);
   if (indexCache.size > INDEX_CACHE_SIZE) indexCache.delete(indexCache.keys().next().value ?? '');
   return index;
@@ -173,6 +183,7 @@ type ChangePage = { rows: Change[]; maxSeq: bigint; hasMore: boolean };
 
 /** One calendar collection as the handlers see it; changes encapsulates source-specific tombstones. */
 export type CollectionView = {
+  kind: 'hosted' | 'imported' | 'feed';
   segment: string;
   display: { name: string; color: string | null; sortOrder: number; description?: string | null; timezone?: string | null };
   privileges: 'read' | 'write' | 'manage';
@@ -183,7 +194,7 @@ export type CollectionView = {
   query(tx: TenantTx, range?: { from: Date; to: Date }): Promise<Map<string, { ics: string }>>;
   token(seq: bigint): string;
   parseToken(tx: TenantTx, token: string): Promise<bigint | null>;
-  changeEntry(row: ResourceRow, maxSeqOfUid: bigint): Promise<{ href: string; etag: string }>;
+  changeEntry(tx: TenantTx, row: ResourceRow, maxSeqOfUid: bigint): Promise<{ href: string; etag: string }>;
   changes(tx: TenantTx, since: bigint, limit: number): Promise<ChangePage>;
 };
 
@@ -200,8 +211,12 @@ function tokenFunctions(host: string, id: string, epoch: number) {
 
 /** Published feeds retain their computed hrefs, projection, ETags and virtual UID merge semantics. */
 export function publicationCollection(pub: Pub, host: string): CollectionView {
-  const changeEntry = async (row: ResourceRow, seq: bigint) => ({ href: await hrefFor(pub.spec, row.uid), etag: await objectEtag(pub.spec, pub.epoch, row.uid, seq) });
+  const changeEntry = async (tx: TenantTx, row: ResourceRow, seq: bigint, names?: Map<string, string>) => {
+    const objectName = (names ?? await importedNames(tx, pub)).get(row.uid) ?? (pub.importedCalendarId && row.deleted ? row.objectName : null);
+    return { href: objectName ? encodeURIComponent(objectName) : await hrefFor(pub.spec, row.uid), etag: await objectEtag(pub.spec, pub.epoch, row.uid, seq) };
+  };
   return {
+    kind: pub.importedCalendarId ? 'imported' : 'feed',
     segment: pub.slug, display: pub, privileges: 'read',
     index: (tx) => pubIndex(tx, pub),
     objects: (tx, uids) => renderUids(tx, pub, uids),
@@ -217,7 +232,8 @@ export function publicationCollection(pub: Pub, host: string): CollectionView {
       }
       const tombstoned = [...changed].filter(([, v]) => !v.alive).map(([uid]) => uid);
       const stillHeld = new Set(tombstoned.length ? (await resourcesByUids(tx, pub.sourceIds, tombstoned)).map((row) => row.uid) : []);
-      const rows = await Promise.all([...changed].map(async ([uid, v]) => ({ uid, alive: v.alive || stillHeld.has(uid), ...await changeEntry(v.row, v.seq) })));
+      const names = await importedNames(tx, pub);
+      const rows = await Promise.all([...changed].map(async ([uid, v]) => ({ uid, alive: v.alive || stillHeld.has(uid), ...await changeEntry(tx, v.row, v.seq, names) })));
       return { ...page, rows };
     },
   };
@@ -235,8 +251,9 @@ export function hostedCollection(calendar: SourceCalendar, privileges: Collectio
       return [r.uid, { ics: r.payload }];
     }));
   }
-  const changeEntry = async (row: ResourceRow) => ({ href: encodeURIComponent(row.objectName ?? ''), etag: `"${row.revision}"` });
+  const changeEntry = async (_tx: TenantTx, row: ResourceRow) => ({ href: encodeURIComponent(row.objectName ?? ''), etag: `"${row.revision}"` });
   return {
+    kind: 'hosted',
     segment: calendar.providerCalendarId, display: calendar, privileges, calendar,
     async index(tx) {
       const { maxSeq } = await publicationState(tx, sourceIds);
@@ -252,19 +269,27 @@ export function hostedCollection(calendar: SourceCalendar, privileges: Collectio
     changeEntry,
     async changes(tx, since, limit) {
       const page = await changesSince(tx, sourceIds, since, limit);
-      return { ...page, rows: await Promise.all(page.rows.map(async (row) => ({ uid: row.uid, alive: !row.deleted, ...await changeEntry(row) }))) };
+      return { ...page, rows: await Promise.all(page.rows.map(async (row) => ({ uid: row.uid, alive: !row.deleted, ...await changeEntry(tx, row) }))) };
     },
   };
 }
 
+/** The device projection shared by listing and write preconditions, including its ETag namespace. */
+export function importedPublication(calendar: SourceCalendar, email: string | null, audience: 'owner' | 'member' = 'owner'): Pub {
+  const ownerAddresses = email ? [`mailto:${email}`] : [];
+  return { id: `${calendar.id}.r`, importedCalendarId: calendar.id, slug: calendar.id, name: calendar.name, color: calendar.color,
+    sortOrder: calendar.sortOrder, epoch: calendar.syncEpoch, spec: { ...memberSpec(calendar.id, ownerAddresses), audience },
+    sources: [{ id: calendar.id, priority: 0, ownerAddresses }], sourceIds: [calendar.id] };
+}
+
 export type UserAccount = { login: typeof davLogin.$inferSelect; ownerEmail: string | null; collections: CollectionView[] };
 /** Reload the credential and active owned/shared collections inside the authenticated tenant transaction. */
-export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string, principal: Principal): Promise<UserAccount | null> {
+export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string, principal: Principal, adapters: AdapterRegistry = {}): Promise<UserAccount | null> {
   const [row] = await tx.select({ login: davLogin, email: user.email }).from(davLogin)
     .innerJoin(user, eq(user.id, davLogin.userId)).where(eq(davLogin.id, id));
   if (!row) return null;
   const calendars = (await deviceHomeCalendars(tx, principal)).filter(({ calendar }) => calendar.state === 'active');
-  const accounts = calendars.length ? await tx.select({ id: calendarAccount.id, ownerId: user.id, ownerName: user.name, email: calendarAccount.email, provider: calendarAccount.provider })
+  const accounts = calendars.length ? await tx.select({ id: calendarAccount.id, ownerId: user.id, ownerName: user.name, email: calendarAccount.email, provider: calendarAccount.provider, status: calendarAccount.status })
     .from(calendarAccount).innerJoin(user, eq(user.id, calendarAccount.ownerUserId))
     .where(inArray(calendarAccount.id, calendars.map(({ calendar }) => calendar.accountId))) : [];
   const byId = new Map(accounts.map((account) => [account.id, account]));
@@ -289,13 +314,12 @@ export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string
       const view = hostedCollection(calendar, atLeast(access, 'manage') ? 'manage' : 'write', host);
       return { ...view, segment: own ? calendar.providerCalendarId : calendar.id, display: { ...view.display, name }, shared: !own };
     }
-    const ownerAddresses = account.email ? [`mailto:${account.email}`] : [];
-    const spec = { ...memberSpec(calendar.id, ownerAddresses), audience: access === 'read' ? 'member' as const : 'owner' as const };
-    const pub: Pub = { id: `${calendar.id}.r`, slug: calendar.id, name, color: calendar.color, sortOrder: calendar.sortOrder, epoch: calendar.syncEpoch,
-      spec, sources: [{ id: calendar.id, priority: 0, ownerAddresses }], sourceIds: [calendar.id] };
-    // Imported calendars (own or shared) and hosted calendars shared at read: segment is the
-    // calendar id, and the collection is read-only even for the owner.
-    return { ...publicationCollection(pub, host), segment: calendar.id, privileges: 'read', calendar, shared: !own };
+    const pub = importedPublication(calendar, account.email, access === 'read' ? 'member' : 'owner');
+    pub.name = name;
+    if (account.provider === 'hosted') delete pub.importedCalendarId;
+    const writable = own && account.provider !== 'hosted' && account.provider !== 'ics' && calendar.capabilities.write === true
+      && adapters[account.provider]?.writes !== undefined && account.status !== 'reauth_required' && account.status !== 'disabled';
+    return { ...publicationCollection(pub, host), kind: account.provider === 'hosted' ? 'hosted' : 'imported', segment: calendar.id, privileges: writable ? 'write' : 'read', calendar, shared: !own };
   });
   // A user's provider_calendar_id wins over a colliding shared calendar id.
   collections.sort((a, b) => Number(a.shared ?? false) - Number(b.shared ?? false) || a.display.sortOrder - b.display.sortOrder);

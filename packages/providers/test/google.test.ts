@@ -37,7 +37,7 @@ function setup(handle: (req: MockRequest) => Response | Promise<Response>, crede
   return { adapter: createGoogleAdapter({ ...mock.options, push: false }), ctx, saved, requests: mock.requests };
 }
 
-const calendar = { id: 'cal_1', providerCalendarId: 'work@example.test', capabilities: { incremental: 'delta', push: false } };
+const calendar = { id: 'cal_1', providerCalendarId: 'work@example.test', capabilities: { incremental: 'delta', push: false, write: false } };
 const eventsPath = '/calendar/v3/calendars/work%40example.test/events';
 
 async function collect(iterable: AsyncIterable<SyncPage | SyncEnd<unknown>>) {
@@ -123,8 +123,8 @@ describe('Google adapter', () => {
         : Response.json({ items: [{ id: 'a', summary: 'A', backgroundColor: '#123456' }], nextPageToken: 'n' }),
     );
     expect(await adapter.listCalendars(ctx)).toEqual([
-      { providerCalendarId: 'a', name: 'A', color: '#123456', timezone: null, capabilities: { incremental: 'delta', push: false } },
-      { providerCalendarId: 'b', name: 'Mine', color: null, timezone: 'Europe/Paris', capabilities: { incremental: 'delta', push: false } },
+      { providerCalendarId: 'a', name: 'A', color: '#123456', timezone: null, capabilities: { incremental: 'delta', push: false, write: false } },
+      { providerCalendarId: 'b', name: 'Mine', color: null, timezone: 'Europe/Paris', capabilities: { incremental: 'delta', push: false, write: false } },
     ]);
   });
 

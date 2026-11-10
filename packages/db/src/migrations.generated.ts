@@ -17,6 +17,7 @@ import m12 from '../migrations/0012_calendar_shares.sql' with { type: 'text' };
 import m13 from '../migrations/0013_monotonic_purge.sql' with { type: 'text' };
 import m14 from '../migrations/0014_sink_problem.sql' with { type: 'text' };
 import m15 from '../migrations/0015_member_roles.sql' with { type: 'text' };
+import m16 from '../migrations/0016_nervous_omega_flight.sql' with { type: 'text' };
 
 /** Every migration file, by name, plus the drizzle-kit journal. */
-export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2, '0003_tenant_organization.sql': m3, '0004_feeds.sql': m4, '0005_sync_engine.sql': m5, '0006_google_provider.sql': m6, '0007_ops_grants.sql': m7, '0008_google_sinks.sql': m8, '0009_hosted_calendars.sql': m9, '0010_calendar_links.sql': m10, '0011_dav_logins.sql': m11, '0012_calendar_shares.sql': m12, '0013_monotonic_purge.sql': m13, '0014_sink_problem.sql': m14, '0015_member_roles.sql': m15 } };
+export const migrations = { journal, files: { '0000_init.sql': m0, '0001_roles_rls.sql': m1, '0002_change_log.sql': m2, '0003_tenant_organization.sql': m3, '0004_feeds.sql': m4, '0005_sync_engine.sql': m5, '0006_google_provider.sql': m6, '0007_ops_grants.sql': m7, '0008_google_sinks.sql': m8, '0009_hosted_calendars.sql': m9, '0010_calendar_links.sql': m10, '0011_dav_logins.sql': m11, '0012_calendar_shares.sql': m12, '0013_monotonic_purge.sql': m13, '0014_sink_problem.sql': m14, '0015_member_roles.sql': m15, '0016_nervous_omega_flight.sql': m16 } };

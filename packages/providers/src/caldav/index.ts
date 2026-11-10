@@ -1,12 +1,13 @@
 /**
  * The CalDAV adapters: generic CalDAV (`caldav`) and iCloud (`icloud`, the same adapter with
  * Apple's server and partition hosts). Both poll; discovery is `discovery.ts`, event sync `sync.ts`,
- * and every request goes through the guarded transport (`session.ts`).
+ * writes `writes.ts`; every request goes through the guarded transport (`session.ts`).
  */
 import { AuthFailedError, type AdapterContext, type ProviderAdapter } from '../adapter.ts';
 import type { ProviderCredentials } from '../credentials.ts';
 import { discoverHome, listCollections, type Incremental } from './discovery.ts';
 import { createDavSession } from './session.ts';
+import { caldavWrites } from './writes.ts';
 import { syncCollection, type CaldavCursor } from './sync.ts';
 
 export { UnsupportedAuthError } from './session.ts';
@@ -32,6 +33,10 @@ export function createCaldavAdapter(provider: 'caldav' | 'icloud', login: (crede
     async listCalendars(ctx) {
       const { account, dav } = session(ctx);
       return listCollections(dav, await discoverHome(dav, account.serverUrl));
+    },
+    writes: {
+      put: (ctx, calendar, ics, existing) => caldavWrites.put(session(ctx).dav, calendar, ics, existing),
+      delete: (ctx, calendar, existing) => caldavWrites.delete(session(ctx).dav, calendar, existing),
     },
     sync(ctx, calendar, cursor) {
       const { dav } = session(ctx);

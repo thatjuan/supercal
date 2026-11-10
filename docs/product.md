@@ -32,8 +32,10 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
   Create, edit and delete events from calendar apps through read-write CalDAV; create and rename
   calendars there too. Each device gets its own named DAV login with a password shown once and
   immediate revocation. Feed logins stay read-only, and DAV logins grant no API or feed access.
-  One device login also lists imported calendars enabled on the Calendars page, read-only with
-  full event details, alongside shared calendars. Feed privacy and filters do not apply to the
+  One device login also lists connected calendars enabled on the Calendars page with full event
+  details, alongside shared calendars. It can create, edit and delete events in your connected
+  iCloud or CalDAV calendars when the provider allows it; shared connected calendars stay read-only.
+  Edits go through to the provider immediately, and conflicts ask the calendar app to refetch. Feed privacy and filters do not apply to the
   owner's device login; hosted calendars stay listed even when their feed publication is disabled.
   The dashboard also shows each hosted calendar's events and creates, edits and deletes them,
   including one occurrence or this and following. The REST API supports JSCalendar event reads and

@@ -140,7 +140,7 @@ describe('RemoveDialog', () => {
     color: null,
     timezone: null,
     state: 'active',
-    capabilities: { incremental: 'none', push: false },
+    capabilities: { incremental: 'none', push: false, write: false },
     freshness: { lastSuccessAt: null, pushActive: false, expectedLatency: null, stale: false },
     publicationIds,
   });
