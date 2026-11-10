@@ -289,8 +289,11 @@ Revoke a device under **Settings → Calendar apps**, or list them with `GET /ap
 revoke one with `DELETE /api/v1/dav-logins/<id>`. It stops authenticating immediately without
 affecting other devices. A tenant admin can revoke a member's device login too. Each user may have at most
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
-Feed usernames and passwords continue to provide read-only publications; use a DAV login to
-edit hosted calendars. Device credentials cannot open the management API or ICS feeds.
+Feed usernames and passwords continue to provide read-only publications. A DAV login lists your
+hosted calendars, imported calendars enabled on the Calendars page, and calendars shared with you.
+You can edit hosted calendars; your imported calendars are read-only and show full event details,
+regardless of feed privacy and filters. Hosted calendars stay listed even when their feed publication
+is disabled. Device credentials cannot open the management API or ICS feeds.
 
 ### Observed client coverage
 

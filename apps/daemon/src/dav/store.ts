@@ -101,7 +101,7 @@ export async function loadAccount(tx: TenantTx, secrets: SecretBox, feedId: Feed
 export type IndexEntry = { uid: string; href: string; seq: bigint; etag: string };
 export type PubIndex = { byHref: Map<string, IndexEntry>; byUid: Map<string, IndexEntry>; maxSeq: bigint };
 
-const INDEX_CACHE_SIZE = 64;
+const INDEX_CACHE_SIZE = 256;
 const indexCache = new Map<string, PubIndex>();
 
 /**
@@ -268,21 +268,34 @@ export async function loadUserAccount(tx: TenantTx, id: DavLoginId, host: string
     .from(calendarAccount).innerJoin(user, eq(user.id, calendarAccount.ownerUserId))
     .where(inArray(calendarAccount.id, calendars.map(({ calendar }) => calendar.accountId))) : [];
   const byId = new Map(accounts.map((account) => [account.id, account]));
-  const collections = calendars.flatMap(({ calendar, access }): CollectionView[] => {
+  const enabled = await tx.select({ id: publicationSource.sourceCalendarId }).from(publication)
+    .innerJoin(feed, eq(feed.id, publication.feedId))
+    .innerJoin(publicationSource, eq(publicationSource.publicationId, publication.id))
+    .where(and(eq(feed.ownerUserId, principal.userId), eq(feed.isDefault, true), eq(publication.kind, 'passthrough'), eq(publication.enabled, true)));
+  const enabledIds = new Set(enabled.map(({ id }) => id));
+  const listed = calendars.flatMap(({ calendar, access }) => {
     const account = byId.get(calendar.accountId)!;
     const own = account.ownerId === principal.userId;
-    // Own imported calendars continue to be served through feeds.
-    if (own && account.provider !== 'hosted') return [];
+    if (own && account.provider !== 'hosted' && !enabledIds.has(calendar.id)) return [];
     const name = own ? calendar.name : `${calendar.name} (${account.ownerName})`;
+    return [{ calendar, access, account, own, name }];
+  });
+  const nameCounts = new Map<string, number>();
+  for (const { name } of listed) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  const collections = listed.map(({ calendar, access, account, own, name: baseName }): CollectionView => {
+    const name = own && account.provider !== 'hosted' && account.email && (nameCounts.get(baseName) ?? 0) > 1
+      ? `${baseName} (${account.email})` : baseName;
     if (account.provider === 'hosted' && access !== 'read') {
       const view = hostedCollection(calendar, atLeast(access, 'manage') ? 'manage' : 'write', host);
-      return [{ ...view, segment: own ? calendar.providerCalendarId : calendar.id, display: { ...view.display, name }, shared: !own }];
+      return { ...view, segment: own ? calendar.providerCalendarId : calendar.id, display: { ...view.display, name }, shared: !own };
     }
     const ownerAddresses = account.email ? [`mailto:${account.email}`] : [];
     const spec = { ...memberSpec(calendar.id, ownerAddresses), audience: access === 'read' ? 'member' as const : 'owner' as const };
     const pub: Pub = { id: `${calendar.id}.r`, slug: calendar.id, name, color: calendar.color, sortOrder: calendar.sortOrder, epoch: calendar.syncEpoch,
       spec, sources: [{ id: calendar.id, priority: 0, ownerAddresses }], sourceIds: [calendar.id] };
-    return [{ ...publicationCollection(pub, host), calendar, shared: !own }];
+    // Imported calendars (own or shared) and hosted calendars shared at read: segment is the
+    // calendar id, and the collection is read-only even for the owner.
+    return { ...publicationCollection(pub, host), segment: calendar.id, privileges: 'read', calendar, shared: !own };
   });
   // A user's provider_calendar_id wins over a colliding shared calendar id.
   collections.sort((a, b) => Number(a.shared ?? false) - Number(b.shared ?? false) || a.display.sortOrder - b.display.sortOrder);
