@@ -81,12 +81,17 @@ export async function toPage(items: JsonValue[], masterUids: Map<string, string 
 export function createGoogleAdapter(options: GoogleAdapterOptions): ProviderAdapter<GoogleCursor> {
   const api = createGoogleApi(options);
 
-  async function watch(ctx: AdapterContext, request: PushRequest): Promise<PushLeaseInfo> {
+  async function watch(ctx: AdapterContext, request: PushRequest): Promise<PushLeaseInfo | null> {
     const path = request.target === 'calendar-list' ? '/users/me/calendarList/watch' : `${calendarPath(request.providerTargetId)}/events/watch`;
     const channel = await api.call(ctx, Channel, path, {
       method: 'POST',
       body: { id: crypto.randomUUID(), type: 'web_hook', address: request.address, token: request.token },
+    }).catch((error: unknown) => {
+      // Google's built-in holiday calendars can be read but cannot create watch channels.
+      if (request.target === 'calendar' && error instanceof GoogleHttpError && error.status === 400 && error.reason === 'pushNotSupportedForRequestedResource') return null;
+      throw error;
     });
+    if (!channel) return null;
     return {
       target: request.target,
       targetId: request.targetId,

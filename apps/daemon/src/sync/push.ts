@@ -2,7 +2,8 @@
  * `push_renew` targets keep one push subscription alive per calendar (Google `events.watch`), or
  * per account: for calendar discovery (Google `calendarList.watch`), or for the whole mailbox's
  * events (Graph `/me/events`, an adapter with `push: 'account'`). Push needs a public https URL;
- * without one (`pushBaseUrl` null) the targets park and calendars are polled.
+ * without one (`pushBaseUrl` null), or when a resource rejects push as unsupported, the targets
+ * park and calendars are polled. Ordinary discovery leaves existing parked targets alone.
  *
  * A run subscribes when no lease exists, and otherwise waits until 80% of the newest lease's
  * lifetime. Renewal stores the new lease before stopping and deleting the old ones, so the two
@@ -10,12 +11,12 @@
  * its sha256 (`secret_hash`), which `/hooks/<provider>` checks.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { calendarAccount, pushLease, sourceCalendar, withTenant, type AccountId, type CalendarAccount, type PushLease, type PushTarget, type SourceCalendarId } from '@supercal/db';
+import { calendarAccount, pushLease, sourceCalendar, syncTarget, withTenant, type AccountId, type CalendarAccount, type PushLease, type PushTarget, type SourceCalendarId } from '@supercal/db';
 import type { JsonValue, PushLeaseInfo, PushRequest } from '@supercal/providers';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { adapterFor, withAccount, type SyncDeps, type TenantJob } from './context.ts';
 import { fenced } from './runner.ts';
-import { StopTargetError, type JobResult } from './scheduler.ts';
+import { StopTargetError, wakeTargets, type JobResult } from './scheduler.ts';
 
 /** Share of a lease's lifetime after which it is renewed. */
 const RENEW_AT = 0.8;
@@ -58,6 +59,19 @@ export async function runPushRenew(deps: SyncDeps, job: TenantJob, signal: Abort
     const token = randomBytes(32).toString('base64url');
     const request: PushRequest = { target, targetId: job.target, providerTargetId, address, token };
     const next = newest ? await adapter.push.renew(ctx, leaseInfo(newest), request) : await adapter.push.subscribe(ctx, request);
+    if (!next) {
+      await fenced(job, async (tx) => {
+        await tx.delete(pushLease).where(and(eq(pushLease.target, target), eq(pushLease.targetId, job.target)));
+        const calendars = tx.select({ id: sourceCalendar.id }).from(sourceCalendar)
+          .where(target === 'calendar' ? eq(sourceCalendar.id, job.target as SourceCalendarId) : eq(sourceCalendar.accountId, account.id));
+        const targets = await tx.select({ id: syncTarget.id }).from(syncTarget)
+          .where(and(eq(syncTarget.kind, 'events'), inArray(syncTarget.targetId, calendars)));
+        await wakeTargets(tx, targets.map((row) => row.id));
+      });
+      ctx.log.info('push is unsupported for this resource; polling instead', { target: job.target });
+      // A successful fallback clears previous retries and account errors, then parks this watch.
+      return { nextRunInMs: Infinity };
+    }
     const createdAt = new Date();
     await fenced(job, (tx) =>
       tx

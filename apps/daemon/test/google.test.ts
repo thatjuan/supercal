@@ -44,6 +44,7 @@ const google = {
   events: (_req: MockRequest): Response => Response.json({ items: [], nextSyncToken: 'token-1' }),
   onStop: async (_req: MockRequest) => {},
   watched: 0,
+  unsupportedPush: false,
   readers: false,
   store: undefined as ReturnType<typeof googleEventStore> | undefined,
 };
@@ -57,6 +58,8 @@ function handle(req: MockRequest): Response | Promise<Response> {
   }
   if (req.path === '/calendar/v3/users/me/calendarList') return Response.json({ items: [{ id: 'work@example.test', summary: 'Work', backgroundColor: '#336699', timeZone: 'Europe/Paris', accessRole: 'owner' }, ...(google.readers ? [{ id: 'holidays', summary: 'Holidays', accessRole: 'reader' }] : [])] });
   if (req.path.endsWith('/watch')) {
+    if (google.unsupportedPush && req.path.endsWith('/events/watch'))
+      return Response.json({ error: { errors: [{ reason: 'pushNotSupportedForRequestedResource' }] } }, { status: 400 });
     const { id } = JSON.parse(req.body) as { id: string };
     return Response.json({ id, resourceId: `res-${++google.watched}`, expiration: String(Date.now() + 7 * 86_400_000) });
   }
@@ -316,6 +319,37 @@ describe.skipIf(!testDatabaseUrl)('Google provider', () => {
     // The next renewal is due at 80% of the new channel's lifetime.
     const [target] = await unsafeDb().select({ dueInDays: sql<number>`extract(epoch from ${syncTarget.nextRunAt} - clock_timestamp())::float8 / 86400` }).from(syncTarget).where(eq(syncTarget.id, await targetOf('push_renew', account.calendarId)));
     expect(target?.dueInDays).toBeCloseTo(5.6, 1);
+  });
+
+  test('unsupported push parks the watch, clears the account error, and keeps polling after discovery', async () => {
+    const id = await targetOf('push_renew', account.calendarId);
+    const ofCalendar = and(eq(pushLease.target, 'calendar'), eq(pushLease.targetId, account.calendarId));
+    await unsafeDb().update(pushLease).set({ createdAt: new Date(Date.now() - 6 * 86_400_000), expiresAt: new Date(Date.now() + 86_400_000) }).where(ofCalendar);
+    await unsafeDb().update(syncTarget).set({ attempts: 169, lastError: 'Google answered 400' }).where(eq(syncTarget.id, id));
+    await unsafeDb().update(calendarAccount).set({ status: 'error', statusDetail: 'Google answered 400' }).where(eq(calendarAccount.id, account.id as AccountId));
+    google.unsupportedPush = true;
+    try {
+      expect(await runNow(id)).toBeUndefined();
+      expect(await accountRow(account.id)).toMatchObject({ status: 'active', statusDetail: null });
+      expect(await unsafeDb().select().from(pushLease).where(ofCalendar)).toEqual([]);
+      const [target] = await unsafeDb().select({ attempts: syncTarget.attempts, lastError: syncTarget.lastError, parked: sql<boolean>`${syncTarget.nextRunAt} = 'infinity'::timestamptz` }).from(syncTarget).where(eq(syncTarget.id, id));
+      expect(target).toEqual({ attempts: 0, lastError: null, parked: true });
+
+      const eventsId = await targetOf('events', account.calendarId);
+      const [poll] = await unsafeDb().select({ due: sql<boolean>`${syncTarget.nextRunAt} <= clock_timestamp()` }).from(syncTarget).where(eq(syncTarget.id, eventsId));
+      expect(poll?.due).toBe(true);
+      google.events = () => Response.json({ items: [], nextSyncToken: 'polling' });
+      expect(await runNow(eventsId)).toBeUndefined();
+      const [calendar] = await unsafeDb().select().from(sourceCalendar).where(eq(sourceCalendar.id, account.calendarId));
+      expect(calendar?.freshness).toMatchObject({ pushActive: false, stale: false, expectedLatencyMs: 120_000 });
+
+      const watches = mock.requests.filter((req) => req.path.endsWith('/events/watch')).length;
+      expect(await runNow(await targetOf('discover', account.id))).toBeUndefined();
+      expect(await claim('test', { leaseMs: 30_000, limit: 1, ids: [id] })).toEqual([]);
+      expect(mock.requests.filter((req) => req.path.endsWith('/events/watch'))).toHaveLength(watches);
+    } finally {
+      google.unsupportedPush = false;
+    }
   });
 
   test('read-only consent stays active; Allow editing wakes discovery and writable calendars accept device writes', async () => {

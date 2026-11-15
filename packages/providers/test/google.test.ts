@@ -21,6 +21,7 @@ import {
   SINK_CALENDAR_MARKER,
   type AdapterContext,
   type ProviderCredentials,
+  type PushRequest,
   type SyncEnd,
   type SyncPage,
 } from '../src/index.ts';
@@ -58,6 +59,28 @@ const master = { id: 'master', etag: '"1"', iCalUID: 'm@example.test', start: { 
 const exception = { id: 'master_20261103', etag: '"2"', iCalUID: 'm@example.test', recurringEventId: 'master', originalStartTime: { date: '2026-11-03' }, start: { date: '2026-11-04' }, end: { date: '2026-11-05' } };
 const sparse = { id: 'master_20261105', etag: '"3"', status: 'cancelled', recurringEventId: 'master', originalStartTime: { date: '2026-11-05' } };
 const deleted = { id: 'gone', etag: '"4"', status: 'cancelled' };
+
+describe('Google push fallback', () => {
+  const request: PushRequest = { target: 'calendar', targetId: 'cal_holidays', providerTargetId: 'holidays', address: 'https://calendar.example/hooks/google', token: 'test-token' };
+  const lease = { target: request.target, targetId: request.targetId, providerChannelId: 'old', providerResourceId: 'old-resource', expiresAt: new Date(), providerState: null };
+
+  test('unsupported calendar push returns null for subscription and renewal', async () => {
+    const { adapter, ctx } = setup(() => Response.json({ error: { errors: [{ reason: 'pushNotSupportedForRequestedResource' }] } }, { status: 400 }));
+    if (!adapter.push) throw new Error('missing push adapter');
+    expect(await adapter.push.subscribe(ctx, request)).toBeNull();
+    expect(await adapter.push.renew(ctx, lease, request)).toBeNull();
+  });
+
+  test.each([
+    { status: 400, reason: 'invalid', target: 'calendar' },
+    { status: 503, reason: 'pushNotSupportedForRequestedResource', target: 'calendar' },
+    { status: 400, reason: 'pushNotSupportedForRequestedResource', target: 'calendar-list' },
+  ] as const)('does not hide $status $reason on $target', async ({ status, reason, target }) => {
+    const { adapter, ctx } = setup(() => Response.json({ error: { errors: [{ reason }] } }, { status }));
+    if (!adapter.push) throw new Error('missing push adapter');
+    await expect(adapter.push.subscribe(ctx, { ...request, target })).rejects.toMatchObject({ status, reason });
+  });
+});
 
 describe('Google adapter', () => {
   test('drains every page; only the final page carries the cursor, and the query never has filters', async () => {

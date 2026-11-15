@@ -41,6 +41,7 @@ export class GoogleHttpError extends ProviderUnavailableError {
   constructor(
     readonly status: number,
     message: string,
+    readonly reason?: string,
   ) {
     super(message);
   }
@@ -154,13 +155,13 @@ export function createGoogleApi({ clientId, clientSecret, apiBase = GOOGLE_API, 
           throw new ProviderWriteRejectedError('invalid-data', body.success ? body.data.error.message : 'Google rejected the event data');
         }
       }
+      const reason = await errorReason(res);
       if (res.status === 403) {
-        const reason = await errorReason(res);
         if (reason && RATE_LIMIT_REASONS.has(reason)) throw new ProviderThrottledError(retryAfterMs(res.headers.get('retry-after')), `Google throttled the request (${reason})`);
         if (forbidden === 'reject') throw new ProviderWriteRejectedError('read-only', 'Google refused this event write');
         if (reason && PERMISSION_REASONS.has(reason)) throw new AuthFailedError('Supercal lacks the Google Calendar permissions it needs; reconnect and grant them');
       }
-      throw new GoogleHttpError(res.status, `Google answered ${res.status} for ${method} ${url.pathname}`);
+      throw new GoogleHttpError(res.status, `Google answered ${res.status} for ${method} ${url.pathname}`, reason);
     }
   }
 

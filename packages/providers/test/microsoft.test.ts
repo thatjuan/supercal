@@ -206,6 +206,7 @@ describe('Microsoft adapter', () => {
     if (!push) throw new Error('push expected');
     const request = { target: 'account' as const, targetId: 'acc_1', providerTargetId: 'acc_1', address: 'https://supercal.example.test/hooks/microsoft', token: 'secret' };
     const lease = await push.subscribe(ctx, request);
+    if (!lease) throw new Error('Graph subscription expected');
     expect(graph.subscriptions.get(lease.providerChannelId)).toMatchObject({
       resource: '/me/events',
       changeType: 'created,updated,deleted',
@@ -217,11 +218,13 @@ describe('Microsoft adapter', () => {
     expect((lease.expiresAt.getTime() - Date.now()) / 60_000).toBeCloseTo(10_000, 0);
 
     const renewed = await push.renew(ctx, lease, request);
+    if (!renewed) throw new Error('Graph renewal expected');
     expect(renewed.providerChannelId).toBe(lease.providerChannelId);
     expect(graph.requests.at(-1)?.method).toBe('PATCH');
 
     graph.subscriptions.clear();
     const recreated = await push.renew(ctx, lease, request);
+    if (!recreated) throw new Error('Graph replacement expected');
     expect(recreated.providerChannelId).not.toBe(lease.providerChannelId);
     await push.teardown(ctx, lease);
   });

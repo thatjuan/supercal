@@ -129,10 +129,11 @@ export interface ProviderAdapter<Cursor> {
   /**
    * Push subscriptions. `renew` may return a new subscription (Google: a new channel) or extend
    * the old one (Graph); the daemon stores the result before tearing down a replaced lease.
+   * A null result means this resource does not support push; the daemon parks its watch and polls.
    */
   push?: {
-    subscribe(ctx: AdapterContext, request: PushRequest): Promise<PushLeaseInfo>;
-    renew(ctx: AdapterContext, lease: PushLeaseInfo, request: PushRequest): Promise<PushLeaseInfo>;
+    subscribe(ctx: AdapterContext, request: PushRequest): Promise<PushLeaseInfo | null>;
+    renew(ctx: AdapterContext, lease: PushLeaseInfo, request: PushRequest): Promise<PushLeaseInfo | null>;
     teardown(ctx: AdapterContext, lease: PushLeaseInfo): Promise<void>;
   };
 }
