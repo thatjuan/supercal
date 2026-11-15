@@ -30,7 +30,7 @@ export class DavStatusError extends Error {
 export type DavEntry = { href: string; status: number; props: Record<string, unknown> };
 export type DavResult = { url: string; entries: DavEntry[]; syncToken: string | null };
 
-const MAX_XML_NAMESPACES = 64;
+const MAX_XML_NAMESPACE_PREFIXES = 64;
 
 const NS = {
   'xmlns:d': 'DAV:',
@@ -93,8 +93,12 @@ export function createDavSession(ctx: AdapterContext, { username, password, host
           if (error instanceof EgressBlockedError || ctx.signal.aborted) throw error;
           throw new ProviderUnavailableError(`could not reach ${host}`, { cause: error });
         });
-        const declarations = new TextDecoder().decode(response.body).match(/\sxmlns(?::[^\s=]+)?\s*=/g)?.length ?? 0;
-        if (declarations > MAX_XML_NAMESPACES) throw new ProviderUnavailableError('the CalDAV server sent an unreasonable XML reply');
+        // Bound namespace context size; redeclaring a prefix on sibling entries does not grow it.
+        const prefixes = new Set<string>();
+        for (const [, prefix] of new TextDecoder().decode(response.body).matchAll(/\sxmlns(?::([^\s=]+))?\s*=/g)) {
+          prefixes.add(prefix ?? '');
+          if (prefixes.size > MAX_XML_NAMESPACE_PREFIXES) throw new ProviderUnavailableError('the CalDAV server sent an unreasonable XML reply');
+        }
         last = response;
         const result = new Response([204, 205, 304].includes(response.status) ? null : new Uint8Array(response.body), { status: response.status, headers: response.headers });
         Object.defineProperty(result, 'url', { value: response.finalUrl });

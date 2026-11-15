@@ -229,6 +229,18 @@ const xmlReply = (children: string, attributes = '') => `<d:multistatus xmlns:d=
 const xmlEntry = (href: string, props = '') => `<d:response><d:href>${href}</d:href><d:propstat><d:prop>${props}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`;
 const padReply = (body: string, bytes: number) => body.replace('</d:multistatus>', `${' '.repeat(Math.max(0, bytes - Buffer.byteLength(body)))}</d:multistatus>`);
 
+test('repeated namespace declarations across DAV entries do not limit the listing size', async () => {
+  const body = xmlReply(Array.from({ length: 100 }, (_, i) => xmlEntry(`/o${i}`, `<getetag xmlns='DAV:' xmlns:d="DAV:">v${i}</getetag>`)).join(''));
+  const result = await xmlSession(body).propfind('https://dav.test/', ['d:getetag'], '1');
+  expect(result.entries).toHaveLength(100);
+  expect(result.entries[99]).toMatchObject({ href: 'https://dav.test/o99', props: { getetag: 'v99' } });
+});
+
+test('too many distinct namespace prefixes are refused before parsing', async () => {
+  const body = xmlReply(xmlEntry('/o'), Array.from({ length: 64 }, (_, i) => `xmlns:n${i}="urn:n${i}"`).join(' '));
+  await expect(xmlSession(body).propfind('https://dav.test/', ['d:getetag'], '1')).rejects.toThrow('the CalDAV server sent an unreasonable XML reply');
+});
+
 const hostileReplies = [
   padReply(xmlReply('<d:x/>'.repeat(10000), Array.from({ length: 1000 }, (_, i) => `xmlns:n${i}="urn:n${i}"`).join(' ')), 159_000),
   padReply(xmlReply(Array.from({ length: 2500 }, (_, i) => `<d:x${i}/>`).join('') + Array.from({ length: 700 }, (_, i) => xmlEntry(`/o${i}`)).join('')), 159_000),
