@@ -105,7 +105,7 @@ Vocabulary (tenant, account, source calendar, feed, publication, sink) is define
 - Publish one hosted or imported calendar with a view-only link, managed for hosted calendars from the Hosted screen. Anyone holding the URL can subscribe without an account. Each calendar can have up to 20 links, each with an explicit `full`, `title-only` or `busy-only` privacy level, an optional label and expiry, and independent revocation. A client can receive full details while a personal website shows only busy time.
 - Published links hide attendees, organizers, attachments, comments, alarms and custom event properties even in full mode. Events marked private or confidential show as “Busy”. Privacy is fixed at creation; create a new link to change it. The secret URL is shown once, with webcal, Google Calendar and Outlook subscription links. Deleting a calendar pauses its links; restoring it resumes them.
 - One-click subscribe links for Google Calendar and Outlook, plus a QR code for phones.
-- **Sinks**: for Google and Outlook users who need fast updates, Supercal mirrors chosen publications into calendars it creates in the user's own Google or Microsoft account. Sinks never send invitations and are never ingested back as sources. (Pending spike R10.)
+- **Sinks**: Supercal mirrors chosen publications into calendars it creates in the user's own Google account. Sinks never send invitations and are never ingested back as sources. Microsoft mirroring is not implemented.
 
 ### Real time
 
@@ -147,4 +147,4 @@ Screens, in the order a new user meets them:
 
 ## Out of scope for v1
 
-Writing changes back to source calendars, tasks (VTODO), scheduling/iTIP (accepting invites through Supercal), Exchange EWS, JMAP, per-tenant bring-your-own OAuth apps, billing.
+Tasks (VTODO), scheduling/iTIP (accepting invites through Supercal), Exchange EWS, JMAP, per-tenant bring-your-own OAuth apps, billing.

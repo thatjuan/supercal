@@ -294,7 +294,7 @@ affecting other devices. A tenant admin can revoke a member's device login too. 
 20 logins in a tenant. Removing or banning a member also stops that member's device logins.
 Feed usernames and passwords continue to provide read-only publications. A DAV login lists your
 hosted calendars, imported calendars enabled on the Calendars page, and calendars shared with you.
-You can edit hosted calendars and your writable Google, iCloud and CalDAV calendars; read-only imported calendars show full event details,
+You can edit hosted calendars and your writable Google, Microsoft, iCloud and CalDAV calendars; read-only imported calendars show full event details,
 regardless of feed privacy and filters. Hosted calendars stay listed even when their feed publication
 is disabled. Device credentials cannot open the management API or ICS feeds.
 
